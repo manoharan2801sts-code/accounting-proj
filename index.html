@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+<meta http-equiv="Pragma" content="no-cache" />
+<meta http-equiv="Expires" content="0" />
+<title>Sign in — TRAVEL AGENCY</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
+<link href="assets/css/design-system.css" rel="stylesheet" />
+<link href="assets/css/app.css" rel="stylesheet" />
+<script>
+  (function(){
+    const t = localStorage.getItem("voyager-theme") || "light";
+    document.documentElement.setAttribute("data-theme", t);
+  })();
+</script>
+</head>
+<body>
+
+<div class="login-shell">
+  <div class="login-brand-pane">
+    <svg class="route-map" viewBox="0 0 500 700" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <circle cx="90" cy="120" r="3" fill="#fff"/>
+      <circle cx="260" cy="90" r="3" fill="#fff"/>
+      <circle cx="420" cy="200" r="3" fill="#fff"/>
+      <circle cx="150" cy="320" r="3" fill="#fff"/>
+      <circle cx="360" cy="410" r="3" fill="#fff"/>
+      <circle cx="80" cy="520" r="3" fill="#fff"/>
+      <circle cx="300" cy="600" r="3" fill="#fff"/>
+      <path d="M90,120 Q180,60 260,90" stroke="#fff" stroke-width="1" fill="none" stroke-dasharray="4 6"/>
+      <path d="M260,90 Q340,120 420,200" stroke="#fff" stroke-width="1" fill="none" stroke-dasharray="4 6"/>
+      <path d="M90,120 Q100,220 150,320" stroke="#fff" stroke-width="1" fill="none" stroke-dasharray="4 6"/>
+      <path d="M150,320 Q260,360 360,410" stroke="#fff" stroke-width="1" fill="none" stroke-dasharray="4 6"/>
+      <path d="M150,320 Q110,420 80,520" stroke="#fff" stroke-width="1" fill="none" stroke-dasharray="4 6"/>
+      <path d="M80,520 Q190,570 300,600" stroke="#fff" stroke-width="1" fill="none" stroke-dasharray="4 6"/>
+      <path d="M360,410 Q340,510 300,600" stroke="#fff" stroke-width="1" fill="none" stroke-dasharray="4 6"/>
+    </svg>
+
+    <div class="login-brand-mark" style="display:flex; align-items:center; gap:8px;">
+      <img class="mark" src="assets/img/travel-agency-logo.png" alt="TRAVEL AGENCY" style="height:40px; width:auto; display:block;" />
+    </div>
+
+    <div class="login-brand-copy">
+      <h1>Every ticket, invoice, and rupee — reconciled in one ledger.</h1>
+      <p>Travel accounting built for agencies, DMCs, OTAs and consolidators across India and the UAE.</p>
+    </div>
+
+    <ul class="login-brand-features">
+      <li>GSTIN &amp; TRN aware</li>
+      <li>BSP reconciliation</li>
+      <li>Multi-branch, multi-currency</li>
+    </ul>
+  </div>
+
+  <div class="login-form-pane">
+    <div class="login-card">
+
+      <!-- Step 1: credentials -->
+      <div id="step-credentials">
+        <div class="login-form-mark" style="display:flex; align-items:center; gap:8px; margin-bottom:1rem;">
+          <img class="mark" src="assets/img/travel-agency-logo.png" alt="TRAVEL AGENCY" style="height:36px; width:auto; display:block;" />
+        </div>
+        <h2 class="login-title">Welcome back</h2>
+        <p class="text-muted-custom" style="margin-bottom:1.6rem;">Sign in to your TRAVEL AGENCY workspace.</p>
+
+        <div id="login-error" class="pill pill-danger" style="display:none; margin-bottom:1rem;"></div>
+
+        <form id="login-form">
+          <div style="margin-bottom:1rem;">
+            <label class="field-label" for="email">Work email</label>
+            <input class="form-control-custom" type="email" id="email" placeholder="admin@travelagency.com" required />
+          </div>
+          <div style="margin-bottom:0.5rem;">
+            <label class="field-label" for="password">Password</label>
+            <input class="form-control-custom" type="password" id="password" placeholder="••••••••" required />
+          </div>
+          <div style="text-align:right; margin-bottom:1.4rem;">
+            <a href="#" id="forgot-link" style="font-size:0.82rem; font-weight:600;">Forgot password?</a>
+          </div>
+          <button type="submit" class="btn-brand" style="width:100%;" id="login-btn">Sign in</button>
+        </form>
+
+        <div class="card-flat card-pad" style="margin-top:1rem; font-size:0.8rem;">
+          <strong>Demo credentials</strong>
+          <div class="text-muted-custom" style="margin-top:0.3rem; line-height:1.6;">
+            admin@travelagency.com &middot; Passw0rd!<br/>
+            <span style="opacity:0.7;">(Super Admin — access to both India &amp; UAE entities)</span>
+          </div>
+        </div>
+
+        <div style="text-align:center; margin-top:1.3rem;">
+          <a href="#" id="demo-link" style="font-size:0.85rem; font-weight:700;">
+            Or explore the app with sample data — no backend or database needed →
+          </a>
+        </div>
+      </div>
+
+      <!-- Step 2: OTP / MFA -->
+      <div id="step-otp" style="display:none;">
+        <h2 style="font-size:1.15rem; font-weight:800; margin-bottom:0.3rem;">Verify it's you</h2>
+        <p class="text-muted-custom" style="margin-bottom:1.6rem;">Enter the 6-digit code we sent to your registered device.</p>
+        <div id="otp-error" class="pill pill-danger" style="display:none; margin-bottom:1rem;"></div>
+        <div id="otp-hint" class="pill pill-neutral" style="display:none; margin-bottom:1rem;"></div>
+        <form id="otp-form">
+          <div style="margin-bottom:1.4rem;">
+            <label class="field-label" for="otp-code">Verification code</label>
+            <input class="form-control-custom" style="letter-spacing:0.4em; font-family:var(--font-mono); text-align:center;"
+                   type="text" id="otp-code" maxlength="6" placeholder="000000" required />
+          </div>
+          <button type="submit" class="btn-brand" style="width:100%;">Verify &amp; sign in</button>
+        </form>
+        <button class="btn-outline-brand" style="width:100%; margin-top:0.7rem;" id="back-to-login">Back</button>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<script src="assets/js/hardcode.js"></script>
+<script src="assets/js/mock-data.js"></script>
+<script src="assets/js/api.js"></script>
+<script src="assets/js/auth.js"></script>
+</body>
+</html>

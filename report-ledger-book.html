@@ -1,0 +1,685 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <title>Ledger — TRAVEL AGENCY</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
+  <link href="assets/css/design-system.css" rel="stylesheet" />
+  <link href="assets/css/app.css" rel="stylesheet" />
+  <link rel="icon" type="image/png" href="assets/img/favicon.png" />
+  <style>
+    .page-header-row { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 1.25rem; flex-wrap: wrap; }
+    .page-title-group h1 { font-size: 1.25rem; font-weight: 700; margin: 0; display: flex; align-items: center; gap: 0.5rem; }
+    .page-title-group .breadcrumb { font-size: 0.8rem; color: var(--color-text-muted); margin-bottom: 0.25rem; display: flex; gap: 0.4rem; align-items: center; }
+
+    .filter-card {
+      background: var(--color-white); border: 1px solid var(--color-border);
+      border-radius: var(--radius-md); padding: 1rem 1.25rem; margin-bottom: 1.25rem;
+      display: flex; align-items: flex-end; gap: 1rem; flex-wrap: wrap;
+    }
+    .filter-group { display: flex; flex-direction: column; gap: 0.35rem; }
+    .filter-group label { font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--color-text-muted); letter-spacing: 0.03em; }
+
+    .table-container {
+      background: var(--color-white); border: 1px solid var(--color-border);
+      border-radius: var(--radius-md); overflow: hidden;
+    }
+    /* Ledger-book print head — mirrors the Tally "Ledger Vouchers"
+       statement banner: ledger name bold on the left, company name +
+       the applied date range on the right. */
+    .lb-head {
+      padding: 0.85rem 1.25rem; border-bottom: 1px solid var(--color-border);
+      display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; flex-wrap: wrap;
+    }
+    .lb-head .lb-ledger-name { font-size: 1rem; font-weight: 700; color: var(--color-text-dark); }
+    .lb-head .lb-ledger-name span { color: var(--color-text-muted); font-weight: 600; margin-right: 0.35rem; }
+    .lb-head .lb-meta { text-align: right; font-size: 12px; color: var(--color-text-muted); }
+    .lb-head .lb-meta .lb-company { display: block; font-weight: 700; color: var(--color-text-dark); font-size: 12.5px; }
+
+    .table-custom { width: 100%; border-collapse: collapse; text-align: left; }
+    .table-custom th {
+      padding: 0.65rem 0.85rem; background: #F8FAFC; border-bottom: 1px solid var(--color-border);
+      font-size: 11.5px; font-weight: 700; text-transform: uppercase; color: var(--color-text-muted); letter-spacing: 0.03em;
+      white-space: nowrap;
+    }
+    .table-custom td {
+      padding: 0.6rem 0.85rem; border-bottom: 1px solid var(--color-border-subtle);
+      font-size: 12.5px; color: var(--color-text); vertical-align: middle; white-space: nowrap;
+    }
+    .table-custom tbody tr:last-child td { border-bottom: none; }
+    .table-custom tbody tr.txn-row { cursor: pointer; }
+    .table-custom tbody tr.txn-row:hover { background: #F8FAFC; }
+    .table-custom td.rownum { color: var(--color-text-muted); font-weight: 600; }
+    .table-custom td.particulars { font-weight: 700; color: var(--color-text-dark); white-space: normal; }
+
+    .lb-opening-row td { background: #FAFBFD; font-weight: 700; border-bottom: 1px solid var(--color-border); }
+    .lb-total-row td { border-top: 2px solid var(--color-border); font-weight: 700; background: #FAFBFD; }
+    .lb-closing-row td { font-weight: 800; font-size: 13.5px; color: var(--color-text-dark); }
+
+    .amt { font-family: var(--font-mono); font-weight: 600; text-align: right; }
+    th.amt-header { text-align: right; }
+    .dr-cr-tag { font-size: 10.5px; font-weight: 700; margin-left: 3px; }
+    .dr-cr-tag.cr { color: var(--color-success, #16A34A); }
+    .dr-cr-tag.dr { color: var(--color-text-muted); }
+
+    /* Ledger picker - centered modal, auto-opens on load, lists real
+       leaf Ledgers only (no groups), Tally-style "select a ledger first". */
+    .ledger-picker-backdrop {
+      display: none; position: fixed; inset: 0; background: rgba(15, 23, 42, 0.45);
+      align-items: center; justify-content: center; z-index: 1000;
+    }
+    .ledger-picker-backdrop.open { display: flex; }
+    .ledger-picker-window {
+      width: 420px; max-width: 92vw; max-height: 80vh; background: var(--color-white);
+      border-radius: var(--radius-md); box-shadow: var(--shadow-lg); display: flex; flex-direction: column; overflow: hidden;
+    }
+    .ledger-picker-head {
+      padding: 0.9rem 1.1rem; border-bottom: 1px solid var(--color-border);
+      display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;
+    }
+    .ledger-picker-head h2 { margin: 0; font-size: 1rem; font-weight: 700; }
+    .ledger-picker-close { cursor: pointer; background: none; border: none; font-size: 1.1rem; color: var(--color-text-muted); line-height: 1; }
+    .ledger-picker-search { padding: 0.75rem 1.1rem; border-bottom: 1px solid var(--color-border); }
+    .ledger-picker-list { overflow-y: auto; flex: 1; }
+    .ledger-picker-item {
+      padding: 0.6rem 1.1rem; cursor: pointer; font-size: 13px; color: var(--color-text-dark);
+      display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;
+    }
+    .ledger-picker-item:hover { background: var(--color-bg-subtle); }
+    .ledger-picker-item .lp-group { font-size: 11px; color: var(--color-text-muted); }
+    .ledger-picker-empty { padding: 1.5rem; text-align: center; color: var(--color-text-muted); font-size: 13px; }
+    .change-ledger-btn { font-size: 12px; }
+
+    .filter-btn-wrap { display: flex; align-items: center; gap: 0.5rem; }
+    .filter-active-chip {
+      display: none; align-items: center; gap: 0.35rem; background: #EFF6FF; color: var(--color-primary);
+      border: 1px solid #BFDBFE; border-radius: 999px; padding: 0.3rem 0.7rem; font-size: 12px; font-weight: 600;
+    }
+    .filter-active-chip.show { display: inline-flex; }
+    .filter-active-chip button {
+      border: none; background: none; cursor: pointer; color: var(--color-primary); font-weight: 800; line-height: 1; padding: 0;
+    }
+
+    /* Filter popup — plain search box + Apply by default; "Advance
+       Filter" swaps it for Tally-style multi-condition rows (Column +
+       Value, joined by AND/OR), same design as the Day Book report. */
+    .ef-backdrop {
+      display: none; position: fixed; inset: 0; background: rgba(15, 23, 42, 0.45);
+      align-items: center; justify-content: center; z-index: 1100;
+    }
+    .ef-backdrop.open { display: flex; }
+    .ef-window {
+      width: 520px; max-width: 92vw; background: var(--color-white);
+      border-radius: var(--radius-md); box-shadow: var(--shadow-lg); display: flex; flex-direction: column; overflow: hidden;
+    }
+    .ef-head {
+      padding: 0.8rem 1rem; border-bottom: 1px solid var(--color-border);
+      display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;
+    }
+    .ef-head h2 { margin: 0; font-size: 0.95rem; font-weight: 700; }
+    .ef-close { cursor: pointer; background: none; border: none; font-size: 1.1rem; color: var(--color-text-muted); line-height: 1; }
+    .ef-advance-row { padding: 0.65rem 1rem 0; display: flex; justify-content: flex-end; }
+    .ef-advance-btn {
+      font-size: 11.5px; font-weight: 700; color: var(--color-primary); background: none; border: none; cursor: pointer;
+      display: flex; align-items: center; gap: 0.3rem; padding: 0;
+    }
+    .ef-body { padding: 0.75rem 1rem 1rem; }
+
+    .ef-cond-row { display: flex; align-items: center; gap: 0.4rem; margin-bottom: 0.5rem; }
+    .ef-cond-join {
+      flex: 0 0 62px; height: 34px; font-size: 11.5px; font-weight: 700; text-align: center;
+      border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: #F8FAFC; color: var(--color-primary);
+    }
+    .ef-cond-join-spacer { flex: 0 0 62px; }
+    .ef-cond-column { flex: 0 0 150px; height: 34px; }
+    .ef-cond-value { flex: 1; min-width: 0; height: 34px; }
+    .ef-cond-remove {
+      flex: 0 0 26px; height: 26px; border: none; background: none; cursor: pointer;
+      color: var(--color-text-muted); font-size: 1.05rem; line-height: 1; padding: 0;
+    }
+    .ef-cond-remove:hover { color: var(--color-danger); }
+    .ef-add-cond-btn {
+      font-size: 11px; font-weight: 700; color: var(--color-primary); background: none;
+      border: 1px dashed #BFDBFE; border-radius: var(--radius-sm); cursor: pointer; padding: 0.25rem 0.5rem; width: auto; display: block; margin: 0 auto;
+    }
+    .ef-add-cond-btn:hover { background: #EFF6FF; }
+
+    .ef-footer { padding: 0.7rem 1rem; border-top: 1px solid var(--color-border); display: flex; justify-content: flex-end; gap: 0.5rem; }
+  </style>
+</head>
+<body>
+  <header class="app-topnav" id="shell-topnav"></header>
+  <div class="app-body">
+    <main class="app-main" style="max-width: 1440px; margin: 0 auto; padding: 1.5rem 2rem;">
+      <div class="page-header-row">
+        <div class="page-title-group">
+          <div class="breadcrumb">Reports &rsaquo; Accounts Book &rsaquo; Ledger</div>
+          <span id="current-ledger-name" style="display:none;"></span>
+        </div>
+        <div style="display:flex; gap:0.5rem;">
+          <button type="button" class="dom-nav-btn change-ledger-btn" id="change-ledger-btn">Change Ledger</button>
+          <button type="button" class="dom-nav-btn" onclick="window.print()">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9V2h12v7M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2m-12 0v4h12v-4"/></svg>
+            Print
+          </button>
+          <button type="button" class="dom-nav-btn btn-primary" onclick="exportCSV()">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4m14-7l-5 5-5-5m5 5V3"/></svg>
+            Export CSV
+          </button>
+        </div>
+      </div>
+
+      <div class="filter-card">
+        <div class="filter-group">
+          <label>From Date</label>
+          <input type="date" class="form-control-custom" id="filter-from" style="height:34px; padding:0.25rem 0.6rem;" />
+        </div>
+        <div class="filter-group">
+          <label>To Date</label>
+          <input type="date" class="form-control-custom" id="filter-to" style="height:34px; padding:0.25rem 0.6rem;" />
+        </div>
+        <button type="button" class="dom-nav-btn btn-primary" style="height:34px;" onclick="loadLedgerBook()">Apply</button>
+        <div class="filter-btn-wrap">
+          <button type="button" class="dom-nav-btn" style="height:34px;" id="open-filter-btn">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/></svg>
+            Filter
+          </button>
+          <span class="filter-active-chip" id="filter-active-chip">
+            <span id="filter-active-chip-label"></span>
+            <button type="button" id="filter-clear-btn" title="Clear filter">&times;</button>
+          </span>
+        </div>
+      </div>
+
+      <div class="table-container">
+        <div class="lb-head">
+          <div class="lb-ledger-name"><span>Ledger:</span><span id="lb-ledger-name-2"></span></div>
+          <div class="lb-meta">
+            <span class="lb-company" id="lb-company-name"></span>
+            <span id="lb-date-range"></span>
+          </div>
+        </div>
+        <div style="overflow-x:auto;">
+          <table class="table-custom" id="main-data-table">
+            <thead>
+              <tr>
+                <th></th>
+                <th>Date</th>
+                <th>Particulars</th>
+                <th>Vch Type</th>
+                <th>S PNR</th>
+                <th>Air-PNR</th>
+                <th>Ticket No</th>
+                <th>Vch No.</th>
+                <th class="amt-header">Debit</th>
+                <th class="amt-header">Credit</th>
+                <th class="amt-header">Balance</th>
+              </tr>
+            </thead>
+            <tbody id="main-data-tbody">
+              <tr><td colspan="11" style="text-align:center; padding:2rem; color:var(--color-text-muted);">Pick a ledger to view its statement.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- Ledger picker - centered, auto-opens on first load, real Ledgers only -->
+  <div class="ledger-picker-backdrop" id="ledger-picker-backdrop">
+    <div class="ledger-picker-window">
+      <div class="ledger-picker-head">
+        <h2>Select Ledger</h2>
+        <button type="button" class="ledger-picker-close" id="ledger-picker-close">&times;</button>
+      </div>
+      <div class="ledger-picker-search">
+        <input type="text" class="form-control-custom" id="ledger-picker-search-input" placeholder="Search ledger..." autocomplete="off" style="height:34px;" />
+      </div>
+      <div class="ledger-picker-list" id="ledger-picker-list"></div>
+    </div>
+  </div>
+
+  <!-- Filter popup: plain search box by default, "Advance Filter" swaps
+       it for Tally-style multi-condition rows (Column + Value, joined
+       by AND/OR). -->
+  <div class="ef-backdrop" id="ef-backdrop">
+    <div class="ef-window">
+      <div class="ef-head">
+        <h2>Filter</h2>
+        <button type="button" class="ef-close" id="ef-close-btn">&times;</button>
+      </div>
+      <div class="ef-advance-row">
+        <button type="button" class="ef-advance-btn" id="ef-advance-toggle-btn">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/></svg>
+          Advance Filter
+        </button>
+      </div>
+      <div class="ef-body">
+        <!-- Simple mode: one search box, matched against every column. -->
+        <input type="text" class="form-control-custom" id="ef-simple-input" placeholder="Search..." autocomplete="off" style="height:34px; width:100%;" />
+        <!-- Advanced mode: Tally-style multi-condition list — each row is
+             a Column + Value pair, joined to the previous row by AND/OR. -->
+        <div id="ef-adv-row" style="display:none;">
+          <div id="ef-cond-list"></div>
+          <button type="button" class="ef-add-cond-btn" id="ef-add-cond-btn">+ Add Condition</button>
+        </div>
+      </div>
+      <div class="ef-footer">
+        <button type="button" class="dom-nav-btn" id="ef-cancel-btn">Cancel</button>
+        <button type="button" class="dom-nav-btn btn-primary" id="ef-apply-btn">Apply</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="assets/js/mock-data.js"></script>
+  <script src="assets/js/api.js"></script>
+  <script src="assets/js/hardcode.js"></script>
+  <script src="assets/js/shell.js"></script>
+  <script>
+    // Not gated on DOMContentLoaded - this page's <script> can be injected
+    // by the app's SPA navigation (shell.js's navigateTo) into a document
+    // that already finished loading, so DOMContentLoaded never fires again
+    // and this would silently never run except on a hard refresh.
+    let activeCompanyId;
+    let allLedgers = [];
+    let currentLedgerId = null;
+    let currentTxns = [];
+    let activeFilter = null; // { label, test(txn) => bool }
+
+    (async function init() {
+      try {
+        const active = await VoyagerShell.init({ activeKey: "rep-ledger-book" });
+        if (active) activeCompanyId = Number(active.id);
+      } catch (err) {
+        console.error("Shell init failed", err);
+      }
+      await loadLedgerList();
+      // Deep link (e.g. from Cash & Bank Book's ledger rows) - skip the
+      // picker and jump straight to that ledger's statement.
+      const linkedLedgerId = new URLSearchParams(window.location.search).get("ledger_id");
+      if (linkedLedgerId && allLedgers.some((l) => String(l.id) === linkedLedgerId)) {
+        selectLedger(Number(linkedLedgerId));
+      } else {
+        openLedgerPicker();
+      }
+    })();
+
+    // ============================================================
+    // Ledger picker - real leaf Ledgers only (no groups), like Tally's
+    // "select a ledger" prompt before showing its statement.
+    // ============================================================
+    async function loadLedgerList() {
+      const API_BASE = window.API_BASE || "/api";
+      try {
+        const res = await fetch(`${API_BASE}/accounts/?company_id=${activeCompanyId}`);
+        const rows = res.ok ? await res.json() : [];
+        allLedgers = rows.filter((r) => !r.is_group).sort((a, b) => a.name.localeCompare(b.name));
+      } catch (err) {
+        console.error("Could not load ledgers - is the backend running?", err);
+        allLedgers = [];
+      }
+    }
+
+    function renderLedgerPickerList(query) {
+      const q = (query || "").trim().toLowerCase();
+      const listEl = document.getElementById("ledger-picker-list");
+      const matches = allLedgers.filter((l) => l.name.toLowerCase().includes(q) || (l.code || "").toLowerCase().includes(q));
+      if (!matches.length) {
+        listEl.innerHTML = `<div class="ledger-picker-empty">No ledgers found.</div>`;
+        return;
+      }
+      listEl.innerHTML = matches.map((l) => `
+        <div class="ledger-picker-item" data-id="${l.id}">
+          <span>${l.name}</span>
+          <span class="lp-group">${l.account_type || ""}</span>
+        </div>
+      `).join("");
+      listEl.querySelectorAll(".ledger-picker-item").forEach((item) => {
+        item.addEventListener("click", () => {
+          selectLedger(Number(item.dataset.id));
+          closeLedgerPicker();
+        });
+      });
+    }
+
+    function openLedgerPicker() {
+      document.getElementById("ledger-picker-backdrop").classList.add("open");
+      // No ledger picked yet -> hide the X, there's nothing to go "back" to.
+      document.getElementById("ledger-picker-close").style.visibility = currentLedgerId ? "" : "hidden";
+      const input = document.getElementById("ledger-picker-search-input");
+      input.value = "";
+      renderLedgerPickerList("");
+      setTimeout(() => input.focus(), 50);
+    }
+    function closeLedgerPicker() {
+      document.getElementById("ledger-picker-backdrop").classList.remove("open");
+    }
+    document.getElementById("ledger-picker-search-input").addEventListener("input", (e) => renderLedgerPickerList(e.target.value));
+    // No ledger picked yet = nothing to show on the page behind it, so the
+    // popup can't be dismissed (X, backdrop click, or Escape) until at
+    // least one ledger has been selected once - only "Change Ledger"
+    // reopens it afterwards, and that case is always closable.
+    document.getElementById("ledger-picker-close").addEventListener("click", () => {
+      if (currentLedgerId) closeLedgerPicker();
+    });
+    document.getElementById("ledger-picker-backdrop").addEventListener("click", (e) => {
+      if (e.target.id === "ledger-picker-backdrop" && currentLedgerId) closeLedgerPicker();
+    });
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && currentLedgerId) closeLedgerPicker();
+    });
+    document.getElementById("change-ledger-btn").addEventListener("click", openLedgerPicker);
+
+    function selectLedger(ledgerId) {
+      currentLedgerId = ledgerId;
+      loadLedgerBook();
+    }
+
+    // ============================================================
+    // Real ledger statement - one row per posted transaction that
+    // actually touches this ledger (Journal Voucher + FOP Payment + PG
+    // Receipts, all recomputed the same way the ticket's own JV modal
+    // computes them), with a running balance and click-through to the
+    // originating ticket.
+    // ============================================================
+    function fmtAmt(n) {
+      const v = Number(n) || 0;
+      return "₹" + Math.abs(v).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+    function fmtSigned(n) {
+      const v = Number(n) || 0;
+      return `${fmtAmt(v)} <span class="dr-cr-tag ${v < 0 ? "cr" : "dr"}">${v < 0 ? "Cr" : "Dr"}</span>`;
+    }
+    function opposingLabel(str) {
+      if (!str || str === "-") return "-";
+      const parts = str.split(",").map((s) => s.trim()).filter(Boolean);
+      if (parts.length <= 1) return parts[0] || "-";
+      return `<span title="${parts.join(", ")}">Sundries</span>`;
+    }
+    function fmtDateDisplay(iso) {
+      if (!iso) return "-";
+      const d = new Date(iso + "T00:00:00");
+      if (isNaN(d)) return iso;
+      return d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "2-digit" }).replace(/ /g, "-");
+    }
+
+    let lastLoadedData = null;
+
+    async function loadLedgerBook() {
+      if (!currentLedgerId) return;
+      const tbody = document.getElementById("main-data-tbody");
+      tbody.innerHTML = `<tr><td colspan="11" style="text-align:center; padding:2rem; color:var(--color-text-muted);">Loading...</td></tr>`;
+
+      const fromDate = document.getElementById("filter-from").value;
+      const toDate = document.getElementById("filter-to").value;
+      let params = `company_id=${activeCompanyId}&ledger_id=${currentLedgerId}`;
+      if (fromDate) params += `&from_date=${fromDate}`;
+      if (toDate) params += `&to_date=${toDate}`;
+
+      const API_BASE = window.API_BASE || "/api";
+      try {
+        const res = await fetch(`${API_BASE}/ledger-book/?${params}`);
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || `Server returned ${res.status}`);
+
+        document.getElementById("current-ledger-name").textContent = `— ${data.ledger_name}`;
+        document.getElementById("lb-ledger-name-2").textContent = data.ledger_name;
+        document.getElementById("lb-company-name").textContent = data.company_name || "";
+        const rangeFrom = data.from_date ? fmtDateDisplay(data.from_date) : "Beginning";
+        const rangeTo = data.to_date ? fmtDateDisplay(data.to_date) : "Date";
+        document.getElementById("lb-date-range").textContent = data.from_date && data.from_date === data.to_date
+          ? rangeFrom : `${rangeFrom} to ${rangeTo}`;
+
+        lastLoadedData = data;
+        currentTxns = data.transactions;
+        activeFilter = null;
+        updateFilterChip();
+        applyFilterAndRender();
+      } catch (err) {
+        console.error("Could not load the ledger statement - is the Django backend running?", err);
+        tbody.innerHTML = `<tr><td colspan="11" style="text-align:center; padding:2rem; color:var(--color-text-muted);">Could not load data. Is the Django backend running on localhost:8000?</td></tr>`;
+      }
+    }
+
+    // ============================================================
+    // Filter popup — simple mode is one search box matched against
+    // every column; "Advance Filter" swaps it for Tally-style
+    // multi-condition rows (Column + Value, joined by AND/OR).
+    // ============================================================
+    const FILTER_COLUMNS = [
+      { key: "date", label: "Date", get: (t) => fmtDateDisplay(t.date) },
+      { key: "particulars", label: "Particulars", get: (t) => t.particulars || opposingLabel(t.opposite).replace(/<[^>]+>/g, "") },
+      { key: "voucher_type", label: "Vch Type", get: (t) => t.voucher_type || "-" },
+      { key: "s_pnr", label: "S PNR", get: (t) => t.s_pnr || "-" },
+      { key: "air_pnr", label: "Air-PNR", get: (t) => t.air_pnr || "-" },
+      { key: "ticket_no", label: "Ticket No", get: (t) => t.ticket_no || "-" },
+      { key: "voucher_no", label: "Vch No.", get: (t) => t.voucher_no || "-" },
+      { key: "debit", label: "Debit", get: (t) => (t.debit ? fmtAmt(t.debit) : "-") },
+      { key: "credit", label: "Credit", get: (t) => (t.credit ? fmtAmt(t.credit) : "-") },
+      { key: "balance", label: "Balance", get: (t) => `${fmtAmt(t.running_balance)} ${Number(t.running_balance) < 0 ? "Cr" : "Dr"}` },
+    ];
+    let isAdvanceMode = false;
+
+    function applyFilterAndRender() {
+      const txns = activeFilter ? currentTxns.filter((t) => activeFilter.test(t)) : currentTxns;
+      renderTable(txns);
+    }
+
+    function updateFilterChip() {
+      const chip = document.getElementById("filter-active-chip");
+      if (activeFilter) {
+        document.getElementById("filter-active-chip-label").textContent = activeFilter.label;
+        chip.classList.add("show");
+      } else {
+        chip.classList.remove("show");
+      }
+    }
+
+    function openFilterPopup() {
+      document.getElementById("ef-backdrop").classList.add("open");
+      isAdvanceMode = false;
+      document.getElementById("ef-simple-input").style.display = "";
+      document.getElementById("ef-adv-row").style.display = "none";
+      document.getElementById("ef-advance-toggle-btn").innerHTML = `
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/></svg>
+        Advance Filter`;
+      document.getElementById("ef-simple-input").value = "";
+      document.getElementById("ef-cond-list").innerHTML = "";
+      addConditionRow();
+      setTimeout(() => document.getElementById("ef-simple-input").focus(), 50);
+    }
+    function closeFilterPopup() {
+      document.getElementById("ef-backdrop").classList.remove("open");
+    }
+    document.getElementById("ef-advance-toggle-btn").addEventListener("click", () => {
+      isAdvanceMode = !isAdvanceMode;
+      document.getElementById("ef-simple-input").style.display = isAdvanceMode ? "none" : "";
+      document.getElementById("ef-adv-row").style.display = isAdvanceMode ? "" : "none";
+      document.getElementById("ef-advance-toggle-btn").innerHTML = isAdvanceMode
+        ? `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5m7 7l-7-7 7-7"/></svg> Simple Filter`
+        : `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/></svg> Advance Filter`;
+    });
+
+    // Tally-style multi-condition rows: each new row after the first
+    // gets an AND/OR join select in front of its Column + Value pair,
+    // and a column already used in one row disappears from the rest.
+    function addConditionRow() {
+      const list = document.getElementById("ef-cond-list");
+      const isFirst = list.children.length === 0;
+      const usedKeys = Array.from(list.querySelectorAll(".ef-cond-column")).map((sel) => sel.value);
+      const defaultCol = FILTER_COLUMNS.find((c) => !usedKeys.includes(c.key)) || FILTER_COLUMNS[0];
+      const row = document.createElement("div");
+      row.className = "ef-cond-row";
+      row.innerHTML = `
+        ${isFirst ? `<span class="ef-cond-join-spacer"></span>` : `
+          <select class="ef-cond-join">
+            <option value="AND">AND</option>
+            <option value="OR">OR</option>
+          </select>`}
+        <select class="form-control-custom ef-cond-column"></select>
+        <input type="text" class="form-control-custom ef-cond-value" placeholder="Enter value..." autocomplete="off" />
+        <button type="button" class="ef-cond-remove" title="Remove condition">&times;</button>
+      `;
+      row.querySelector(".ef-cond-remove").addEventListener("click", () => {
+        if (list.children.length <= 1) return;
+        row.remove();
+        const first = list.children[0];
+        if (first && first.querySelector(".ef-cond-join")) {
+          first.querySelector(".ef-cond-join").outerHTML = `<span class="ef-cond-join-spacer"></span>`;
+        }
+        refreshConditionColumnOptions();
+      });
+      list.appendChild(row);
+      row.querySelector(".ef-cond-column").dataset.value = defaultCol.key;
+      refreshConditionColumnOptions();
+    }
+    document.getElementById("ef-add-cond-btn").addEventListener("click", addConditionRow);
+
+    function refreshConditionColumnOptions() {
+      const selects = Array.from(document.querySelectorAll("#ef-cond-list .ef-cond-column"));
+      const chosen = selects.map((sel) => sel.dataset.value || sel.value);
+      selects.forEach((sel, idx) => {
+        const mine = sel.dataset.value || sel.value;
+        const takenByOthers = chosen.filter((_, i) => i !== idx);
+        const available = FILTER_COLUMNS.filter((c) => c.key === mine || !takenByOthers.includes(c.key));
+        sel.innerHTML = available.map((c) => `<option value="${c.key}" ${c.key === mine ? "selected" : ""}>${c.label}</option>`).join("");
+        sel.dataset.value = mine;
+      });
+      selects.forEach((sel) => {
+        sel.onchange = () => {
+          sel.dataset.value = sel.value;
+          refreshConditionColumnOptions();
+        };
+      });
+    }
+
+    document.getElementById("open-filter-btn").addEventListener("click", openFilterPopup);
+    document.getElementById("ef-close-btn").addEventListener("click", closeFilterPopup);
+    document.getElementById("ef-cancel-btn").addEventListener("click", closeFilterPopup);
+    document.getElementById("ef-backdrop").addEventListener("click", (e) => {
+      if (e.target.id === "ef-backdrop") closeFilterPopup();
+    });
+
+    document.getElementById("ef-apply-btn").addEventListener("click", () => {
+      if (isAdvanceMode) {
+        const rows = Array.from(document.querySelectorAll("#ef-cond-list .ef-cond-row"));
+        const conditions = rows.map((row) => {
+          const columnKey = row.querySelector(".ef-cond-column").value;
+          const value = row.querySelector(".ef-cond-value").value.trim();
+          const joinEl = row.querySelector(".ef-cond-join");
+          return { col: FILTER_COLUMNS.find((c) => c.key === columnKey), value, join: joinEl ? joinEl.value : null };
+        }).filter((c) => c.value);
+
+        if (!conditions.length) {
+          activeFilter = null;
+        } else {
+          const label = conditions.map((c, i) => `${i > 0 ? ` ${c.join} ` : ""}${c.col.label}: "${c.value}"`).join("");
+          activeFilter = {
+            label,
+            test: (t) => {
+              let result = conditions[0].col.get(t).toLowerCase().includes(conditions[0].value.toLowerCase());
+              for (let i = 1; i < conditions.length; i++) {
+                const c = conditions[i];
+                const match = c.col.get(t).toLowerCase().includes(c.value.toLowerCase());
+                result = c.join === "OR" ? (result || match) : (result && match);
+              }
+              return result;
+            },
+          };
+        }
+      } else {
+        const value = document.getElementById("ef-simple-input").value.trim();
+        if (!value) {
+          activeFilter = null;
+        } else {
+          const q = value.toLowerCase();
+          activeFilter = {
+            label: `"${value}"`,
+            test: (t) => FILTER_COLUMNS.some((c) => c.get(t).toLowerCase().includes(q)),
+          };
+        }
+      }
+      closeFilterPopup();
+      updateFilterChip();
+      applyFilterAndRender();
+    });
+    document.getElementById("filter-clear-btn").addEventListener("click", () => {
+      activeFilter = null;
+      updateFilterChip();
+      applyFilterAndRender();
+    });
+
+    function renderTable(txns) {
+      const tbody = document.getElementById("main-data-tbody");
+      const data = lastLoadedData;
+      if (!data) return;
+
+      let rows = `
+        <tr class="lb-opening-row">
+          <td></td><td></td>
+          <td class="particulars">Opening Balance</td>
+          <td colspan="6"></td>
+          <td class="amt">${fmtSigned(data.opening_balance)}</td>
+        </tr>`;
+
+      if (!txns.length) {
+        rows += `<tr><td colspan="11" style="text-align:center; padding:2rem; color:var(--color-text-muted);">No transactions match the current filter.</td></tr>`;
+      } else {
+        const totalDebit = txns.reduce((sum, t) => sum + (Number(t.debit) || 0), 0);
+        const totalCredit = txns.reduce((sum, t) => sum + (Number(t.credit) || 0), 0);
+        rows += txns.map((t, idx) => `
+          <tr class="${t.ticket_id ? "txn-row" : ""}" data-ticket-id="${t.ticket_id || ""}" title="${t.ticket_id ? "Click to open this ticket" : ""}">
+            <td class="rownum">${idx + 1}</td>
+            <td>${fmtDateDisplay(t.date)}</td>
+            <td class="particulars">${t.particulars || opposingLabel(t.opposite)}</td>
+            <td>${t.voucher_type || "-"}</td>
+            <td>${t.s_pnr || "-"}</td>
+            <td>${t.air_pnr || "-"}</td>
+            <td>${t.ticket_no || "-"}</td>
+            <td>${t.voucher_no || "-"}</td>
+            <td class="amt">${t.debit ? fmtAmt(t.debit) : "-"}</td>
+            <td class="amt">${t.credit ? fmtAmt(t.credit) : "-"}</td>
+            <td class="amt">${fmtSigned(t.running_balance)}</td>
+          </tr>
+        `).join("");
+
+        rows += `
+          <tr class="lb-total-row">
+            <td colspan="8" style="text-align:right;">Current Total :</td>
+            <td class="amt">${fmtAmt(totalDebit)}</td>
+            <td class="amt">${fmtAmt(totalCredit)}</td>
+            <td></td>
+          </tr>
+          <tr class="lb-closing-row">
+            <td colspan="10" style="text-align:right;">Closing Balance :</td>
+            <td class="amt">${fmtSigned(data.closing_balance)}</td>
+          </tr>`;
+      }
+
+      tbody.innerHTML = rows;
+      tbody.querySelectorAll("tr.txn-row").forEach((row) => {
+        row.addEventListener("click", () => {
+          window.location.href = `ticket-entry.html?id=${row.dataset.ticketId}`;
+        });
+      });
+    }
+
+    function exportCSV() {
+      let csv = [];
+      const rows = document.querySelectorAll("#main-data-table tr");
+      rows.forEach((row) => {
+        let cols = Array.from(row.querySelectorAll("th, td")).map((td) => `"${td.innerText.replace(/"/g, '""')}"`);
+        csv.push(cols.join(","));
+      });
+      const blob = new Blob([csv.join("\n")], { type: "text/csv;charset=utf-8;" });
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = "ledger-book.csv";
+      link.click();
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Country name="India">
+    <States>
+        <State name="Andhra Pradesh" capital="Amaravati" />
+        <State name="Arunachal Pradesh" capital="Itanagar" />
+        <State name="Assam" capital="Dispur" />
+        <State name="Bihar" capital="Patna" />
+        <State name="Chhattisgarh" capital="Raipur" />
+        <State name="Goa" capital="Panaji" />
+        <State name="Gujarat" capital="Gandhinagar" />
+        <State name="Haryana" capital="Chandigarh" />
+        <State name="Himachal Pradesh" capital="Shimla" />
+        <State name="Jharkhand" capital="Ranchi" />
+        <State name="Karnataka" capital="Bengaluru" />
+        <State name="Kerala" capital="Thiruvananthapuram" />
+        <State name="Madhya Pradesh" capital="Bhopal" />
+        <State name="Maharashtra" capital="Mumbai" />
+        <State name="Manipur" capital="Imphal" />
+        <State name="Meghalaya" capital="Shillong" />
+        <State name="Mizoram" capital="Aizawl" />
+        <State name="Nagaland" capital="Kohima" />
+        <State name="Odisha" capital="Bhubaneswar" />
+        <State name="Punjab" capital="Chandigarh" />
+        <State name="Rajasthan" capital="Jaipur" />
+        <State name="Sikkim" capital="Gangtok" />
+        <State name="Tamil Nadu" capital="Chennai" />
+        <State name="Telangana" capital="Hyderabad" />
+        <State name="Tripura" capital="Agartala" />
+        <State name="Uttar Pradesh" capital="Lucknow" />
+        <State name="Uttarakhand" capital="Dehradun" />
+        <State name="West Bengal" capital="Kolkata" />
+    </States>
+</Country>

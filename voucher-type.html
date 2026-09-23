@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en-GB"><head>
+<meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+<meta http-equiv="Pragma" content="no-cache" />
+<meta http-equiv="Expires" content="0" />
+<title>Voucher Type — TRAVEL AGENCY</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
+<link href="assets/css/design-system.css" rel="stylesheet" />
+<link href="assets/css/app.css" rel="stylesheet" />
+<link rel="icon" type="image/png" href="assets/img/favicon.png" />
+<style>
+  /* Page-scoped tokens (vt- prefix), matching Company Master's card/grid
+     look - independent of the shared .dom-* classes. */
+  :root {
+    --vt-blue: #3F6FB5;
+    --vt-text: #183B70;
+    --vt-border: #D8E1EC;
+    --vt-bg: #F5F7FA;
+    --vt-white: #FFFFFF;
+  }
+
+  .vt-main { background: var(--vt-bg); }
+
+  .vt-main {
+    max-width: 100%; padding: 14px 24px; box-sizing: border-box;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    height: calc(100vh - var(--topnav-height) - var(--menubar-height, 0px)); overflow: hidden;
+  }
+
+  .vt-card {
+    width: 100%; max-width: 1180px; background: var(--vt-white);
+    border: 1px solid var(--vt-border); border-radius: 4px;
+    box-shadow: 0 2px 10px rgba(24, 59, 112, 0.08);
+    display: flex; flex-direction: column; overflow: hidden;
+    max-height: 100%;
+  }
+
+  .vt-titlebar {
+    background: var(--vt-blue); color: var(--vt-white);
+    font-size: 13px; font-weight: 700; padding: 9px 16px; flex-shrink: 0;
+  }
+
+  .vt-body { padding: 14px 18px 8px; overflow: hidden; box-sizing: border-box; }
+
+  .vt-grid {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px 20px; box-sizing: border-box;
+  }
+  .vt-field { display: flex; flex-direction: column; gap: 3px; box-sizing: border-box; }
+
+  .vt-field label {
+    font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
+    color: var(--vt-text); white-space: nowrap;
+  }
+  .vt-field label .vt-req { color: #D64545; margin-left: 2px; }
+
+  .vt-field input[type="text"], .vt-field select {
+    height: 32px; font-size: 12.5px; padding: 0 8px; width: 100%; box-sizing: border-box;
+    border: 1px solid var(--vt-border); border-radius: 3px; background: var(--vt-white); color: #0F172A;
+  }
+  .vt-field input:focus, .vt-field select:focus {
+    outline: none; border-color: var(--vt-blue); box-shadow: 0 0 0 2px rgba(63, 111, 181, 0.15);
+  }
+  .vt-hint { font-size: 9.5px; color: #D64545; min-height: 11px; margin-top: -1px; }
+
+  /* Yes/No toggle switches for the boolean fields. */
+  .vt-toggle-row { display: flex; align-items: center; gap: 0.55rem; height: 32px; }
+  .vt-toggle { position: relative; display: inline-block; width: 32px; height: 18px; flex-shrink: 0; }
+  .vt-toggle input { opacity: 0; width: 0; height: 0; }
+  .vt-toggle-track { position: absolute; inset: 0; background: var(--vt-border); cursor: pointer; border-radius: 999px; transition: background 0.15s; }
+  .vt-toggle-track::before { content: ""; position: absolute; width: 14px; height: 14px; left: 2px; top: 2px; background: #FFFFFF; border-radius: 50%; transition: transform 0.15s; }
+  .vt-toggle input:checked + .vt-toggle-track { background: var(--vt-blue); }
+  .vt-toggle input:checked + .vt-toggle-track::before { transform: translateX(14px); }
+  .vt-toggle-text { font-size: 12.5px; color: #0F172A; min-width: 22px; }
+
+  .vt-actions {
+    display: flex; justify-content: flex-end; gap: 8px; padding: 10px 18px; flex-shrink: 0;
+    border-top: 1px solid var(--vt-border); background: var(--vt-bg);
+  }
+  .vt-btn {
+    height: 32px; padding: 0 18px; font-size: 12.5px; font-weight: 600; border-radius: 3px;
+    border: 1px solid var(--vt-border); background: var(--vt-white); color: var(--vt-text); cursor: pointer;
+    box-sizing: border-box;
+  }
+  .vt-btn:hover { background: #EEF2F7; }
+  .vt-btn.vt-primary { background: var(--vt-blue); border-color: var(--vt-blue); color: var(--vt-white); }
+  .vt-btn.vt-primary:hover { background: #355F9E; }
+
+  /* Restart Numbering mini-table inside the Additional Numbering Details popup. */
+  .an-restart-table { width: 100%; border-collapse: collapse; }
+  .an-restart-table th {
+    font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em;
+    color: var(--vt-text); text-align: left; padding: 0 8px 4px 0;
+  }
+  .an-restart-table td { padding: 0 8px 0 0; }
+  .an-restart-table td:last-child { padding-right: 0; }
+  .an-restart-table input, .an-restart-table select {
+    height: 30px; font-size: 12.5px; padding: 0 8px; width: 100%; box-sizing: border-box;
+    border: 1px solid var(--vt-border); border-radius: 3px; background: var(--vt-white); color: #0F172A;
+  }
+  .an-restart-table input:focus, .an-restart-table select:focus {
+    outline: none; border-color: var(--vt-blue); box-shadow: 0 0 0 2px rgba(63, 111, 181, 0.15);
+  }
+
+  /* Responsive: tablet = 2 columns, mobile = 1 column. */
+  @media (max-width: 1024px) {
+    .vt-grid { grid-template-columns: repeat(2, 1fr); }
+  }
+  @media (max-width: 640px) {
+    .app-body { height: auto !important; overflow: visible !important; }
+    .vt-main { height: auto; overflow: visible; padding: 10px; }
+    .vt-card { max-height: none; }
+    .vt-body { overflow: visible; }
+    .vt-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head><body>
+<header class="app-topnav" id="shell-topnav"></header>
+<div class="app-body" style="height: calc(100vh - var(--topnav-height) - var(--menubar-height, 0px)); overflow: hidden;">
+  <main class="app-main vt-main">
+    <div class="vt-card">
+      <div class="vt-titlebar">Voucher Type</div>
+
+      <div class="vt-body">
+        <div class="vt-grid">
+          <div class="vt-field">
+            <label>Voucher Name<span class="vt-req">*</span></label>
+            <input type="text" id="vt-name" placeholder="e.g. Petty Cash Payment" autocomplete="off" />
+            <div class="vt-hint" id="vt-name-hint"></div>
+          </div>
+          <div class="vt-field">
+            <label>Alias Name</label>
+            <input type="text" id="vt-alias" placeholder="Optional" autocomplete="off" />
+          </div>
+          <div class="vt-field">
+            <label>Type of Voucher</label>
+            <select id="vt-type">
+              <option value="General">General</option>
+              <option value="Journal">Journal</option>
+              <option value="Payment">Payment</option>
+              <option value="Receipt">Receipt</option>
+              <option value="Debit Note">Debit Note</option>
+              <option value="Credit Note">Credit Note</option>
+            </select>
+          </div>
+
+          <div class="vt-field">
+            <label>Active Voucher</label>
+            <div class="vt-toggle-row">
+              <label class="vt-toggle"><input type="checkbox" id="vt-active" checked /><span class="vt-toggle-track"></span></label>
+              <span class="vt-toggle-text" id="vt-active-text">Yes</span>
+            </div>
+          </div>
+          <div class="vt-field">
+            <label>Voucher Number Method</label>
+            <select id="vt-number-method">
+              <option value="Automatic">Automatic</option>
+              <option value="Manual">Manual</option>
+              <option value="Automatic & Manual Override">Automatic &amp; Manual Override</option>
+            </select>
+          </div>
+          <div class="vt-field">
+            <label>Additional Numbering Details</label>
+            <div class="vt-toggle-row">
+              <label class="vt-toggle"><input type="checkbox" id="vt-addl-numbering" /><span class="vt-toggle-track"></span></label>
+              <span class="vt-toggle-text" id="vt-addl-numbering-text">No</span>
+            </div>
+          </div>
+
+          <div class="vt-field">
+            <label>Effective Dates</label>
+            <div class="vt-toggle-row">
+              <label class="vt-toggle"><input type="checkbox" id="vt-effective-dates" /><span class="vt-toggle-track"></span></label>
+              <span class="vt-toggle-text" id="vt-effective-dates-text">No</span>
+            </div>
+          </div>
+          <div class="vt-field">
+            <label>Allow Zero Value Transaction</label>
+            <div class="vt-toggle-row">
+              <label class="vt-toggle"><input type="checkbox" id="vt-zero-value" /><span class="vt-toggle-track"></span></label>
+              <span class="vt-toggle-text" id="vt-zero-value-text">No</span>
+            </div>
+          </div>
+          <div class="vt-field">
+            <label>Allow Narration</label>
+            <div class="vt-toggle-row">
+              <label class="vt-toggle"><input type="checkbox" id="vt-narration" checked /><span class="vt-toggle-track"></span></label>
+              <span class="vt-toggle-text" id="vt-narration-text">Yes</span>
+            </div>
+          </div>
+
+          <div class="vt-field">
+            <label>Allow Narration in Each Ledger</label>
+            <div class="vt-toggle-row">
+              <label class="vt-toggle"><input type="checkbox" id="vt-narration-ledger" /><span class="vt-toggle-track"></span></label>
+              <span class="vt-toggle-text" id="vt-narration-ledger-text">No</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="vt-actions">
+        <button type="button" class="vt-btn" id="vt-new-btn">+ New</button>
+        <button type="button" class="vt-btn vt-primary" id="vt-save-btn">Save</button>
+      </div>
+    </div>
+  </main>
+</div>
+
+<div class="dom-modal-backdrop spa-extra-content" id="addl-numbering-modal">
+  <div class="dom-modal-window" style="max-width: 560px; width: 95%;">
+    <div class="dom-modal-titlebar">
+      <div>Additional Numbering Details</div>
+      <button type="button" class="dom-titlebar-btn btn-close" id="addl-numbering-close-x-btn" title="Close">&times;</button>
+    </div>
+    <div class="dom-modal-body" style="display:block; padding:14px;">
+      <div class="vt-field" style="margin-bottom:12px;">
+        <label>Width of Invoice Number</label>
+        <input type="text" id="an-width" inputmode="numeric" maxlength="3" placeholder="e.g. 6" autocomplete="off" />
+      </div>
+
+      <div class="vt-field" style="margin-bottom:14px;">
+        <label>Prefill with Zero (0)</label>
+        <div class="vt-toggle-row">
+          <label class="vt-toggle"><input type="checkbox" id="an-prefill-zero" /><span class="vt-toggle-track"></span></label>
+          <span class="vt-toggle-text" id="an-prefill-zero-text">No</span>
+        </div>
+      </div>
+
+      <div class="vt-field" style="margin-bottom:14px;">
+        <label>Restart Numbering</label>
+        <table class="an-restart-table">
+          <thead>
+            <tr><th>Applicable From</th><th>Starting Number</th><th>Period</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><input type="date" id="an-applicable-from" /></td>
+              <td><input type="text" id="an-starting-number" inputmode="numeric" placeholder="1" autocomplete="off" /></td>
+              <td>
+                <select id="an-period">
+                  <option value="Daily">Daily</option>
+                  <option value="Weekly">Weekly</option>
+                  <option value="Monthly">Monthly</option>
+                  <option value="Yearly">Yearly</option>
+                  <option value="None" selected>None</option>
+                </select>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="vt-field" style="margin-bottom:12px;">
+        <label>Prefix Details</label>
+        <input type="text" id="an-prefix" placeholder="Optional" autocomplete="off" />
+      </div>
+      <div class="vt-field">
+        <label>Suffix Details</label>
+        <input type="text" id="an-suffix" placeholder="Optional" autocomplete="off" />
+      </div>
+    </div>
+    <div class="dom-modal-footer">
+      <div></div>
+      <button type="button" class="dom-nav-btn" id="addl-numbering-cancel-btn">Cancel</button>
+      <button type="button" class="dom-nav-btn btn-primary" id="addl-numbering-save-btn">Save</button>
+    </div>
+  </div>
+</div>
+
+<script src="assets/js/hardcode.js"></script>
+<script src="assets/js/mock-data.js"></script>
+<script src="assets/js/api.js"></script>
+<script src="assets/js/shell.js?v=6"></script>
+<script src="assets/js/page-voucher-type.js"></script>
+</body></html>

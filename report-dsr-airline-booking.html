@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <title>DSR — Airline Ticket Booking — TRAVEL AGENCY</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
+  <link href="assets/css/design-system.css" rel="stylesheet" />
+  <link href="assets/css/app.css" rel="stylesheet" />
+  <link rel="icon" type="image/png" href="assets/img/favicon.png" />
+  <style>
+    /* DSR Airline Booking viewport layout */
+    .dsr-main {
+      display: flex; flex-direction: column;
+      height: calc(100vh - var(--topnav-height) - var(--menubar-height, 0px));
+      padding: 1.5rem 2rem; box-sizing: border-box;
+    }
+    .page-header-row { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 1.25rem; flex-wrap: wrap; flex-shrink: 0; }
+    .page-title-group h1 { font-size: 1.25rem; font-weight: 700; margin: 0; display: flex; align-items: center; gap: 0.5rem; }
+    .page-title-group .breadcrumb { font-size: 0.8rem; color: var(--color-text-muted); margin-bottom: 0.25rem; display: flex; gap: 0.4rem; align-items: center; }
+
+    .filter-card {
+      background: var(--color-white); border: 1px solid var(--color-border);
+      border-radius: var(--radius-md); padding: 1rem 1.25rem; margin-bottom: 1.25rem;
+      display: flex; flex-direction: column; gap: 1rem; flex-shrink: 0;
+    }
+    /* Customer/Supplier grow tall once a few chips are picked - keeping
+       them in their own top row (instead of flex-wrapping together with
+       the short one-line fields below) means their variable height never
+       drags the date/product/category controls out of alignment with
+       each other. */
+    .filter-row-pickers { display: flex; gap: 1.5rem; flex-wrap: wrap; }
+    .filter-row-pickers .filter-group { flex: 1; min-width: 260px; }
+    .filter-row-pickers .chip-chips { max-width: none; }
+    .filter-row-simple { display: flex; align-items: flex-end; gap: 1rem; flex-wrap: wrap; }
+
+    .filter-group { display: flex; flex-direction: column; gap: 0.35rem; }
+    .filter-group label { font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--color-text-muted); letter-spacing: 0.03em; }
+
+    /* Chip picker (used for both Customer and Supplier) - starts as an
+       empty search box; typing (or just focusing it) opens a dropdown of
+       matching names below, click to add one as a removable chip. Multiple
+       values can be picked. */
+    .chip-picker-input-wrap { position: relative; max-width: 320px; }
+    .chip-picker-input-wrap input { width: 100% !important; }
+    .chip-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; max-width: 220px; }
+    .chip-chips:empty { display: none; }
+    .chip {
+      display: inline-flex; align-items: center; gap: 6px;
+      border: 1px solid var(--color-primary-light); border-radius: 3px; background: var(--color-primary-tint);
+      padding: 0.25rem 0.5rem; font-size: 12px; font-weight: 700; color: var(--color-primary);
+    }
+    .chip .chip-remove { cursor: pointer; font-weight: 700; line-height: 1; }
+    .chip .chip-remove:hover { color: var(--color-danger); }
+    .chip-dropdown {
+      /* Anchored to the input's own wrapper only (not the whole picker),
+         so it always sits directly under the search box instead of
+         drifting further down as more chips get added below. */
+      display: none; position: absolute; top: 100%; left: 0; margin-top: 2px; width: 220px; z-index: 20;
+      background: var(--color-white); border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+      box-shadow: var(--shadow-md); max-height: 180px; overflow-y: auto;
+    }
+    .chip-picker.open .chip-dropdown { display: block; }
+    .chip-option { padding: 0.45rem 0.7rem; font-size: 12.5px; font-weight: 600; color: var(--color-text-dark); cursor: pointer; }
+    .chip-option:hover { background: var(--color-primary); color: #FFFFFF; }
+    .chip-option.is-selected { color: var(--color-text-faint); background: var(--color-bg-subtle); }
+    .chip-option.is-selected:hover { background: var(--color-primary); color: #FFFFFF; }
+    .chip-dropdown-empty { padding: 0.5rem 0.7rem; font-size: 12px; color: var(--color-text-muted); }
+
+    .table-container {
+      background: var(--color-white); border: 1px solid var(--color-border);
+      border-radius: var(--radius-md); overflow: hidden;
+      flex: 1; min-height: 0; display: flex; flex-direction: column;
+    }
+    .table-scroll { flex: 1; min-height: 0; overflow-y: auto; overflow-x: auto; }
+    .table-custom { width: 100%; border-collapse: collapse; text-align: left; }
+    .table-custom th {
+      padding: 0.5rem 0.75rem; background: #F8FAFC; border-bottom: 1px solid var(--color-border);
+      font-size: 10.5px; font-weight: 700; text-transform: uppercase; color: var(--color-text-muted); letter-spacing: 0.03em;
+      position: sticky; top: 0; z-index: 1;
+    }
+    .table-custom td {
+      padding: 0.4rem 0.75rem; border-bottom: 1px solid var(--color-border-subtle);
+      font-size: 12px; color: var(--color-text); vertical-align: middle; line-height: 1.4;
+    }
+    .table-custom tbody tr:hover { background: #F8FAFC; }
+    .table-custom tbody tr:last-child td { border-bottom: none; }
+    .table-custom tbody tr.dsr-data-row { cursor: pointer; }
+    .status-badge {
+      display: inline-flex; align-items: center; padding: 0.2rem 0.55rem;
+      border-radius: 4px; font-size: 11.5px; font-weight: 700; text-transform: uppercase;
+    }
+    .badge-issued, .badge-success { background: #DCFCE7; color: #166534; }
+    .badge-pending, .badge-warning { background: #FEF3C7; color: #92400E; }
+    .badge-cancelled, .badge-danger { background: #FEE2E2; color: #991B1B; }
+    .badge-rescheduled, .badge-info { background: #E0E7FF; color: #3730A3; }
+    
+    .amt { font-family: var(--font-mono); font-weight: 600; text-align: right; }
+    th.amt-header { text-align: right; }
+  </style>
+</head>
+<body>
+  <header class="app-topnav" id="shell-topnav"></header>
+  <div class="app-body" style="height: calc(100vh - var(--topnav-height) - var(--menubar-height, 0px)); overflow: hidden;">
+    <main class="app-main dsr-main" style="max-width: 1440px; margin: 0 auto;">
+      <div class="page-header-row">
+        <div class="page-title-group">
+          <div class="breadcrumb">Reports &rsaquo; DSR</div>
+          <h1><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--color-primary)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg> DSR</h1>
+        </div>
+        <div style="display:flex; gap:0.5rem;">
+          <button type="button" class="dom-nav-btn" onclick="window.print()">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9V2h12v7M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2m-12 0v4h12v-4"/></svg>
+            Print
+          </button>
+          <button type="button" class="dom-nav-btn btn-primary" onclick="exportCSV()">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4m14-7l-5 5-5-5m5 5V3"/></svg>
+            Export CSV
+          </button>
+        </div>
+      </div>
+
+      <div class="filter-card">
+        <div class="filter-row-simple">
+          <div class="filter-group">
+            <label>From Date</label>
+            <input type="date" class="form-control-custom" id="filter-from" value="2026-09-01" style="height:34px; padding:0.25rem 0.6rem;" />
+          </div>
+          <div class="filter-group">
+            <label>To Date</label>
+            <input type="date" class="form-control-custom" id="filter-to" value="2026-09-21" style="height:34px; padding:0.25rem 0.6rem;" />
+          </div>
+          <div class="filter-group">
+            <label>Product</label>
+            <select class="form-control-custom" id="filter-product" style="height:34px; min-width:130px;">
+              <option value="">All Products</option>
+              <option value="Airline" selected>Airline</option>
+              <option value="Hotel">Hotel</option>
+              <option value="Bus">Bus</option>
+              <option value="Train">Train</option>
+              <option value="Visa">Visa</option>
+              <option value="Tour Packages">Tour Packages</option>
+              <option value="Insurance">Insurance</option>
+              <option value="Vouchers">Vouchers</option>
+            </select>
+          </div>
+          <div class="filter-group">
+            <label>Airline Category</label>
+            <select class="form-control-custom" id="filter-airline-category" style="height:34px; min-width:130px;">
+              <option value="">All Categories</option>
+              <option value="LCC">LCC</option>
+              <option value="FSC">FSC</option>
+              <option value="OSC">OSC</option>
+            </select>
+          </div>
+          <div class="filter-group">
+            <label>Travel Type</label>
+            <select class="form-control-custom" id="filter-travel-type" style="height:34px; min-width:130px;">
+              <option value="">All Types</option>
+              <option value="Domestic">Domestic</option>
+              <option value="International">International</option>
+            </select>
+          </div>
+          <button type="button" class="dom-nav-btn btn-primary" style="height:34px;" onclick="applyFiltersAndRender()">Apply</button>
+        </div>
+
+        <div class="filter-row-pickers">
+          <div class="filter-group">
+            <label>Customer</label>
+            <div class="chip-picker" id="customer-picker">
+              <div class="chip-picker-input-wrap">
+                <input type="text" class="form-control-custom" id="customer-search" placeholder="Search customer..." autocomplete="off" style="height:34px;" />
+                <div class="chip-dropdown" id="customer-dropdown"></div>
+              </div>
+              <div class="chip-chips" id="customer-chips"></div>
+            </div>
+          </div>
+          <div class="filter-group">
+            <label>Supplier</label>
+            <div class="chip-picker" id="supplier-picker">
+              <div class="chip-picker-input-wrap">
+                <input type="text" class="form-control-custom" id="supplier-search" placeholder="Search supplier..." autocomplete="off" style="height:34px;" />
+                <div class="chip-dropdown" id="supplier-dropdown"></div>
+              </div>
+              <div class="chip-chips" id="supplier-chips"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="table-container">
+        <div class="table-scroll">
+          <table class="table-custom" id="main-data-table">
+            <thead>
+              <tr>
+                  <th class="">Inv Date</th>
+  <th class="">Invoice No</th>
+  <th class="">PNR</th>
+  <th class="">Sector</th>
+  <th class="">Airline</th>
+  <th class="">Pax Name</th>
+  <th class="amt-header">Base Fare</th>
+  <th class="amt-header">Taxes</th>
+  <th class="amt-header">Gross Amount</th>
+  <th class="">Supplier</th>
+  <th class="">Customer</th>
+
+              </tr>
+            </thead>
+            <tbody id="main-data-tbody">
+              <tr><td colspan="11" style="text-align:center; padding:2rem; color:var(--color-text-muted);">Loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script src="assets/js/hardcode.js"></script>
+  <script src="assets/js/mock-data.js"></script>
+  <script src="assets/js/api.js"></script>
+  <script src="assets/js/util.js"></script>
+  <script src="assets/js/entry-common.js"></script>
+  <script src="assets/js/shell.js"></script>
+  <script>
+    let activeCompanyId;
+    // Not gated on DOMContentLoaded - when this page is opened via the
+    // app's SPA navigation (shell.js's navigateTo), its <script> tags are
+    // injected into a document that already finished loading long ago, so
+    // DOMContentLoaded has already fired and never fires again. Gating
+    // init on it meant loadReport() silently never ran except on a hard
+    // refresh, matching every other page's plain top-level async IIFE.
+    (async function initDsrPage() {
+      try {
+        const active = await VoyagerShell.init({ activeKey: "rep-dsr" });
+        if (active) activeCompanyId = Number(active.id);
+      } catch (err) {
+        console.error("Shell init failed", err);
+      }
+      loadReport();
+    })();
+
+    // Double-click a row to open that ticket in ticket-entry.html, read-only
+    // (view mode) - passing ?id=<ticket id> is all it takes; ticket-entry.js
+    // loads that ticket and renders it via enterViewMode() automatically.
+    document.getElementById("main-data-tbody").addEventListener("dblclick", (e) => {
+      const row = e.target.closest(".dsr-data-row");
+      if (!row) return;
+      window.location.href = `ticket-entry.html?id=${row.dataset.id}`;
+    });
+
+    // ============================================================
+    // Real report data - one row per Airline TicketLine, pulled straight
+    // from the Django backend (same /api/tickets/ endpoint ticket-entry.js
+    // and tickets.html already use).
+    // ============================================================
+    const API_BASE = window.API_BASE || "/api";
+    const TICKETS_API = `${API_BASE}/tickets/`;
+    let allRows = [];
+
+    function fmtAmt(n) {
+      return "₹" + (Number(n) || 0).toLocaleString("en-IN", { maximumFractionDigits: 2 });
+    }
+
+    function rowTaxes(r) {
+      return (Number(r.yq) || 0) + (Number(r.yr) || 0) + (Number(r.k3_tax) || 0) + (Number(r.tax_others) || 0);
+    }
+
+    function populateReferenceFilters() {
+      CUSTOMER_OPTIONS = [...new Set(allRows.map((r) => r.customer_name).filter(Boolean))].sort();
+      SUPPLIER_OPTIONS = [...new Set(allRows.map((r) => r.supplier_name).filter(Boolean))].sort();
+    }
+
+    // Multi-sector tickets store a comma-joined value per sector (e.g.
+    // "AirIndia,Lufthansa,Lufthansa,..."). Wrap that onto multiple lines,
+    // 3 values per line, instead of one long unbroken comma string.
+    function formatMultiValue(str) {
+      if (!str) return "-";
+      const items = String(str).split(",").map((s) => s.trim()).filter(Boolean);
+      if (!items.length) return "-";
+      const lines = [];
+      for (let i = 0; i < items.length; i += 3) lines.push(items.slice(i, i + 3).join(", "));
+      return lines.join("<br>");
+    }
+
+    function renderTable(rows) {
+      const tbody = document.getElementById("main-data-tbody");
+      if (!rows.length) {
+        tbody.innerHTML = `<tr><td colspan="11" style="text-align:center; padding:2rem; color:var(--color-text-muted);">No records found for the selected filters.</td></tr>`;
+        return;
+      }
+      tbody.innerHTML = rows.map((r) => `
+        <tr class="dsr-data-row" data-id="${r.ticket_id}" title="Double-click to view this ticket">
+          <td>${r.invoice_date || "-"}</td>
+          <td>${r.invoice_number || "-"}</td>
+          <td>${r.pnr || "-"}</td>
+          <td>${formatMultiValue(r.sector)}</td>
+          <td>${formatMultiValue(r.airline_name || r.airline_code)}</td>
+          <td>${r.passenger_name || "-"}</td>
+          <td class="amt">${fmtAmt(r.basic_fare)}</td>
+          <td class="amt">${fmtAmt(rowTaxes(r))}</td>
+          <td class="amt">${fmtAmt(r.total_billed)}</td>
+          <td>${r.supplier_name || "-"}</td>
+          <td>${r.customer_name || "-"}</td>
+        </tr>
+      `).join("");
+    }
+
+    function applyFiltersAndRender() {
+      const fromDate = document.getElementById("filter-from").value;
+      const toDate = document.getElementById("filter-to").value;
+      const product = document.getElementById("filter-product").value;
+      const category = document.getElementById("filter-airline-category").value;
+      const travelType = document.getElementById("filter-travel-type").value;
+      const pickedCustomers = customerPicker.getSelected();
+      const pickedSuppliers = supplierPicker.getSelected();
+
+      // This report only has Airline ticket line data - any other Product
+      // selection has nothing to show here.
+      if (product && product !== "Airline") {
+        renderTable([]);
+        return;
+      }
+
+      const rows = allRows.filter((r) => {
+        if (fromDate && r.invoice_date && r.invoice_date < fromDate) return false;
+        if (toDate && r.invoice_date && r.invoice_date > toDate) return false;
+        if (pickedCustomers.length && !pickedCustomers.includes(r.customer_name)) return false;
+        if (pickedSuppliers.length && !pickedSuppliers.includes(r.supplier_name)) return false;
+        if (category && r.airline_category !== category) return false;
+        if (travelType && r.travel_type !== travelType) return false;
+        return true;
+      });
+      renderTable(rows);
+    }
+
+    async function loadReport() {
+      const tbody = document.getElementById("main-data-tbody");
+      try {
+        const res = await fetch(`${TICKETS_API}?company_id=${activeCompanyId}`);
+        if (!res.ok) throw new Error(`Server returned ${res.status}`);
+        const data = await res.json();
+        allRows = data.map((l) => ({ ...l, pnr: l.airline_pnr || l.gds_pnr || l.booking_reference }));
+      } catch (err) {
+        console.error("Could not load tickets for the DSR report - is the Django backend running?", err);
+        allRows = [];
+        tbody.innerHTML = `<tr><td colspan="11" style="text-align:center; padding:2rem; color:var(--color-text-muted);">Could not load data. Is the Django backend running on localhost:8000?</td></tr>`;
+        return;
+      }
+      populateReferenceFilters();
+      applyFiltersAndRender();
+    }
+
+    // ============================================================
+    // Chip picker - reusable for both Customer and Supplier filters. An
+    // empty search box; typing/focusing opens a dropdown of matching names
+    // (loaded from the real report data above), click one to add it as a
+    // removable chip. Multiple values can be picked per field.
+    // ============================================================
+    let CUSTOMER_OPTIONS = [];
+    let SUPPLIER_OPTIONS = [];
+
+    function createChipPicker({ pickerEl, searchEl, chipsEl, dropdownEl, getOptions }) {
+      let selected = [];
+
+      function renderDropdown() {
+        const q = searchEl.value.trim().toLowerCase();
+        const matches = getOptions().filter((name) => name.toLowerCase().includes(q));
+        dropdownEl.innerHTML = matches.length
+          ? matches.map((name) => {
+              const isSelected = selected.includes(name);
+              return `<div class="chip-option ${isSelected ? "is-selected" : ""}" data-name="${name}">${name}</div>`;
+            }).join("")
+          : `<div class="chip-dropdown-empty">No matches</div>`;
+      }
+
+      function renderChips() {
+        chipsEl.innerHTML = selected.map((name) => `
+          <span class="chip" data-name="${name}">
+            ${name}<span class="chip-remove" title="Remove">&times;</span>
+          </span>
+        `).join("");
+      }
+
+      searchEl.addEventListener("focus", () => {
+        pickerEl.classList.add("open");
+        renderDropdown();
+      });
+      searchEl.addEventListener("input", renderDropdown);
+
+      dropdownEl.addEventListener("click", (e) => {
+        const opt = e.target.closest(".chip-option");
+        if (!opt || opt.classList.contains("is-selected")) return;
+        selected.push(opt.dataset.name);
+        renderChips();
+        // Keep whatever was typed so the remaining matches for that search
+        // stay visible - clearing it made the list look empty right after
+        // picking one, instead of showing the other matches still available.
+        renderDropdown();
+        searchEl.focus();
+      });
+
+      chipsEl.addEventListener("click", (e) => {
+        const remove = e.target.closest(".chip-remove");
+        if (!remove) return;
+        const name = remove.closest(".chip").dataset.name;
+        selected = selected.filter((n) => n !== name);
+        renderChips();
+        renderDropdown();
+      });
+
+      document.addEventListener("click", (e) => {
+        if (!pickerEl.contains(e.target)) pickerEl.classList.remove("open");
+      });
+
+      return { getSelected: () => selected };
+    }
+
+    const customerPicker = createChipPicker({
+      pickerEl: document.getElementById("customer-picker"),
+      searchEl: document.getElementById("customer-search"),
+      chipsEl: document.getElementById("customer-chips"),
+      dropdownEl: document.getElementById("customer-dropdown"),
+      getOptions: () => CUSTOMER_OPTIONS,
+    });
+    const supplierPicker = createChipPicker({
+      pickerEl: document.getElementById("supplier-picker"),
+      searchEl: document.getElementById("supplier-search"),
+      chipsEl: document.getElementById("supplier-chips"),
+      dropdownEl: document.getElementById("supplier-dropdown"),
+      getOptions: () => SUPPLIER_OPTIONS,
+    });
+
+    function exportCSV() {
+      let csv = [];
+      const rows = document.querySelectorAll("#main-data-table tr");
+      rows.forEach(row => {
+        let cols = Array.from(row.querySelectorAll("th, td")).map(td => `"${td.innerText.replace(/"/g, '""')}"`);
+        csv.push(cols.join(","));
+      });
+      const blob = new Blob([csv.join("\n")], { type: "text/csv;charset=utf-8;" });
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = "rep-dsr-airline-booking.csv";
+      link.click();
+    }
+  </script>
+</body>
+</html>

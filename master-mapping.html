@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en-GB"><head>
+<meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+<meta http-equiv="Pragma" content="no-cache" />
+<meta http-equiv="Expires" content="0" />
+<title>Ledger Mapping — TRAVEL AGENCY</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
+<link href="assets/css/design-system.css" rel="stylesheet" />
+<link href="assets/css/app.css" rel="stylesheet" />
+<style>
+
+  .mm-page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+  .mm-page-head h1 { display: flex; align-items: center; gap: 0.5rem; }
+  .mm-page-head p { margin: 0.15rem 0 0; }
+  #mm-product-badge {
+    display: none; align-items: center; gap: 0.35rem; font-size: 12px; font-weight: 700;
+    color: var(--color-primary); background: var(--color-primary-tint);
+    border: 1px solid var(--color-primary); border-radius: 0; padding: 0.35rem 0.7rem; white-space: nowrap;
+  }
+
+  .mm-toolbar {
+    display: flex; align-items: flex-end; gap: 1.5rem; flex-wrap: wrap;
+    background: var(--color-white); border: 1px solid var(--color-border); border-radius: 0;
+    padding: 0.6rem 1rem; margin-top: 0.6rem;
+  }
+  .mm-toolbar-field { display: flex; flex-direction: column; gap: 0.3rem; min-width: 220px; }
+  .mm-toolbar-field label { font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--color-text-muted); }
+
+  .mm-table { width: 100%; border-collapse: collapse; background: var(--color-white); border: 1px solid var(--color-border); border-radius: 0; }
+  .mm-table thead th {
+    text-align: left; padding: 0.45rem 1rem; font-size: 11px; font-weight: 700; letter-spacing: 0.04em;
+    text-transform: uppercase; color: var(--color-text-muted); background: var(--color-bg-subtle);
+    border-bottom: 1px solid var(--color-border);
+  }
+  .mm-table tbody td { padding: 0.32rem 1rem; border-bottom: 1px solid var(--color-border-subtle); vertical-align: middle; }
+  .mm-table tbody tr:last-child td { border-bottom: none; }
+  .mm-field-name { display: flex; align-items: center; gap: 0.5rem; font-size: 12.5px; font-weight: 600; color: var(--color-text-dark); }
+  .mm-field-name .mm-field-dot { color: var(--color-primary); flex-shrink: 0; }
+  .mm-table select { width: 100%; max-width: 320px; height: 32px; padding: 0.25rem 0.5rem; font-size: 12.5px; line-height: 1.3; box-sizing: border-box; }
+  .mm-table input[type="date"] {
+    width: 100%; max-width: 170px; height: 26px; padding: 0.15rem 0.4rem; font-size: 12px;
+    accent-color: var(--color-primary);
+  }
+  .mm-table select:disabled, .mm-table input:disabled {
+    background: #E9EEF5 !important; color: #0F172A !important;
+    -webkit-text-fill-color: #0F172A !important; opacity: 1 !important;
+    font-weight: 600 !important;
+  }
+  .mm-table th:last-child, .mm-table td:last-child { width: 130px; }
+  .mm-table td:last-child .dom-action-btn-group { justify-content: flex-start; }
+
+  .mm-tabs-field { display: flex; flex-direction: column; gap: 0.35rem; flex: 1; min-width: 320px; }
+  .mm-tabs-field label { font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--color-text-muted); }
+  .mm-tabs {
+    display: flex; gap: 0.5rem; flex-wrap: wrap;
+  }
+  .mm-tab-btn {
+    appearance: none; cursor: pointer;
+    padding: 0.5rem 1rem; font-size: 12.5px; font-weight: 700; letter-spacing: 0.01em;
+    color: var(--color-text-dark); background: var(--color-primary-tint);
+    border: 1px solid var(--color-primary-tint-strong); border-radius: 5px;
+  }
+  .mm-tab-btn:hover { border-color: var(--color-primary-light); }
+  .mm-tab-btn.active {
+    color: #FFFFFF; background: var(--color-primary); border-color: var(--color-primary-dark);
+    box-shadow: 0 0 0 2px var(--color-primary-tint-strong);
+  }
+  .mm-tab-panel { display: none; }
+  .mm-tab-panel.active { display: block; }
+  .mm-category-heading {
+    font-size: 12.5px; font-weight: 700; letter-spacing: 0.03em; text-transform: uppercase;
+    color: var(--color-primary); margin: 1.1rem 0 0.4rem;
+  }
+  .mm-category-heading:first-child { margin-top: 0.9rem; }
+</style>
+</head><body>
+<header class="app-topnav" id="shell-topnav"></header>
+<div class="app-body" style="height: calc(100vh - var(--topnav-height) - var(--menubar-height, 0px)); overflow: hidden;">
+  <main class="app-main" style="max-width:1400px; width:100%; box-sizing:border-box; margin-left:auto !important; margin-right:auto; padding-left:40px; padding-right:40px; overflow-x:hidden;">
+    <div class="mm-page-head">
+      <div>
+        <h1 style="font-size:1.15rem;">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+          Ledger Mapping
+        </h1>
+      </div>
+      <div id="mm-product-badge">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
+        <span>Product: <span id="mm-product-badge-name"></span></span>
+      </div>
+    </div>
+
+    <div class="mm-toolbar" style="flex-wrap:wrap;">
+      <div class="mm-toolbar-field">
+        <label>Product</label>
+        <select class="form-control-custom" id="mm-product" style="border-radius:0;"></select>
+      </div>
+      <div class="mm-tabs-field" id="mm-tabs-field" style="display:none;">
+        <label>Categories</label>
+        <div id="mm-tabs-slot"></div>
+      </div>
+    </div>
+
+    <div id="mm-categories-wrap" style="display:none;"></div>
+  </main>
+</div>
+<script src="assets/js/hardcode.js"></script>
+<script src="assets/js/mock-data.js"></script>
+<script src="assets/js/api.js"></script>
+<script src="assets/js/util.js"></script>
+<script src="assets/js/entry-common.js"></script>
+<script src="assets/js/shell.js?v=6"></script>
+<script src="assets/js/page-master-mapping.js"></script>
+</body></html>

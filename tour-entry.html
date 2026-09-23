@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en-GB"><head>
+<meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+<meta http-equiv="Pragma" content="no-cache" />
+<meta http-equiv="Expires" content="0" />
+<title>New Tour Package — TRAVEL AGENCY</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
+<link href="assets/css/design-system.css" rel="stylesheet" />
+<link href="assets/css/app.css" rel="stylesheet" />
+</head><body>
+<header class="app-topnav" id="shell-topnav"></header>
+<div class="app-body">
+  <aside class="app-sidebar" id="shell-sidebar"></aside>
+  <main class="app-main" style="max-width:1400px;">
+    <h1 style="font-size:1.15rem;" id="page-title">New Tour Package</h1>
+    <p class="text-muted-custom">FIT or GIT package — cost, revenue and margin tracked per booking.</p>
+    <form id="tour-form" style="margin-top:0.7rem;">
+      <div class="entry-section-title">Package detail</div>
+      <div class="entry-grid">
+        <div><label class="field-label">Branch</label><select class="form-control-custom" id="branch" required></select></div>
+        <div><label class="field-label">Customer</label><select class="form-control-custom" id="customer" required></select></div>
+        <div class="span-2"><label class="field-label">Package Name</label><input class="form-control-custom" id="package_name" required /></div>
+        <div><label class="field-label">Package Type</label>
+          <select class="form-control-custom" id="package_type"><option value="FIT">FIT — Free Independent Traveller</option><option value="GIT">GIT — Group Inclusive Tour</option></select>
+        </div>
+        <div><label class="field-label">Pax Count</label><input class="form-control-custom" type="number" id="pax_count" value="1" min="1" /></div>
+        <div><label class="field-label">Start Date</label><input class="form-control-custom" type="date" id="start_date" required /></div>
+        <div><label class="field-label">End Date</label><input class="form-control-custom" type="date" id="end_date" required /></div>
+        <div><label class="field-label">Status</label>
+          <select class="form-control-custom" id="status"><option value="CONFIRMED">Confirmed</option><option value="CANCELLED">Cancelled</option></select>
+        </div>
+      </div>
+
+      <div class="entry-section-title">Cost &amp; revenue</div>
+      <div class="entry-grid">
+        <div><label class="field-label">Total Cost</label><input class="form-control-custom calc" type="number" id="total_cost" value="0" min="0" step="0.01" /></div>
+        <div><label class="field-label">Total Revenue</label><input class="form-control-custom calc" type="number" id="total_revenue" value="0" min="0" step="0.01" /></div>
+        <div><label class="field-label">Margin</label><div class="computed-field" id="margin">—</div></div>
+      </div>
+
+      <div class="entry-actions">
+        <a href="tours.html" class="btn-outline-brand" id="cancel-link">Cancel</a>
+        <button type="submit" class="btn-brand" id="submit-btn">Save Package</button>
+      </div>
+    </form>
+  </main>
+</div>
+<script src="assets/js/hardcode.js"></script>
+<script src="assets/js/mock-data.js"></script>
+<script src="assets/js/api.js"></script>
+<script src="assets/js/util.js"></script>
+<script src="assets/js/shell.js?v=6"></script>
+<script src="assets/js/entry-common.js"></script>
+<script src="assets/js/page-tour-entry.js"></script>
+</body></html>

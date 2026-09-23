@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en-GB"><head>
+<meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+<meta http-equiv="Pragma" content="no-cache" />
+<meta http-equiv="Expires" content="0" />
+<title>New Voucher — TRAVEL AGENCY</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
+<link href="assets/css/design-system.css" rel="stylesheet" />
+<link href="assets/css/app.css" rel="stylesheet" />
+</head><body>
+<header class="app-topnav" id="shell-topnav"></header>
+<div class="app-body">
+  <aside class="app-sidebar" id="shell-sidebar"></aside>
+  <main class="app-main" style="max-width:1400px;">
+    <h1 style="font-size:1.15rem;" id="page-title">New Voucher</h1>
+    <form id="voucher-form" style="margin-top:0.7rem;">
+      <div class="entry-section-title">Voucher header</div>
+      <div class="entry-grid">
+        <div><label class="field-label">Branch</label><select class="form-control-custom" id="branch" required></select></div>
+        <div><label class="field-label">Voucher Type</label>
+          <select class="form-control-custom" id="voucher_type">
+            <option value="JOURNAL">Journal</option><option value="CONTRA">Contra</option>
+            <option value="PAYMENT">Payment</option><option value="RECEIPT">Receipt</option>
+            <option value="DEBIT_NOTE">Debit Note</option><option value="CREDIT_NOTE">Credit Note</option>
+          </select>
+        </div>
+        <div><label class="field-label">Voucher Date</label><input class="form-control-custom" type="date" id="voucher_date" required /></div>
+        <div class="span-2"><label class="field-label">Narration</label><input class="form-control-custom" id="narration" placeholder="Brief description of this entry" /></div>
+      </div>
+
+      <div class="entry-section-title">Debit / Credit lines</div>
+      <div class="voucher-lines-editor">
+        <table>
+          <thead><tr><th style="width:45%;">Account</th><th style="width:20%;">Debit</th><th style="width:20%;">Credit</th><th></th></tr></thead>
+          <tbody id="lines-body"></tbody>
+        </table>
+      </div>
+      <button type="button" class="btn-outline-brand" id="add-line-btn" style="margin-top:0.8rem; padding:0.5rem 1rem; font-size:0.85rem;">+ Add line</button>
+
+      <div style="display:flex; justify-content:flex-end; gap:1.5rem; margin-top:1.2rem; align-items:center;">
+        <span>Total Debit: <strong class="tabular-nums" id="total-debit">0.00</strong></span>
+        <span>Total Credit: <strong class="tabular-nums" id="total-credit">0.00</strong></span>
+        <span id="balance-indicator" class="balance-indicator pill-danger" style="background:var(--color-danger-bg); color:var(--color-danger);">Unbalanced</span>
+      </div>
+
+      <div class="entry-actions">
+        <a href="vouchers.html" class="btn-outline-brand" id="cancel-link">Cancel</a>
+        <button type="submit" class="btn-brand" id="save-btn" disabled>Post Voucher</button>
+      </div>
+    </form>
+  </main>
+</div>
+<script src="assets/js/hardcode.js"></script>
+<script src="assets/js/mock-data.js"></script>
+<script src="assets/js/api.js"></script>
+<script src="assets/js/util.js"></script>
+<script src="assets/js/shell.js?v=6"></script>
+<script src="assets/js/entry-common.js"></script>
+<script src="assets/js/page-voucher-entry.js?v=2"></script>
+</body></html>

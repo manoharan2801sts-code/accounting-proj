@@ -1,0 +1,874 @@
+<!DOCTYPE html>
+<html lang="en-GB"><head>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%233B6DB5' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2 16l20-8-8 20-2-8-8-2z' fill='%233B6DB5' stroke='%233B6DB5'/%3E%3C/svg%3E" />
+<meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+<meta http-equiv="Pragma" content="no-cache" />
+<meta http-equiv="Expires" content="0" />
+<title>New Ticket — TRAVEL AGENCY</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
+<link href="assets/css/design-system.css" rel="stylesheet" />
+<link href="assets/css/app.css" rel="stylesheet" />
+<link href="assets/css/loader.css" rel="stylesheet" />
+<style>
+  /* Ticket Entry fixed desk layout */
+
+  .dom-addr-view-btn { width: 20px; height: 22px; padding: 0; font-size: 11px; line-height: 1; border: 1px solid #CBD5E1; background: #F1F5F9; cursor: pointer; flex-shrink: 0; }
+  .dom-eye-btn {
+    width: 20px; height: 20px; padding: 0; border: 1px solid #CBD5E1; border-radius: 3px;
+    background: #F1F5F9; color: #3B6DB5; cursor: pointer; flex-shrink: 0;
+    display: inline-flex; align-items: center; justify-content: center; margin-left: 4px;
+  }
+  .dom-eye-btn:hover { background: #E2E8F0; }
+  .dom-gst-detail-table { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+  .dom-gst-detail-table th {
+    text-align: right; padding: 5px 8px; background: #F8FAFC; border-bottom: 1px solid #E2E8F0;
+    font-weight: 700; color: #475569;
+  }
+  .dom-gst-detail-table th:first-child { text-align: left; }
+  .dom-gst-detail-table td { text-align: right; padding: 5px 8px; border-bottom: 1px solid #EEF1F5; }
+  .dom-gst-detail-table td:first-child { text-align: left; font-weight: 600; }
+  .dom-gst-detail-table tr.dom-gst-detail-total td { font-weight: 700; border-top: 2px solid #CBD5E1; border-bottom: none; }
+
+  /* Passenger register - Add/Remove action buttons, outlined in the
+     project's own brand colors (not solid-filled green/red) */
+  .pax-circle-btn {
+    min-width: 62px; height: 22px; border-radius: 3px; cursor: pointer;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 10.5px; font-weight: 700; letter-spacing: 0.03em; line-height: 1; padding: 0 8px;
+    background: var(--color-white);
+    border: 1.5px solid var(--color-primary-light);
+    color: var(--color-primary);
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+  }
+  .pax-circle-btn + .pax-circle-btn { margin-top: 4px; }
+  .pax-circle-add:hover { background: var(--color-primary); border-color: var(--color-primary); color: #FFFFFF; }
+  .pax-circle-remove { border-color: var(--color-danger); color: var(--color-danger); }
+  .pax-circle-remove:hover { background: var(--color-danger); border-color: var(--color-danger); color: #FFFFFF; }
+  .pax-row.pax-add-row td { color: #94A3B8; }
+  .pax-row[data-idx] { cursor: pointer; }
+
+  /* Passenger Fare modal — read-only sector detail card, all sectors as
+     rows inside ONE card (not one card per sector) */
+  .dom-sector-detail-card {
+    border: 1px solid #CBD5E1; border-radius: 3px; background: #FFFFFF;
+    padding: 2px 5px; margin-bottom: 4px;
+    max-height: 112px; overflow-y: auto;
+  }
+  .dom-sector-detail-row {
+    display: flex; align-items: center; gap: 3px; padding: 3px 0;
+    border-bottom: 1px solid #EEF1F5;
+  }
+  .dom-sector-detail-row:last-child { border-bottom: none; }
+  /* Fixed width (not auto) - "HSR-BOM" vs "MUC-BLQ" etc. are the same
+     length but not the same pixel width in a proportional font, so an
+     auto-sized head shifted every column after it out of line row to row. */
+  .dom-sector-detail-head { flex: 0 0 62px; font-weight: 700; font-size: 10px; color: #3B6DB5; white-space: nowrap; }
+  .dom-sector-detail-row .dom-input {
+    font-size: 10px; padding: 1px 3px; height: 20px; min-width: 0; flex: 1 1 0;
+  }
+  .dom-sector-detail-row .dom-input.dsd-flight { flex: 0 0 68px; }
+  .dom-sector-detail-row .dom-input.dsd-class { flex: 0 0 24px; text-align: center; padding: 1px; }
+  .dom-sector-detail-row .dom-input.dsd-date { flex: 0 0 76px; }
+
+  /* J.V modal — FOP Payment / PG Receipts tab info cards */
+  .jv-info-card {
+    background: var(--color-bg-alt, #F8FAFC); border: 1px solid var(--color-border, #CBD5E1);
+    border-radius: 3px; padding: 8px 10px;
+  }
+  .jv-info-label { color: #64748B; display: block; font-size: 10px; font-weight: 600; margin-bottom: 2px; }
+
+</style>
+</head><body>
+<header class="app-topnav" id="shell-topnav"></header>
+<div class="app-body" style="height: calc(100vh - var(--topnav-height) - var(--menubar-height, 0px)); overflow: hidden;">
+  <aside class="app-sidebar" id="shell-sidebar"></aside>
+  <main class="app-main" style="max-width:100%; padding:6px 40px; display:flex; flex-direction:column; height:calc(100vh - var(--topnav-height) - var(--menubar-height, 0px)); overflow:hidden;">
+
+    <div class="dom-window">
+      <!-- 1. Window Title Bar (Our Project Title) -->
+      <div class="dom-titlebar">
+        <div class="dom-titlebar-title"><span id="page-title" style="font-weight:700; font-size:12.5px;">New Airline Ticket</span></div>
+      </div>
+
+      <!-- 3. Main Form Body -->
+      <form id="ticket-form" style="display:flex; flex-direction:column; flex:1; min-height:0; overflow:hidden;">
+        <div class="dom-main-content">
+
+          <!-- 4. Header Booking Details (3-column grid, field order per updated spec) -->
+          <div class="dom-form-grid">
+            <div class="dom-field">
+              <label class="dom-label">Invoice Number<span class="dom-req">*</span></label>
+              <input class="dom-input" id="invoice_number" maxlength="20" required />
+              <div class="field-hint" id="invoice_number_hint" style="display:none;"></div>
+            </div>
+            <div class="dom-field">
+              <label class="dom-label">Invoice Date<span class="dom-req">*</span></label>
+              <div class="date-group" id="invoice_date">
+                <input type="date" class="dg-native" style="height:24px; font-size:11.5px;" />
+              </div>
+              <div class="field-hint" id="invoice_date_hint" style="display:none;"></div>
+            </div>
+            <div class="dom-field">
+              <label class="dom-label">Invoice Type<span class="dom-req">*</span></label>
+              <select class="dom-select" id="invoice_type" required></select>
+            </div>
+            <div class="dom-field">
+              <label class="dom-label">Booking Mode</label>
+              <select class="dom-select" id="booking_mode"></select>
+            </div>
+            <div class="dom-field">
+              <label class="dom-label">Booking Type<span class="dom-req">*</span></label>
+              <select class="dom-select" id="booking_type" required></select>
+            </div>
+            <div class="dom-field">
+              <label class="dom-label">Booking Status<span class="dom-req">*</span></label>
+              <select class="dom-select" id="booking_status" required></select>
+            </div>
+            <div class="dom-field">
+              <label class="dom-label">Customer Name<span class="dom-req">*</span></label>
+              <input class="dom-input" id="customer" list="customer-options" placeholder="Type to search…" autocomplete="off" required />
+              <datalist id="customer-options"></datalist>
+              <div class="field-hint" id="customer_hint" style="display:none;"></div>
+            </div>
+            <div class="dom-field">
+              <label class="dom-label">Customer Code</label>
+              <div class="dom-input-readonly" id="customer_code" style="flex:0 0 90px;">—</div>
+              <label class="dom-label" style="min-width:52px;">Agent ID</label>
+              <div class="dom-input-readonly" id="customer_agent_id" style="flex:1;">—</div>
+            </div>
+            <div class="dom-field field-address">
+              <label class="dom-label">Customer Address</label>
+              <div class="dom-input-readonly readonly-address" id="customer_address" title="Customer Address">—</div>
+            </div>
+            <div class="dom-field">
+              <label class="dom-label">Customer GST/TRN</label>
+              <div class="dom-input-readonly" id="customer_gst">—</div>
+            </div>
+            <div class="dom-field">
+              <label class="dom-label">Travel Type</label>
+              <select class="dom-select" id="travel_type"></select>
+            </div>
+            <div class="dom-field">
+              <label class="dom-label">User Name</label>
+              <input class="dom-input" id="user_name" list="user-name-options" placeholder="Type to search…" autocomplete="off" />
+              <datalist id="user-name-options"></datalist>
+            </div>
+            <div class="dom-field">
+              <label class="dom-label">Currency</label>
+              <div class="dom-input-readonly" id="currency" style="font-weight:700; flex:0 0 60px;">—</div>
+              <label class="dom-label" style="min-width:36px;">ROE</label>
+              <input class="dom-input" type="number" id="roe" min="0" step="0.0001" placeholder="1.0000" style="flex:0 0 80px;" />
+            </div>
+            <div class="dom-field">
+              <label class="dom-label">Booking Given By</label>
+              <input class="dom-input" id="booking_given_by" maxlength="25" />
+            </div>
+            <div class="dom-field">
+              <label class="dom-label">Booking Reference<span class="dom-req">*</span></label>
+              <input class="dom-input" id="booking_reference" required />
+              <div class="field-hint" id="booking_reference_hint" style="display:none;"></div>
+            </div>
+            <div class="dom-field">
+              <label class="dom-label">Booking Ref Date<span class="dom-req">*</span></label>
+              <div class="date-group" id="booking_ref_date">
+                <input type="date" class="dg-native" style="height:24px; font-size:11.5px;" />
+              </div>
+              <div class="field-hint" id="booking_ref_date_hint" style="display:none;"></div>
+            </div>
+            <div class="dom-field">
+              <label class="dom-label">Airline PNR</label>
+              <input class="dom-input" id="airline_pnr_header" maxlength="13" />
+            </div>
+            <div class="dom-field">
+              <label class="dom-label">GDS PNR</label>
+              <input class="dom-input" id="gds_pnr_header" maxlength="13" />
+            </div>
+            <div class="dom-field">
+              <label class="dom-label">Payment Mode</label>
+              <select class="dom-select" id="payment_mode" style="flex:0 0 110px;"></select>
+              <span id="payment-gateway-ref-field" style="display:none;">
+                <label class="dom-label" style="min-width:70px;">Gateway Ref</label>
+                <select class="dom-select" id="payment_gateway_ref"></select>
+              </span>
+            </div>
+            <div class="dom-field" style="grid-column:3; justify-content:flex-end;">
+              <button type="button" class="dom-proceed-btn" id="proceed-btn" style="display:none;" title="Open Detailed Passenger Fare & Accounting Breakdown">
+                Proceed &#10132;
+              </button>
+            </div>
+          </div>
+
+          <!-- 5. Passenger Register Data Grid (Slate-grey header & active row blue highlight) -->
+          <div class="dom-grid-container">
+            <div class="dom-grid-scroll">
+              <table class="dom-grid-table pax-table" id="erp-pax-grid">
+                <thead>
+                  <tr>
+                    <th style="width:32px; text-align:center;">#</th>
+                    <th>Ticket No.</th>
+                    <th>Airline</th>
+                    <th>Card No.</th>
+                    <th>Pax Name</th>
+                    <th class="num">Basic Fare</th>
+                    <th class="num">YQ</th>
+                    <th class="num">K3</th>
+                    <th class="num">SSR</th>
+                    <th class="num">All Taxes</th>
+                    <th class="num">Total</th>
+                    <th style="width:105px; text-align:center;">Action</th>
+                  </tr>
+                </thead>
+                <tbody id="ticket-lines">
+                  <tr class="pax-row pax-add-row">
+                    <td colspan="11" style="text-align:center; padding:14px; font-size:11.5px;">
+                      No passengers added yet. Fill booking details above, then click <strong style="color:#3B6DB5;">ADD</strong> to add a passenger.
+                    </td>
+                    <td style="text-align:center;">
+                      <button type="button" class="pax-circle-btn pax-circle-add" id="pax-add-row-btn" title="Add passenger">ADD</button>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <!-- Under-grid bar -->
+            <div class="dom-grid-statusbar" style="justify-content:flex-end;">
+              <div class="dom-mini-btn-group">
+                <button type="button" class="dom-bevel-btn" id="add-line-btn" style="display:none;">+ Add Passenger</button>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </form>
+
+      <!-- 6. Financial Summary & Live Breakdown (Reference Image Look with Our Project's Actual Data) -->
+      <div class="dom-summary-strip">
+        <!-- Left: Real Breakdown Table from Our Project's Data -->
+        <table class="dom-dtls-table">
+          <thead>
+            <tr>
+              <th>Summary</th>
+              <th>Basic</th>
+              <th>Taxes</th>
+              <th>SSR</th>
+              <th>Disc</th>
+              <th>TDS</th>
+              <th>Markup</th>
+              <th>S.Fee</th>
+              <th>GST Amount</th>
+              <th>Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td style="font-weight:700; color:#3B6DB5;">Purchase Cost</td>
+              <td id="pc-basic">0.00</td>
+              <td id="pc-taxes">0.00</td>
+              <td id="pc-ssr">0.00</td>
+              <td id="pc-disc">0.00</td>
+              <td id="pc-tds">0.00</td>
+              <td id="pc-markup">0.00</td>
+              <td id="pc-sfee">0.00</td>
+              <td id="pc-gst">0.00</td>
+              <td id="pc-total" style="font-weight:800; color:#3B6DB5; font-size:12px;">0.00</td>
+            </tr>
+            <tr>
+              <td style="font-weight:700; color:#3B6DB5;">Sales Cost</td>
+              <td id="sc-basic">0.00</td>
+              <td id="sc-taxes">0.00</td>
+              <td id="sc-ssr">0.00</td>
+              <td id="sc-disc">0.00</td>
+              <td id="sc-tds">0.00</td>
+              <td id="sc-markup">0.00</td>
+              <td id="sc-sfee">0.00</td>
+              <td id="sc-gst">0.00</td>
+              <td id="sc-total" style="font-weight:800; color:#3B6DB5; font-size:12px;">0.00</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <!-- Right: Blue Earnings Card -->
+        <div class="dom-bal-card">
+          <div class="bal-title">Earnings (<span id="bal-currency">INR</span>)</div>
+          <div class="dom-bal-pill">
+            <span style="font-size:12px; cursor:pointer;" id="refresh-total-btn" title="Recalculate">&#8635;</span>
+            <span id="invoice_total">0.00</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 7. Bottom Action Toolbar (Desktop ERP Buttons with Our Project's Real Actions) -->
+      <div class="dom-bottom-toolbar">
+        <button type="button" class="dom-nav-btn" id="add-line-btn-bot" style="display:none;">+ Add Passenger</button>
+        <button type="button" class="dom-nav-btn" id="find-btn" title="Find an existing ticket">Find</button>
+        <button type="submit" form="ticket-form" class="dom-nav-btn btn-primary" id="submit-btn" style="font-weight:700;">Save Ticket</button>
+        <a href="ticket-entry.html" class="dom-nav-btn" id="cancel-link">Discard</a>
+        <button type="button" class="dom-nav-btn" id="edit-ticket-btn" style="display:none;" title="Edit this saved ticket">Edit</button>
+        <button type="button" class="dom-nav-btn btn-primary" id="jv-btn" style="font-weight:700; min-width:54px;" title="View Journal Voucher (J.V)">J.V</button>
+        <button type="button" class="dom-nav-btn" id="print-btn" onclick="window.print()">Print</button>
+        <a href="dashboard.html" class="dom-nav-btn btn-danger" id="exit-btn">Exit</a>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<!-- Passenger Fare & Accounting Breakdown Modal (Image 2 Reference Style, Project Details & Colors) -->
+<div class="dom-modal-backdrop spa-extra-content" id="fare-breakdown-modal">
+  <div class="dom-modal-window">
+    <div class="dom-modal-titlebar">
+      <div><span id="modal-pax-display" style="display:none;">Passenger #1</span></div>
+      <button type="button" class="dom-titlebar-btn btn-close" id="modal-close-x-btn" title="Close">&times;</button>
+    </div>
+
+    <div class="dom-modal-body">
+      <!-- Left Column: Passenger & Flight Details -->
+      <div class="dom-modal-col-left">
+        <div class="dom-modal-section-title">Passenger &amp; Segment Details</div>
+        <div class="dom-modal-form-grid">
+          <label>Airline Category</label>
+          <select class="dom-select" id="modal-airline-category"></select>
+
+          <label>Ticket No<span class="dom-req">*</span></label>
+          <input class="dom-input" id="modal-ticket-no" placeholder="e.g. F4KHTD-1" required />
+
+          <label>Pax Name<span class="dom-req">*</span></label>
+          <input class="dom-input" id="modal-pax-name" maxlength="50" placeholder="e.g. Mr. Murugan" required />
+
+          <label>Pax Type</label>
+          <select class="dom-select" id="modal-pax-type"></select>
+
+          <label>Sector</label>
+          <div class="dom-chip-box" id="modal-sector-box" style="display:flex; align-items:center; gap:6px;">
+            <div class="dom-chip-box-inner" id="modal-sector-chips" style="flex:0 1 auto; width:160px;">
+              <span class="dom-chip-placeholder" id="modal-sector-placeholder">Click here to add sector</span>
+            </div>
+            <button type="button" class="dom-chip-add-btn" id="modal-sector-add-btn" title="Add another sector">+</button>
+          </div>
+
+          <label>Office ID</label>
+          <input class="dom-input" id="modal-office-id" list="modal-office-id-options" placeholder="Type to search…" autocomplete="off" />
+          <datalist id="modal-office-id-options"></datalist>
+
+          <label>Supplier</label>
+          <input class="dom-input" id="modal-supplier" placeholder="Auto-filled from Office ID" readonly />
+
+          <label>FOP</label>
+          <select class="dom-select" id="modal-fop"></select>
+
+          <span id="modal-card-number-field" style="display:none;">
+            <label>Card Number</label>
+            <select class="dom-select" id="modal-card-number"></select>
+          </span>
+
+          <div id="modal-sector-details" class="dom-sector-detail-card" style="grid-column: 1 / -1; display:none; flex-direction:column;"></div>
+        </div>
+      </div>
+
+      <!-- Right Column: Fares & Accounting Breakup -->
+      <div class="dom-modal-col-right">
+        <!-- 1. Base Fare & Segment Taxes -->
+        <div class="dom-modal-fares-card">
+          <div class="dom-modal-section-title">Base Fare &amp; Tax Components (<span class="modal-currency-label">INR</span>)</div>
+          <div class="dom-modal-fares-grid">
+            <div class="fare-item">
+              <label>Basic Fare</label>
+              <input class="dom-input modal-calc dom-amount" type="text" inputmode="decimal" id="modal-basic-fare" min="0" step="0.01" value="0.00" />
+            </div>
+            <div class="fare-item">
+              <label>YQ Tax</label>
+              <input class="dom-input modal-calc dom-amount" type="text" inputmode="decimal" id="modal-yq" min="0" step="0.01" value="0.00" />
+            </div>
+            <div class="fare-item">
+              <label>YR Tax</label>
+              <input class="dom-input modal-calc dom-amount" type="text" inputmode="decimal" id="modal-yr" min="0" step="0.01" value="0.00" />
+            </div>
+
+            <div class="fare-item">
+              <label>K3 Tax</label>
+              <input class="dom-input modal-calc dom-amount" type="text" inputmode="decimal" id="modal-k3" min="0" step="0.01" value="0.00" />
+            </div>
+            <div class="fare-item">
+              <label>Tax &amp; Others</label>
+              <input class="dom-input modal-calc dom-amount" type="text" inputmode="decimal" id="modal-tax-others" min="0" step="0.01" value="0.00" />
+            </div>
+            <div class="fare-item">
+              <label>Seat Charges</label>
+              <input class="dom-input modal-calc dom-amount" type="text" inputmode="decimal" id="modal-seat" min="0" step="0.01" value="0.00" />
+            </div>
+
+            <div class="fare-item">
+              <label>Meal Charges</label>
+              <input class="dom-input modal-calc dom-amount" type="text" inputmode="decimal" id="modal-meal" min="0" step="0.01" value="0.00" />
+            </div>
+            <div class="fare-item">
+              <label>Baggage</label>
+              <input class="dom-input modal-calc dom-amount" type="text" inputmode="decimal" id="modal-baggage" min="0" step="0.01" value="0.00" />
+            </div>
+            <div class="fare-item">
+              <label>Other SSR</label>
+              <input class="dom-input modal-calc dom-amount" type="text" inputmode="decimal" id="modal-other-ssr" min="0" step="0.01" value="0.00" />
+            </div>
+          </div>
+        </div>
+
+        <!-- 2. Two Accounting Boxes (Single Shared Header) -->
+        <div class="dom-modal-accounting-row">
+          <div class="dom-modal-section-title">Client Accounting (<span class="modal-currency-label">INR</span>)</div>
+          <div class="dom-modal-section-title">Supplier Commission</div>
+          <!-- Client Accounting (Discount, Markup, Service Fee, TDS & GST) -->
+          <div class="dom-acct-box">
+            <div class="dom-acct-body">
+              <div class="dom-acct-field">
+                <label>Discount Type</label>
+                <select class="dom-select modal-calc" id="modal-disc-type"></select>
+              </div>
+              <div class="dom-acct-field" id="modal-disc-on-field" style="display:none;">
+                <label>Cust Discount On</label>
+                <select class="dom-select modal-calc" id="modal-disc-on"></select>
+              </div>
+              <div class="dom-acct-field dom-acct-field-dual disc-amount-row">
+                <span id="modal-disc-value-field" style="display:none;">
+                  <label id="modal-disc-val-label">Discount %</label>
+                  <input class="dom-input modal-calc dom-acct-input-sm dom-amount" type="text" inputmode="decimal" id="modal-disc-value" min="0" step="0.01" value="0.00" />
+                </span>
+                <label>Discount Amount</label>
+                <input class="dom-input dom-acct-input-sm dom-amount" type="text" inputmode="decimal" id="modal-disc-computed" min="0" step="0.01" value="0.00" />
+              </div>
+              <div class="dom-acct-field dom-acct-field-triple">
+                <label>Markup</label>
+                <input class="dom-input modal-calc dom-acct-input-sm dom-max10 dom-amount" type="text" inputmode="decimal" id="modal-markup" min="0" max="9999999999" step="0.01" value="0.00" />
+                <label>Addl Markup</label>
+                <input class="dom-input modal-calc dom-acct-input-sm dom-max10 dom-amount" type="text" inputmode="decimal" id="modal-addl-markup" min="0" max="9999999999" step="0.01" value="0.00" />
+                <label>SSR Markup</label>
+                <input class="dom-input modal-calc dom-acct-input-sm dom-max10 dom-amount" type="text" inputmode="decimal" id="modal-ssr-markup" min="0" max="9999999999" step="0.01" value="0.00" />
+              </div>
+              <div class="dom-acct-field dom-acct-field-triple">
+                <label>Service Fee</label>
+                <input class="dom-input modal-calc dom-acct-input-sm dom-max10 dom-amount" type="text" inputmode="decimal" id="modal-service-fee" min="0" max="9999999999" step="0.01" value="0.00" />
+                <label>Addl Service Fee</label>
+                <input class="dom-input modal-calc dom-acct-input-sm dom-max10 dom-amount" type="text" inputmode="decimal" id="modal-addl-service-fee" min="0" max="9999999999" step="0.01" value="0.00" />
+                <label>SSR Service Fee</label>
+                <input class="dom-input modal-calc dom-acct-input-sm dom-max10 dom-amount" type="text" inputmode="decimal" id="modal-ssr-service-fee" min="0" max="9999999999" step="0.01" value="0.00" />
+              </div>
+              <div class="dom-acct-field dom-acct-field-dual">
+                <label>TDS %</label>
+                <input class="dom-input modal-calc dom-acct-input-sm dom-amount" type="text" inputmode="decimal" id="modal-tds-per" min="0" step="0.01" value="0.00" />
+                <label>TDS Amount</label>
+                <div class="dom-input-readonly dom-acct-input-sm" id="modal-tds-computed">0.00</div>
+              </div>
+              <!-- Taxable Amount is display-only - Service Fee + Addl
+                   Service Fee + SSR Service Fee, not used in any
+                   calculation (view purposes only). GST Amount = each of
+                   those times its own mapped ledger's GST% (see
+                   computeFareLine). -->
+              <div class="dom-acct-field dom-acct-field-dual">
+                <label>Taxable Amount</label>
+                <div class="dom-input-readonly" id="modal-taxable-amount" style="flex:none; width:70px; text-align:right; justify-content:flex-end;">0.00</div>
+                <label>GST Amount</label>
+                <div style="display:flex; align-items:center; gap:4px;">
+                  <div class="dom-input-readonly" id="modal-gst-computed" style="flex:1; min-width:0; text-align:right; justify-content:flex-end;">0.00</div>
+                  <button type="button" class="dom-eye-btn" id="modal-gst-detail-btn" title="View GST Amount calculation">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                  </button>
+                </div>
+              </div>
+              <!-- Only shown when the ticket's Payment Mode is "Payment
+                   Gateway" - posts against that gateway's PG Master ->
+                   PG Charges Master ledger. PG GST is display-only - the
+                   selected gateway's PG Charges Master ledger's own GST%
+                   (view purposes only, not used in any calculation). -->
+              <div class="dom-acct-field dom-acct-field-dual" id="modal-pg-charges-field" style="display:none;">
+                <label>PG Charges</label>
+                <input class="dom-input modal-calc dom-acct-input-sm dom-max10 dom-amount" type="text" inputmode="decimal" id="modal-pg-charges" min="0" max="9999999999" step="0.01" value="0.00" />
+                <label>PG GST</label>
+                <div class="dom-input-readonly dom-acct-input-sm" id="modal-pg-gst-pct">0.00</div>
+              </div>
+              <div class="dom-acct-field dom-acct-field-dual" style="display:none;">
+                <label>GST %</label>
+                <input class="dom-input modal-calc dom-acct-input-sm dom-amount" type="text" inputmode="decimal" id="modal-gst-pct" min="0" step="0.01" value="0.00" />
+              </div>
+            </div>
+          </div>
+
+          <!-- Supplier Commission -->
+          <div class="dom-acct-box">
+            <div class="dom-acct-body">
+              <div class="dom-acct-field dom-acct-field-dual">
+                <label>Commission Type</label>
+                <select class="dom-select modal-calc dom-acct-input-sm" id="modal-supp-comm-type"></select>
+                <span id="modal-supp-comm-value-field" style="display:contents;">
+                  <label id="modal-supp-comm-val-label">Commission %</label>
+                  <input class="dom-input modal-calc dom-acct-input-sm dom-amount" type="text" inputmode="decimal" id="modal-supp-comm-value" min="0" step="0.01" value="0.00" />
+                </span>
+              </div>
+              <div class="dom-acct-field" id="modal-supp-comm-on-field" style="display:none;">
+                <label>Supplier Commission On</label>
+                <select class="dom-select modal-calc" id="modal-supp-comm-on"></select>
+              </div>
+              <div class="dom-acct-field">
+                <label>Commission Amount</label>
+                <input class="dom-input dom-amount" type="text" inputmode="decimal" id="modal-supp-comm-computed" min="0" step="0.01" value="0.00" />
+              </div>
+              <div class="dom-acct-field dom-acct-field-dual">
+                <label>Sup Markup</label>
+                <input class="dom-input modal-calc dom-acct-input-sm dom-max10 dom-amount" type="text" inputmode="decimal" id="modal-supp-markup" min="0" max="9999999999" step="0.01" value="0.00" />
+                <label>Sup Addl Markup</label>
+                <input class="dom-input modal-calc dom-acct-input-sm dom-max10 dom-amount" type="text" inputmode="decimal" id="modal-supp-addl-markup" min="0" max="9999999999" step="0.01" value="0.00" />
+              </div>
+              <div class="dom-acct-field dom-acct-field-dual">
+                <label>Sup Service Fee</label>
+                <input class="dom-input modal-calc dom-acct-input-sm dom-max10 dom-amount" type="text" inputmode="decimal" id="modal-supp-service-fee" min="0" max="9999999999" step="0.01" value="0.00" />
+                <label>Sup Addl Service Fee</label>
+                <input class="dom-input modal-calc dom-acct-input-sm dom-max10 dom-amount" type="text" inputmode="decimal" id="modal-supp-addl-service-fee" min="0" max="9999999999" step="0.01" value="0.00" />
+              </div>
+              <div class="dom-acct-field dom-acct-field-dual">
+                <label>Sup TDS %</label>
+                <input class="dom-input modal-calc dom-acct-input-sm dom-amount" type="text" inputmode="decimal" id="modal-supp-tds-per" min="0" step="0.01" value="0.00" />
+                <label>Sup TDS Amount</label>
+                <div class="dom-input-readonly dom-acct-input-sm" id="modal-supp-tds-computed">0.00</div>
+              </div>
+              <div class="dom-acct-field dom-acct-field-dual">
+                <label>Sup GST %</label>
+                <input class="dom-input modal-calc dom-acct-input-sm dom-amount" type="text" inputmode="decimal" id="modal-supp-gst-pct" min="0" step="0.01" value="0.00" />
+                <label>Sup GST Amount</label>
+                <div class="dom-input-readonly dom-acct-input-sm" id="modal-supp-gst-computed">0.00</div>
+              </div>
+            </div>
+            <div class="dom-acct-box-actions">
+              <button type="button" class="dom-nav-btn" id="modal-cancel-btn">Cancel</button>
+              <button type="button" class="dom-nav-btn btn-primary" id="modal-save-btn">Save &amp; Apply</button>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- Modal Footer Toolbar -->
+    <div class="dom-modal-footer">
+      <div class="dom-modal-total-bar">
+        <span>Total Billed:</span>
+        <span class="modal-currency-label">INR</span>
+        <span id="modal-total-computed" style="font-size:16px; font-weight:800; font-family:var(--font-mono);">0.00</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Add Sector Modal — one entry per multi-city segment, shown as a chip on the Sector box -->
+<div class="dom-modal-backdrop spa-extra-content" id="sector-modal">
+  <div class="dom-modal-window" style="max-width: 460px; width: 95%;">
+    <div class="dom-modal-titlebar">
+      <div>Add Sector</div>
+      <button type="button" class="dom-titlebar-btn btn-close" id="sector-close-x-btn" title="Close">&times;</button>
+    </div>
+    <div class="dom-modal-body dom-modal-body-scroll" style="display:block; padding:12px; max-height:76vh;">
+      <div class="dom-modal-form-grid" style="grid-template-columns: 100px 1fr;">
+        <div style="grid-column: 1 / -1; display:flex; align-items:center; gap:6px;">
+          <label style="flex:0 0 100px;">Origin<span class="dom-req">*</span></label>
+          <input class="dom-input" type="text" id="sector-from" maxlength="4" placeholder="e.g. BOM" style="text-transform:uppercase; width:64px; flex:0 0 auto;" />
+          <label style="margin-left:8px;">Destination<span class="dom-req">*</span></label>
+          <input class="dom-input" type="text" id="sector-to" maxlength="4" placeholder="e.g. DXB" style="text-transform:uppercase; width:64px; flex:0 0 auto;" />
+        </div>
+
+        <div style="grid-column: 1 / -1; display:flex; align-items:center; gap:6px;">
+          <label style="flex:0 0 100px;">Airline Code</label>
+          <input class="dom-input" type="text" id="sector-airline-code" maxlength="2" placeholder="e.g. 6E" style="text-transform:uppercase; width:48px; flex:0 0 auto;" />
+          <label style="margin-left:8px;">Airline Name</label>
+          <input class="dom-input" type="text" id="sector-airline-name" placeholder="e.g. IndiGo" style="flex:1;" />
+        </div>
+
+        <label>Travel Date</label>
+        <div class="date-group" id="sector-travel-date">
+          <input type="date" class="dg-native" />
+        </div>
+
+        <label>Flight No</label>
+        <input class="dom-input" type="text" id="sector-flight-no" placeholder="e.g. 5259" />
+
+        <label>Cabin</label>
+        <select class="dom-select" id="sector-cabin"></select>
+
+        <label>Class</label>
+        <input class="dom-input" type="text" id="sector-class" placeholder="e.g. Y" />
+
+        <label>Fare Type</label>
+        <select class="dom-select" id="sector-fare-type"></select>
+      </div>
+    </div>
+    <div class="dom-modal-footer">
+      <div></div>
+      <div style="display:flex; gap:6px;">
+        <button type="button" class="dom-nav-btn" id="sector-cancel-btn">Cancel</button>
+        <button type="button" class="dom-nav-btn btn-primary" id="sector-save-btn" style="font-weight:700;">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- GST Amount calculation breakdown - view only. -->
+<div class="dom-modal-backdrop spa-extra-content" id="gst-detail-modal">
+  <div class="dom-modal-window" style="max-width: 420px; width: 95%;">
+    <div class="dom-modal-titlebar">
+      <div>GST Amount Calculation</div>
+      <button type="button" class="dom-titlebar-btn btn-close" id="gst-detail-close-x-btn" title="Close">&times;</button>
+    </div>
+    <div class="dom-modal-body" style="display:block; padding:12px;">
+      <table class="dom-gst-detail-table">
+        <thead>
+          <tr><th>Particular</th><th>Taxable Amount</th><th>GST%</th><th>GST Amount</th></tr>
+        </thead>
+        <tbody id="gst-detail-tbody"></tbody>
+      </table>
+    </div>
+    <div class="dom-modal-footer">
+      <div></div>
+      <button type="button" class="dom-nav-btn btn-primary" id="gst-detail-ok-btn" style="font-weight:700;">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Journal Voucher (J.V) Modal — Desktop ERP Double-Entry Ledger Preview -->
+<div class="dom-modal-backdrop spa-extra-content" id="jv-modal">
+  <div class="dom-modal-window" style="max-width: 760px; width: 95%; max-height: 82vh;">
+    <div class="dom-modal-titlebar">
+      <div></div>
+      <button type="button" class="dom-titlebar-btn btn-close" id="jv-close-x-btn" title="Close">&times;</button>
+    </div>
+
+    <div class="dom-tabs" id="jv-tabs" style="padding-left:12px; padding-right:12px;">
+      <a class="dom-tab active" data-jv-tab="voucher">Journal Voucher</a>
+      <a class="dom-tab" data-jv-tab="fop" id="jv-tab-btn-fop">FOP Payment</a>
+      <a class="dom-tab" data-jv-tab="pg" id="jv-tab-btn-pg">PG Receipts</a>
+    </div>
+
+    <div class="dom-modal-body dom-modal-body-scroll" style="display:block; padding:12px; height:52vh;">
+
+      <!-- Tab 1: Journal Voucher -->
+      <div id="jv-tab-panel-voucher" class="jv-tab-panel" style="min-height:48vh;">
+        <!-- Voucher Meta Header Card -->
+        <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:8px; background:var(--color-bg-alt, #F8FAFC); border:1px solid var(--color-border, #CBD5E1); padding:10px; border-radius:3px; margin-bottom:12px; font-size:11.5px;">
+          <div>
+            <span style="color:#64748B; display:block; font-size:10px; font-weight:600;">Voucher No</span>
+            <strong id="jv-meta-vno" style="font-family:var(--font-mono, monospace); font-size:12px; color:#3B6DB5;">—</strong>
+          </div>
+          <div>
+            <span style="color:#64748B; display:block; font-size:10px; font-weight:600;">Voucher Date</span>
+            <strong id="jv-meta-date">—</strong>
+          </div>
+          <div>
+            <span style="color:#64748B; display:block; font-size:10px; font-weight:600;">Voucher Type</span>
+            <span class="pill pill-neutral" style="font-size:10.5px; font-weight:700;">Journal (Ticket)</span>
+          </div>
+          <div>
+            <span style="color:#64748B; display:block; font-size:10px; font-weight:600;">Currency</span>
+            <strong id="jv-meta-currency">INR</strong>
+          </div>
+        </div>
+
+        <!-- Journal Voucher Debit & Credit Table - its own bounded/scrollable
+             region (sticky header), independent of the meta card above and
+             the narration box below, so a long account list never pushes
+             the whole modal taller. -->
+        <div style="border:1px solid var(--color-border, #CBD5E1); border-radius:3px; overflow:hidden; margin-bottom:12px;">
+          <div style="max-height:26vh; overflow-y:auto;">
+            <table style="width:100%; border-collapse:collapse; font-size:11.5px;">
+              <thead>
+                <tr style="background:#3B6DB5; color:#FFFFFF; font-weight:700; text-align:left; height:26px;">
+                  <th style="padding:4px 8px; width:36px; text-align:center; position:sticky; top:0; background:#3B6DB5;">#</th>
+                  <th style="padding:4px 8px; position:sticky; top:0; background:#3B6DB5;">Account / General Ledger Head</th>
+                  <th style="padding:4px 8px; width:110px; text-align:right; position:sticky; top:0; background:#3B6DB5;">Debit (<span class="jv-currency-label">INR</span>)</th>
+                  <th style="padding:4px 8px; width:110px; text-align:right; position:sticky; top:0; background:#3B6DB5;">Credit (<span class="jv-currency-label">INR</span>)</th>
+                </tr>
+              </thead>
+              <tbody id="jv-table-body">
+                <!-- Dynamically populated rows -->
+              </tbody>
+            </table>
+          </div>
+          <table style="width:100%; border-collapse:collapse; font-size:11.5px;">
+            <tfoot>
+              <tr style="background:#F1F5F9; font-weight:800; border-top:2px solid #3B6DB5; height:28px;">
+                <td style="padding:6px 10px; text-align:right; font-size:11px; letter-spacing:0.5px; width:36px;"></td>
+                <td style="padding:6px 10px; text-align:right; font-size:11px; letter-spacing:0.5px;">
+                  Total Balanced Entry:
+                </td>
+                <td id="jv-total-debit" style="padding:6px 8px; text-align:right; font-family:var(--font-mono, monospace); font-size:12.5px; color:#3B6DB5; width:110px;">0.00</td>
+                <td id="jv-total-credit" style="padding:6px 8px; text-align:right; font-family:var(--font-mono, monospace); font-size:12.5px; color:#3B6DB5; width:110px;">0.00</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+
+        <!-- Narration Box -->
+        <div style="background:var(--color-bg-alt, #F8FAFC); border:1px solid var(--color-border, #CBD5E1); border-radius:3px; padding:8px 10px; font-size:11px;">
+          <strong style="color:#475569; display:block; margin-bottom:2px;">Narration:</strong>
+          <span id="jv-narration-text" style="color:#1E293B; font-style:italic;">Being airline ticket issue entry for Passenger booking.</span>
+        </div>
+      </div>
+
+      <!-- Tab 2: FOP Payment — how the supplier side was settled. Only
+           posts when FOP != Cash: Own Card credits the FOP Master card's
+           ledger, Client Card credits Customer instead (their own card was
+           charged directly). Empty when FOP = Cash. -->
+      <div id="jv-tab-panel-fop" class="jv-tab-panel" style="display:none; min-height:48vh;">
+        <div style="border:1px solid var(--color-border, #CBD5E1); border-radius:3px; overflow:hidden; margin-bottom:12px;">
+          <table style="width:100%; border-collapse:collapse; font-size:11.5px;">
+            <thead>
+              <tr style="background:#3B6DB5; color:#FFFFFF; font-weight:700; text-align:left; height:26px;">
+                <th style="padding:4px 8px; width:36px; text-align:center;">#</th>
+                <th style="padding:4px 8px;">Account / General Ledger Head</th>
+                <th style="padding:4px 8px; width:110px; text-align:right;">Debit (<span class="jv-currency-label">INR</span>)</th>
+                <th style="padding:4px 8px; width:110px; text-align:right;">Credit (<span class="jv-currency-label">INR</span>)</th>
+              </tr>
+            </thead>
+            <tbody id="jv-fop-table-body"></tbody>
+            <tfoot>
+              <tr style="background:#F1F5F9; font-weight:800; border-top:2px solid #3B6DB5; height:28px;">
+                <td colspan="2" style="padding:6px 10px; text-align:right; font-size:11px; letter-spacing:0.5px;">Total:</td>
+                <td id="jv-fop-total-debit" style="padding:6px 8px; text-align:right; font-family:var(--font-mono, monospace); font-size:12.5px; color:#3B6DB5;">0.00</td>
+                <td id="jv-fop-total-credit" style="padding:6px 8px; text-align:right; font-family:var(--font-mono, monospace); font-size:12.5px; color:#3B6DB5;">0.00</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+        <div id="jv-fop-empty" class="jv-info-card" style="display:none;">No FOP settlement — Form of Payment is Cash.</div>
+      </div>
+
+      <!-- Tab 3: PG Receipts — how money was received from the customer.
+           Only posts when Payment Mode = Payment Gateway. Empty for Top-up. -->
+      <div id="jv-tab-panel-pg" class="jv-tab-panel" style="display:none; min-height:48vh;">
+        <div style="border:1px solid var(--color-border, #CBD5E1); border-radius:3px; overflow:hidden; margin-bottom:12px;">
+          <table style="width:100%; border-collapse:collapse; font-size:11.5px;">
+            <thead>
+              <tr style="background:#3B6DB5; color:#FFFFFF; font-weight:700; text-align:left; height:26px;">
+                <th style="padding:4px 8px; width:36px; text-align:center;">#</th>
+                <th style="padding:4px 8px;">Account / General Ledger Head</th>
+                <th style="padding:4px 8px; width:110px; text-align:right;">Debit (<span class="jv-currency-label">INR</span>)</th>
+                <th style="padding:4px 8px; width:110px; text-align:right;">Credit (<span class="jv-currency-label">INR</span>)</th>
+              </tr>
+            </thead>
+            <tbody id="jv-pg-table-body"></tbody>
+            <tfoot>
+              <tr style="background:#F1F5F9; font-weight:800; border-top:2px solid #3B6DB5; height:28px;">
+                <td colspan="2" style="padding:6px 10px; text-align:right; font-size:11px; letter-spacing:0.5px;">Total:</td>
+                <td id="jv-pg-total-debit" style="padding:6px 8px; text-align:right; font-family:var(--font-mono, monospace); font-size:12.5px; color:#3B6DB5;">0.00</td>
+                <td id="jv-pg-total-credit" style="padding:6px 8px; text-align:right; font-family:var(--font-mono, monospace); font-size:12.5px; color:#3B6DB5;">0.00</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+        <div id="jv-pg-empty" class="jv-info-card" style="display:none;">No PG Receipt — Payment Mode is not "Payment Gateway".</div>
+      </div>
+
+    </div>
+
+    <!-- Modal Footer Toolbar -->
+    <div class="dom-modal-footer" style="display:flex; justify-content:space-between; align-items:center;">
+      <div style="font-size:11px; color:#16A34A; font-weight:700; display:flex; align-items:center; gap:4px;">
+        <span>&#10003; Double-Entry Verification: Balanced</span>
+      </div>
+      <div style="display:flex; gap:6px;">
+        <button type="button" class="dom-nav-btn" id="jv-print-btn" onclick="window.print()">Print J.V</button>
+        <button type="button" class="dom-nav-btn btn-primary" id="jv-ok-btn" style="font-weight:700;">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Find Ticket Modal -->
+<div class="dom-modal-backdrop spa-extra-content" id="find-modal">
+  <div class="dom-modal-window" style="max-width: 720px; width: 95%; max-height: 90vh;">
+    <div class="dom-modal-titlebar">
+      <div>Find Ticket</div>
+      <button type="button" class="dom-titlebar-btn btn-close" id="find-close-x-btn" title="Close">&times;</button>
+    </div>
+
+    <div class="dom-modal-body dom-modal-body-scroll" style="display:block; padding:12px; max-height:76vh;">
+      <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:8px; margin-bottom:10px;">
+        <div style="display:flex; flex-direction:column; gap:2px; font-size:11px;">
+          <label style="font-weight:600; color:#334155;">Invoice Number</label>
+          <input class="dom-input" type="text" id="find-invoice-number" placeholder="e.g. INV-IN-00001" />
+        </div>
+        <div style="display:flex; flex-direction:column; gap:2px; font-size:11px;">
+          <label style="font-weight:600; color:#334155;">Booking Ref</label>
+          <input class="dom-input" type="text" id="find-booking-ref" placeholder="e.g. BREF-IN-00001" />
+        </div>
+        <div style="display:flex; flex-direction:column; gap:2px; font-size:11px;">
+          <label style="font-weight:600; color:#334155;">Airline PNR</label>
+          <input class="dom-input" type="text" id="find-airline-pnr" placeholder="e.g. X1234" />
+        </div>
+        <div style="display:flex; flex-direction:column; gap:2px; font-size:11px;">
+          <label style="font-weight:600; color:#334155;">GDS PNR</label>
+          <input class="dom-input" type="text" id="find-gds-pnr" placeholder="e.g. GDSX1234" />
+        </div>
+        <div style="display:flex; flex-direction:column; gap:2px; font-size:11px;">
+          <label style="font-weight:600; color:#334155;">Ticket No</label>
+          <input class="dom-input" type="text" id="find-ticket-no" placeholder="e.g. F4KHTD-1" />
+        </div>
+        <div style="display:flex; flex-direction:column; gap:2px; font-size:11px;">
+          <label style="font-weight:600; color:#334155;">Customer Name</label>
+          <input class="dom-input" type="text" id="find-customer-name" placeholder="e.g. Sundaram Traders" />
+        </div>
+        <div style="display:flex; flex-direction:column; gap:2px; font-size:11px;">
+          <label style="font-weight:600; color:#334155;">Airline Code</label>
+          <input class="dom-input" type="text" id="find-airline-code" placeholder="e.g. 6E" />
+        </div>
+        <div aria-hidden="true"></div>
+        <div style="display:flex; flex-direction:column; gap:2px; font-size:11px;">
+          <label style="font-weight:600; color:#334155;">Date Type</label>
+          <div class="dom-date-type-toggle" id="find-date-type" data-value="travel_date">
+            <button type="button" class="dom-date-type-btn active" data-value="travel_date">Travel Date</button>
+            <button type="button" class="dom-date-type-btn" data-value="issue_date">Booking Date</button>
+          </div>
+        </div>
+        <div style="display:flex; flex-direction:column; gap:2px; font-size:11px;">
+          <label style="font-weight:600; color:#334155;">Date From</label>
+          <input class="dom-input" type="date" id="find-date-from" />
+        </div>
+        <div style="display:flex; flex-direction:column; gap:2px; font-size:11px;">
+          <label style="font-weight:600; color:#334155;">Date To</label>
+          <input class="dom-input" type="date" id="find-date-to" />
+        </div>
+      </div>
+      <div style="display:flex; justify-content:flex-end; margin-bottom:10px;">
+        <button type="button" class="dom-nav-btn btn-primary" id="find-search-btn" style="font-weight:700;">Search</button>
+      </div>
+
+      <div style="border:1px solid var(--color-border, #CBD5E1); border-radius:3px; overflow:hidden;">
+        <div style="max-height:280px; overflow-y:auto;">
+          <table style="width:100%; border-collapse:collapse; font-size:11.5px;">
+            <thead>
+              <tr style="background:#3B6DB5; color:#FFFFFF; font-weight:700; text-align:left; height:26px;">
+                <th style="padding:4px 8px; position:sticky; top:0; background:#3B6DB5;">Invoice No</th>
+                <th style="padding:4px 8px; position:sticky; top:0; background:#3B6DB5;">Booking Ref</th>
+                <th style="padding:4px 8px; position:sticky; top:0; background:#3B6DB5;">Airline PNR</th>
+                <th style="padding:4px 8px; position:sticky; top:0; background:#3B6DB5;">GDS PNR</th>
+                <th style="padding:4px 8px; position:sticky; top:0; background:#3B6DB5;">Ticket No</th>
+                <th style="padding:4px 8px; position:sticky; top:0; background:#3B6DB5;">Passenger</th>
+                <th style="padding:4px 8px; text-align:right; position:sticky; top:0; background:#3B6DB5;">Total Billed</th>
+              </tr>
+            </thead>
+            <tbody id="find-results-body">
+              <tr><td colspan="7" style="text-align:center; padding:14px; color:#64748B;">Enter a filter above and click Search.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="assets/js/hardcode.js"></script>
+<script src="assets/js/mock-data.js"></script>
+<script src="assets/js/loader.js?v=5"></script>
+<script src="assets/js/api.js"></script>
+<script src="assets/js/util.js"></script>
+<script src="assets/js/shell.js?v=8"></script>
+<script src="assets/js/entry-common.js"></script>
+<script src="assets/js/page-ticket-entry.js?v=5"></script>
+</body></html>

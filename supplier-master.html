@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en-GB"><head>
+<meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+<meta http-equiv="Pragma" content="no-cache" />
+<meta http-equiv="Expires" content="0" />
+<title>Supplier Master — TRAVEL AGENCY</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
+<link href="assets/css/design-system.css" rel="stylesheet" />
+<link href="assets/css/app.css" rel="stylesheet" />
+</head><body>
+<header class="app-topnav" id="shell-topnav"></header>
+<div class="app-body">
+  <main class="app-main" style="max-width:1400px;">
+    <h1 style="font-size:1.15rem;">Supplier Master</h1>
+
+    <datalist id="sm-office-id-options"></datalist>
+
+    <div class="entry-section-title" style="max-width:1400px;">Commission Rules</div>
+    <div class="card-glass table-card" style="border-radius:0;">
+      <div style="overflow-x:auto;">
+        <table class="dom-grid-table sm-table-lg" id="sm-rule-table" style="min-width:1500px;">
+          <thead><tr>
+            <th>Type</th><th>Office Id</th><th>Supplier</th><th>Travel Type</th><th>Airline Category</th>
+            <th>Cabin</th><th>Fare Type</th><th>Supplier Commission On</th><th>Calculation Type</th><th id="sm-rule-calc-value-header">% of Calculation</th>
+            <th>Valid Upto</th><th></th>
+          </tr></thead>
+          <tbody id="sm-rule-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="entry-section-title" style="max-width:1400px;">Supplier Commission List</div>
+    <div class="card-glass table-card" style="border-radius:0;">
+      <div style="overflow-x:auto;">
+        <table class="dom-grid-table sm-table-lg" id="sm-list-table" style="min-width:1500px;">
+          <thead><tr>
+            <th>Type</th><th>Office Id</th><th>Supplier</th><th>Travel Type</th><th>Airline Category</th>
+            <th>Cabin</th><th>Fare Type</th><th>Supplier Commission On</th><th>Calculation Type</th><th>Calculation Value</th>
+            <th>Valid Upto</th><th></th>
+          </tr></thead>
+          <tbody id="sm-list-tbody">
+            <tr id="sm-list-empty-row"><td colspan="12" style="text-align:center; padding:14px; color:#64748B;">No saved commission rules yet.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+</div>
+<script src="assets/js/hardcode.js"></script>
+<script src="assets/js/mock-data.js"></script>
+<script src="assets/js/api.js"></script>
+<script src="assets/js/util.js"></script>
+<script src="assets/js/entry-common.js"></script>
+<script src="assets/js/shell.js?v=6"></script>
+<script src="assets/js/page-supplier-master.js"></script>
+</body></html>

@@ -1,0 +1,78 @@
+-- Split the old combined "Vouchers" table into two:
+--   1. JournalVoucher - renamed from the existing Vouchers table (every
+--      existing row is ticket-driven, so this is a real rename, no data lost)
+--   2. Vouchers - a brand-new, empty table for manually created vouchers only
+--      (voucher-entry.html) - reuses the "Vouchers" name once step 1 frees it up
+
+-- ============================================================
+-- Step 1: rename Vouchers -> JournalVoucher (keeps all existing rows)
+-- ============================================================
+EXEC sp_rename 'Vouchers', 'JournalVoucher';
+GO
+
+ALTER TABLE JournalVoucher DROP CONSTRAINT uq_voucher_company_no;
+ALTER TABLE JournalVoucher ADD CONSTRAINT uq_journal_voucher_company_no
+    UNIQUE (company_id, voucher_no);
+
+DROP INDEX ix_vouchers_company_id ON JournalVoucher;
+DROP INDEX ix_vouchers_source_ticket ON JournalVoucher;
+
+CREATE INDEX journal_voucher_company_idx ON JournalVoucher(company_id);
+CREATE INDEX journal_voucher_ticket_idx  ON JournalVoucher(source_ticket_id);
+
+-- category now only ever holds AIRLINE/HOTEL/VISA/INSURANCE/TOUR (no more
+-- MANUAL rows in this table), and voucher_type defaults to 'Tax Invoice'
+-- since every row here is ticket-driven.
+ALTER TABLE JournalVoucher ADD CONSTRAINT DF_JournalVoucher_voucher_type
+    DEFAULT 'Tax Invoice' FOR voucher_type;
+ALTER TABLE JournalVoucher ADD CONSTRAINT DF_JournalVoucher_category
+    DEFAULT 'AIRLINE' FOR category;
+GO
+
+-- ============================================================
+-- Step 2: create a fresh, empty Vouchers table (manual entries only -
+-- no source_ticket_id column at all)
+-- ============================================================
+CREATE TABLE Vouchers (
+    id                INT IDENTITY(1,1) PRIMARY KEY,
+
+    company_id        INT NOT NULL,
+    branch_name       NVARCHAR(100) NULL,
+
+    voucher_type      NVARCHAR(20) NOT NULL DEFAULT 'Journal'
+        CONSTRAINT ck_vouchers_voucher_type
+        CHECK (voucher_type IN ('Journal', 'Contra', 'Payment', 'Receipt', 'Debit Note', 'Credit Note')),
+    voucher_date      DATE NOT NULL,
+    narration         NVARCHAR(250) NULL,
+
+    category          NVARCHAR(20) NOT NULL DEFAULT 'MANUAL',
+    voucher_no        NVARCHAR(20) NULL,
+
+    total_debit       DECIMAL(16,2) NOT NULL DEFAULT 0,
+    total_credit      DECIMAL(16,2) NOT NULL DEFAULT 0,
+
+    lines_json        NVARCHAR(MAX) NOT NULL DEFAULT '[]',
+
+    created_at        DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+    updated_at        DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+
+    CONSTRAINT uq_voucher_company_no
+        UNIQUE (company_id, voucher_no)
+);
+GO
+
+CREATE INDEX voucher_company_idx ON Vouchers(company_id);
+GO
+
+CREATE TRIGGER trg_vouchers_updated_at
+ON Vouchers
+AFTER UPDATE
+AS
+BEGIN
+    SET NOCOUNT ON;
+    UPDATE v
+    SET updated_at = SYSUTCDATETIME()
+    FROM Vouchers v
+    INNER JOIN inserted i ON v.id = i.id;
+END;
+GO

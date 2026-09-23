@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+<meta http-equiv="Pragma" content="no-cache" />
+<meta http-equiv="Expires" content="0" />
+<title>Dashboard — TRAVEL AGENCY</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
+<link href="assets/css/design-system.css" rel="stylesheet" />
+<link href="assets/css/app.css" rel="stylesheet" />
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+</head>
+<body>
+
+<header class="app-topnav" id="shell-topnav"></header>
+<div class="app-body">
+  <aside class="app-sidebar" id="shell-sidebar"></aside>
+
+  <main class="app-main">
+    <div id="dashboard-header" style="margin-bottom:0.4rem;">
+      <h1 style="font-size:1.15rem;" id="greeting">Good day</h1>
+      <p class="text-muted-custom" id="scope-label">Loading company scope…</p>
+    </div>
+
+    <div class="hero-row" id="hero-row"></div>
+
+    <div class="section-heading">
+      <h2>Revenue by product line</h2>
+      <span class="hint">Ticket, hotel, visa &amp; insurance revenue captured to date</span>
+    </div>
+    <div class="metric-grid" id="revenue-grid"></div>
+
+    <div class="row" style="display:grid; grid-template-columns: 1.6fr 1fr; gap:0.7rem; margin-top:0.7rem;">
+      <div class="card-glass chart-card">
+        <h2 style="font-size:0.85rem; font-weight:700; margin-bottom:0.6rem;">Monthly revenue &amp; profitability trend</h2>
+        <canvas id="trendChart"></canvas>
+      </div>
+      <div class="card-glass chart-card">
+        <h2 style="font-size:0.85rem; font-weight:700; margin-bottom:0.6rem;">Product mix</h2>
+        <canvas id="mixChart"></canvas>
+      </div>
+    </div>
+
+    <div class="section-heading">
+      <h2>Finance position</h2>
+      <span class="hint">Cash, receivables, payables &amp; BSP exposure</span>
+    </div>
+    <div class="metric-grid" id="finance-grid"></div>
+
+    <div class="section-heading">
+      <h2>Compliance liability</h2>
+      <span class="hint">India GST/TDS and UAE VAT payable</span>
+    </div>
+    <div class="metric-grid" id="compliance-grid"></div>
+
+    <div class="row" style="display:grid; grid-template-columns: 1fr; gap:0.7rem; margin-top:0.7rem;">
+      <div class="card-glass table-card">
+        <div style="padding:0.6rem 0.8rem 0.5rem; display:flex; justify-content:space-between; align-items:center;">
+          <h2 style="font-size:0.85rem; font-weight:700; margin:0;">Branch performance</h2>
+          <span class="hint">Sales &amp; approximate profit by branch</span>
+        </div>
+        <table>
+          <thead><tr><th>Branch</th><th>Sales</th><th>Profit</th><th>Margin</th></tr></thead>
+          <tbody id="branch-table-body">
+            <tr><td colspan="4"><div class="skeleton" style="height:16px;"></div></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<script src="assets/js/hardcode.js"></script>
+<script src="assets/js/mock-data.js"></script>
+<script src="assets/js/api.js"></script>
+<script src="assets/js/util.js"></script>
+<script src="assets/js/entry-common.js"></script>
+<script src="assets/js/drilldown.js"></script>
+<script src="assets/js/shell.js?v=6"></script>
+<script src="assets/js/dashboard.js"></script>
+</body>
+</html>

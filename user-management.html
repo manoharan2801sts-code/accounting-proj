@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <title>User Management — TRAVEL AGENCY</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
+  <link href="assets/css/design-system.css" rel="stylesheet" />
+  <link href="assets/css/app.css" rel="stylesheet" />
+  <link rel="icon" type="image/png" href="assets/img/favicon.png" />
+  <style>
+    .page-header-row { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 1.25rem; flex-wrap: wrap; }
+    .page-title-group h1 { font-size: 1.25rem; font-weight: 700; margin: 0; display: flex; align-items: center; gap: 0.5rem; }
+    .page-title-group .breadcrumb { font-size: 0.8rem; color: var(--color-text-muted); margin-bottom: 0.25rem; display: flex; gap: 0.4rem; align-items: center; }
+
+    .table-container {
+      background: var(--color-white); border: 1px solid var(--color-border);
+      border-radius: var(--radius-md); overflow: hidden;
+    }
+    .table-toolbar {
+      padding: 0.85rem 1.25rem; display: flex; align-items: center; justify-content: space-between;
+      border-bottom: 1px solid var(--color-border); gap: 1rem; flex-wrap: wrap; background: #FAFBFD;
+    }
+    .table-search { max-width: 300px; width: 100%; }
+    .table-custom { width: 100%; border-collapse: collapse; text-align: left; }
+    .table-custom th {
+      padding: 0.75rem 1rem; background: #F8FAFC; border-bottom: 1px solid var(--color-border);
+      font-size: 11.5px; font-weight: 700; text-transform: uppercase; color: var(--color-text-muted); letter-spacing: 0.03em;
+    }
+    .table-custom td {
+      padding: 0.75rem 1rem; border-bottom: 1px solid var(--color-border-subtle);
+      font-size: 13px; color: var(--color-text); vertical-align: middle;
+    }
+    .table-custom tbody tr:hover { background: #F8FAFC; }
+    .table-custom tbody tr:last-child td { border-bottom: none; }
+    .status-badge {
+      display: inline-flex; align-items: center; padding: 0.2rem 0.55rem;
+      border-radius: 4px; font-size: 11.5px; font-weight: 700; text-transform: uppercase;
+    }
+    .badge-active, .badge-success { background: #DCFCE7; color: #166534; }
+    .badge-inactive, .badge-danger { background: #FEE2E2; color: #991B1B; }
+    .row-actions { display: flex; gap: 0.4rem; }
+    .row-actions button {
+      background: none; border: none; cursor: pointer; padding: 0.3rem;
+      color: var(--color-text-muted); border-radius: 4px;
+    }
+    .row-actions button:hover { background: #F1F5F9; color: var(--color-primary); }
+  </style>
+</head>
+<body>
+  <header class="app-topnav" id="shell-topnav"></header>
+  <div class="app-body">
+    <main class="app-main" style="max-width: 1440px; margin: 0 auto; padding: 1.5rem 2rem;">
+      <div class="page-header-row">
+        <div class="page-title-group">
+          <div class="breadcrumb">Control Panel &rsaquo; User Management</div>
+          <h1><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--color-primary)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg> User Management</h1>
+        </div>
+        <button type="button" class="dom-nav-btn btn-primary" id="add-user-btn">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+          Add User
+        </button>
+      </div>
+
+      <div class="table-container">
+        <div class="table-toolbar">
+          <div style="font-weight:700; font-size:0.92rem; color:var(--color-text-dark);">System Users</div>
+          <input type="text" class="form-control-custom table-search" placeholder="Search users..." oninput="filterTable(this.value)" />
+        </div>
+        <div style="overflow-x:auto;">
+          <table class="table-custom" id="user-table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Email</th>
+                <th>Role</th>
+                <th>Branch / Office</th>
+                <th>Status</th>
+                <th>Last Login</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="user-tbody">
+              <tr>
+                <td>Ananya Krishnan</td>
+                <td>ananya.krishnan@travelagency.com</td>
+                <td>Administrator</td>
+                <td>Delhi HQ</td>
+                <td><span class="status-badge badge-active">Active</span></td>
+                <td>2026-09-21 09:12</td>
+                <td class="row-actions">
+                  <button type="button" title="Edit"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.85 2.85 0 114 4L7.5 20.5 2 22l1.5-5.5z"/></svg></button>
+                  <button type="button" title="Deactivate"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><line x1="8" y1="8" x2="16" y2="16"/></svg></button>
+                </td>
+              </tr>
+              <tr>
+                <td>Rahul Mehta</td>
+                <td>rahul.mehta@travelagency.com</td>
+                <td>Accountant</td>
+                <td>Mumbai Branch</td>
+                <td><span class="status-badge badge-active">Active</span></td>
+                <td>2026-09-20 17:45</td>
+                <td class="row-actions">
+                  <button type="button" title="Edit"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.85 2.85 0 114 4L7.5 20.5 2 22l1.5-5.5z"/></svg></button>
+                  <button type="button" title="Deactivate"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><line x1="8" y1="8" x2="16" y2="16"/></svg></button>
+                </td>
+              </tr>
+              <tr>
+                <td>Fatima Al Suwaidi</td>
+                <td>fatima.alsuwaidi@travelagency.com</td>
+                <td>Travel Desk</td>
+                <td>Dubai Branch</td>
+                <td><span class="status-badge badge-inactive">Inactive</span></td>
+                <td>2026-08-30 11:02</td>
+                <td class="row-actions">
+                  <button type="button" title="Edit"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.85 2.85 0 114 4L7.5 20.5 2 22l1.5-5.5z"/></svg></button>
+                  <button type="button" title="Activate"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg></button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script src="assets/js/api.js"></script>
+  <script src="assets/js/hardcode.js"></script>
+  <script src="assets/js/shell.js"></script>
+  <script>
+    document.addEventListener("DOMContentLoaded", () => {
+      VoyagerShell.init({ activeKey: "user-management" });
+    });
+
+    document.getElementById("add-user-btn").addEventListener("click", () => {
+      voyagerAlert("This module is part of the Phase 2 build.");
+    });
+
+    function filterTable(query) {
+      const q = query.toLowerCase();
+      const rows = document.querySelectorAll("#user-table tbody tr");
+      rows.forEach((r) => {
+        r.style.display = r.textContent.toLowerCase().includes(q) ? "" : "none";
+      });
+    }
+  </script>
+</body>
+</html>

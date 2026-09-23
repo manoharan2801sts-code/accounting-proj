@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en-GB"><head>
+<meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+<meta http-equiv="Pragma" content="no-cache" />
+<meta http-equiv="Expires" content="0" />
+<title>Payables — TRAVEL AGENCY</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.datatables.net/1.13.11/css/dataTables.dataTables.min.css">
+<link href="assets/css/design-system.css" rel="stylesheet" />
+<link href="assets/css/app.css" rel="stylesheet" />
+<style>table.dataTable{font-size:0.76rem} .dt-toolbar{display:flex;justify-content:space-between;align-items:center;padding:0.6rem 0.8rem 0.4rem}</style>
+</head><body>
+<header class="app-topnav" id="shell-topnav"></header>
+<div class="app-body">
+  <aside class="app-sidebar" id="shell-sidebar"></aside>
+  <main class="app-main">
+    <h1 style="font-size:1.15rem;">Accounts Payable</h1>
+    <p class="text-muted-custom">Supplier outstanding &amp; credit terms — sorted by highest exposure.</p>
+    <div class="card-glass table-card" style="margin-top:0.7rem;">
+      <div class="dt-toolbar"><strong style="font-size:0.95rem;">Supplier ledger</strong><span class="hint text-muted-custom" id="row-count"></span></div>
+      <table id="data-table" class="display" style="width:100%">
+        <thead><tr><th>Code</th><th>Supplier</th><th>Type</th><th>Credit Days</th><th>Outstanding</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </main>
+</div>
+<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+<script src="https://cdn.datatables.net/1.13.11/js/dataTables.dataTables.min.js"></script>
+<script src="assets/js/hardcode.js"></script>
+<script src="assets/js/mock-data.js"></script>
+<script src="assets/js/api.js"></script>
+<script src="assets/js/util.js"></script>
+<script src="assets/js/drilldown.js"></script>
+<script src="assets/js/entry-common.js"></script>
+<script src="assets/js/shell.js?v=6"></script>
+<script src="assets/js/page-suppliers.js"></script>
+</body></html>

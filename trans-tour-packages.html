@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <title>Tour Packages Transactions — TRAVEL AGENCY</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
+  <link href="assets/css/design-system.css" rel="stylesheet" />
+  <link href="assets/css/app.css" rel="stylesheet" />
+  <link rel="icon" type="image/png" href="assets/img/favicon.png" />
+  <style>
+    .page-header-row { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 1.25rem; flex-wrap: wrap; }
+    .page-title-group h1 { font-size: 1.25rem; font-weight: 700; margin: 0; display: flex; align-items: center; gap: 0.5rem; }
+    .page-title-group .breadcrumb { font-size: 0.8rem; color: var(--color-text-muted); margin-bottom: 0.25rem; display: flex; gap: 0.4rem; align-items: center; }
+    
+    .filter-card {
+      background: var(--color-white); border: 1px solid var(--color-border);
+      border-radius: var(--radius-md); padding: 1rem 1.25rem; margin-bottom: 1.25rem;
+      display: flex; align-items: flex-end; gap: 1rem; flex-wrap: wrap;
+    }
+    .filter-group { display: flex; flex-direction: column; gap: 0.35rem; }
+    .filter-group label { font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--color-text-muted); letter-spacing: 0.03em; }
+    
+    .kpi-grid {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 1rem; margin-bottom: 1.25rem;
+    }
+    .kpi-card {
+      background: var(--color-white); border: 1px solid var(--color-border);
+      border-radius: var(--radius-md); padding: 1rem 1.25rem;
+    }
+    .kpi-card .kpi-label { font-size: 12px; font-weight: 600; color: var(--color-text-muted); text-transform: uppercase; margin-bottom: 0.35rem; }
+    .kpi-card .kpi-val { font-size: 1.4rem; font-weight: 800; font-family: var(--font-display); color: var(--color-text-dark); }
+    .kpi-card.highlight { border-left: 4px solid var(--color-primary); }
+    .kpi-card.accent-success { border-left: 4px solid var(--color-success); }
+    .kpi-card.accent-warning { border-left: 4px solid var(--color-warning); }
+    
+    .table-container {
+      background: var(--color-white); border: 1px solid var(--color-border);
+      border-radius: var(--radius-md); overflow: hidden;
+    }
+    .table-toolbar {
+      padding: 0.85rem 1.25rem; display: flex; align-items: center; justify-content: space-between;
+      border-bottom: 1px solid var(--color-border); gap: 1rem; flex-wrap: wrap; background: #FAFBFD;
+    }
+    .table-search { max-width: 300px; width: 100%; }
+    .table-custom { width: 100%; border-collapse: collapse; text-align: left; }
+    .table-custom th {
+      padding: 0.75rem 1rem; background: #F8FAFC; border-bottom: 1px solid var(--color-border);
+      font-size: 11.5px; font-weight: 700; text-transform: uppercase; color: var(--color-text-muted); letter-spacing: 0.03em;
+    }
+    .table-custom td {
+      padding: 0.75rem 1rem; border-bottom: 1px solid var(--color-border-subtle);
+      font-size: 13px; color: var(--color-text); vertical-align: middle;
+    }
+    .table-custom tbody tr:hover { background: #F8FAFC; }
+    .table-custom tbody tr:last-child td { border-bottom: none; }
+    .status-badge {
+      display: inline-flex; align-items: center; padding: 0.2rem 0.55rem;
+      border-radius: 4px; font-size: 11.5px; font-weight: 700; text-transform: uppercase;
+    }
+    .badge-issued, .badge-success { background: #DCFCE7; color: #166534; }
+    .badge-pending, .badge-warning { background: #FEF3C7; color: #92400E; }
+    .badge-cancelled, .badge-danger { background: #FEE2E2; color: #991B1B; }
+    .badge-rescheduled, .badge-info { background: #E0E7FF; color: #3730A3; }
+    
+    .amt { font-family: var(--font-mono); font-weight: 600; text-align: right; }
+    th.amt-header { text-align: right; }
+  </style>
+</head>
+<body>
+  <header class="app-topnav" id="shell-topnav"></header>
+  <div class="app-body">
+    <main class="app-main" style="max-width: 1440px; margin: 0 auto; padding: 1.5rem 2rem;">
+      <div class="page-header-row">
+        <div class="page-title-group">
+          <div class="breadcrumb">Transactions &rsaquo; Tour Packages</div>
+          <h1><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--color-primary)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg> Tour Packages Transactions</h1>
+        </div>
+        <div style="display:flex; gap:0.5rem;">
+          <button type="button" class="dom-nav-btn" onclick="window.print()">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9V2h12v7M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2m-12 0v4h12v-4"/></svg>
+            Print
+          </button>
+          <button type="button" class="dom-nav-btn btn-primary" onclick="exportCSV()">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4m14-7l-5 5-5-5m5 5V3"/></svg>
+            Export CSV
+          </button>
+        </div>
+      </div>
+
+      <div class="filter-card">
+        <div class="filter-group">
+          <label>From Date</label>
+          <input type="date" class="form-control-custom" id="filter-from" value="2026-09-01" style="height:34px; padding:0.25rem 0.6rem;" />
+        </div>
+        <div class="filter-group">
+          <label>To Date</label>
+          <input type="date" class="form-control-custom" id="filter-to" value="2026-09-21" style="height:34px; padding:0.25rem 0.6rem;" />
+        </div>
+        <div class="filter-group">
+          <label>Branch / Office</label>
+          <select class="form-control-custom" style="height:34px; min-width:140px;">
+            <option value="">All Branches</option>
+            <option value="DEL">Delhi HQ</option>
+            <option value="BOM">Mumbai Branch</option>
+            <option value="DXB">Dubai Branch</option>
+          </select>
+        </div>
+        <div class="filter-group">
+          <label>Status</label>
+          <select class="form-control-custom" style="height:34px; min-width:120px;">
+            <option value="">All Statuses</option>
+            <option value="ISSUED">Confirmed / Issued</option>
+            <option value="PENDING">Pending</option>
+            <option value="CANCELLED">Cancelled</option>
+          </select>
+        </div>
+        <button type="button" class="dom-nav-btn btn-primary" style="height:34px;" onclick="voyagerAlert('Filters applied successfully.')">Apply</button>
+      </div>
+
+      <div class="kpi-grid">
+  <div class="kpi-card highlight">
+    <div class="kpi-label">Active Tours</div>
+    <div class="kpi-val">16</div>
+  </div>
+  <div class="kpi-card accent-success">
+    <div class="kpi-label">Total Travelers</div>
+    <div class="kpi-val">68</div>
+  </div>
+  <div class="kpi-card standard">
+    <div class="kpi-label">Package Turnover</div>
+    <div class="kpi-val">₹18,40,000</div>
+  </div>
+  <div class="kpi-card accent-success">
+    <div class="kpi-label">Margin Realized</div>
+    <div class="kpi-val">₹2,45,000</div>
+  </div>
+</div>
+
+      <div class="table-container">
+        <div class="table-toolbar">
+          <div style="font-weight:700; font-size:0.92rem; color:var(--color-text-dark);">Holiday & Tour Packages Booking Register</div>
+          <input type="text" class="form-control-custom table-search" placeholder="Search records..." oninput="filterTable(this.value)" />
+        </div>
+        <div style="overflow-x:auto;">
+          <table class="table-custom" id="main-data-table">
+            <thead>
+              <tr>
+                  <th class="">Tour Code</th>
+  <th class="">Package Name</th>
+  <th class="">Destination</th>
+  <th class="">Lead Traveler</th>
+  <th class="">Pax Count</th>
+  <th class="">Duration</th>
+  <th class="">Departure Date</th>
+  <th class="amt-header">Package Cost</th>
+  <th class="amt-header">Advance Paid</th>
+  <th class="">Status</th>
+  <th class="">Action</th>
+
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+  <td class="">PKG-801</td>
+  <td class="">Dubai Extravaganza with Desert Safari</td>
+  <td class="">Dubai, UAE</td>
+  <td class="">Dr. Rajesh V & Family</td>
+  <td class="">4 Adults</td>
+  <td class="">5N / 6D</td>
+  <td class="">2026-10-02</td>
+  <td class="amt">₹2,95,000</td>
+  <td class="amt">₹1,50,000</td>
+  <td class=""><span class='status-badge badge-issued'>Vouchered</span></td>
+  <td class=""><button class='dom-nav-btn' style='padding:2px 8px; font-size:11px;'>Itinerary</button></td>
+</tr>
+<tr>
+  <td class="">PKG-802</td>
+  <td class="">Enchanting Bali Honeymoon & Beach</td>
+  <td class="">Bali, Indonesia</td>
+  <td class="">Gokul Kumar & Spouse</td>
+  <td class="">2 Adults</td>
+  <td class="">6N / 7D</td>
+  <td class="">2026-10-15</td>
+  <td class="amt">₹1,78,000</td>
+  <td class="amt">₹1,78,000 (Full)</td>
+  <td class=""><span class='status-badge badge-issued'>Confirmed</span></td>
+  <td class=""><button class='dom-nav-btn' style='padding:2px 8px; font-size:11px;'>Itinerary</button></td>
+</tr>
+<tr>
+  <td class="">PKG-803</td>
+  <td class="">Kashmir Paradise Tour</td>
+  <td class="">Srinagar & Gulmarg</td>
+  <td class="">R. Swaminathan Group</td>
+  <td class="">6 Adults</td>
+  <td class="">4N / 5D</td>
+  <td class="">2026-09-28</td>
+  <td class="amt">₹2,10,000</td>
+  <td class="amt">₹1,00,000</td>
+  <td class=""><span class='status-badge badge-pending'>Balance Due</span></td>
+  <td class=""><button class='dom-nav-btn' style='padding:2px 8px; font-size:11px;'>Invoice</button></td>
+</tr>
+<tr>
+  <td class="">PKG-804</td>
+  <td class="">Singapore & Sentosa Highlights</td>
+  <td class="">Singapore</td>
+  <td class="">S. Venkat & Family</td>
+  <td class="">3 Adults, 1 Child</td>
+  <td class="">4N / 5D</td>
+  <td class="">2026-10-20</td>
+  <td class="amt">₹2,40,000</td>
+  <td class="amt">₹80,000</td>
+  <td class=""><span class='status-badge badge-issued'>Booked</span></td>
+  <td class=""><button class='dom-nav-btn' style='padding:2px 8px; font-size:11px;'>Itinerary</button></td>
+</tr>
+
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script src="assets/js/api.js"></script>
+  <script src="assets/js/hardcode.js"></script>
+  <script src="assets/js/shell.js"></script>
+  <script>
+    document.addEventListener("DOMContentLoaded", () => {
+      VoyagerShell.init({ activeKey: "trans-tour-packages" });
+    });
+
+    function filterTable(query) {
+      const q = query.toLowerCase();
+      const rows = document.querySelectorAll("#main-data-table tbody tr");
+      rows.forEach(r => {
+        r.style.display = r.textContent.toLowerCase().includes(q) ? "" : "none";
+      });
+    }
+
+    function exportCSV() {
+      let csv = [];
+      const rows = document.querySelectorAll("#main-data-table tr");
+      rows.forEach(row => {
+        let cols = Array.from(row.querySelectorAll("th, td")).map(td => `"${td.innerText.replace(/"/g, '""')}"`);
+        csv.push(cols.join(","));
+      });
+      const blob = new Blob([csv.join("\n")], { type: "text/csv;charset=utf-8;" });
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = "trans-tour-packages.csv";
+      link.click();
+    }
+  </script>
+</body>
+</html>

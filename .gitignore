@@ -1,0 +1,8 @@
+backend/.venv_test/
+backend/.env
+backend/staticfiles/
+__pycache__/
+*.pyc
+*.pyo
+db.sqlite3
+.DS_Store

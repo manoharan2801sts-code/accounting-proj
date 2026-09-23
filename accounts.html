@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en-GB"><head>
+<meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+<meta http-equiv="Pragma" content="no-cache" />
+<meta http-equiv="Expires" content="0" />
+<title>Chart of Accounts — TRAVEL AGENCY</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
+<link href="assets/css/design-system.css" rel="stylesheet" />
+<link href="assets/css/app.css" rel="stylesheet" />
+<style>
+  .coa-row { display:flex; align-items:center; padding:0.42rem 0.85rem; font-size:0.82rem; border-bottom:1px solid var(--color-border-subtle); color:var(--color-text-body); transition:background var(--t-fast); }
+  .coa-row:last-child { border-bottom:none; }
+  .coa-row:hover:not(.group) { background:var(--color-bg-subtle); }
+  .coa-row.group { background:var(--color-bg-subtle); color:var(--color-text-dark); font-weight:700; border-top:1px solid var(--color-border-subtle); }
+  .coa-code { width:65px; font-family:var(--font-mono); font-size:0.75rem; color:var(--color-text-muted); }
+  .coa-name { flex:1; color:var(--color-text-dark); }
+  .coa-type { width:100px; }
+  .coa-balance { width:140px; text-align:right; font-variant-numeric:tabular-nums; font-weight:600; color:var(--color-text-dark); }
+  .coa-name a { color:var(--color-text-dark); text-decoration:none !important; }
+  .coa-name a:hover { color:var(--color-primary); text-decoration:none !important; }
+  .coa-actions { width:100px; text-align:right; display:flex; gap:0.3rem; justify-content:flex-end; }
+  .coa-actions a, .coa-actions button { border:1px solid var(--color-border); background:var(--color-white); color:var(--color-text-body); border-radius:var(--radius-xs); padding:0.2rem 0.45rem; font-size:0.72rem; cursor:pointer; text-decoration:none !important; transition:all var(--t-fast); }
+  .coa-actions a:hover, .coa-actions button:hover { border-color:var(--color-primary); color:var(--color-primary); background:var(--color-bg-tint); }
+</style>
+</head><body>
+<header class="app-topnav" id="shell-topnav"></header>
+<div class="app-body">
+  <aside class="app-sidebar" id="shell-sidebar"></aside>
+  <main class="app-main">
+    <h1 style="font-size:1.15rem;">Chart of Accounts</h1>
+    <p class="text-muted-custom">Hierarchical ledger structure — Asset, Liability, Income, Expense, Capital.</p>
+    <div style="display:flex; justify-content:space-between; align-items:center; gap:1rem; margin-top:0.8rem; flex-wrap:wrap;">
+      <div class="global-search" style="max-width:340px; flex:1;">
+        <span class="icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg></span>
+        <input type="text" id="coa-search" placeholder="Search by ledger name, code, or group…" />
+      </div>
+      <a href="ledger-entry.html" class="btn-brand" style="padding:0.5rem 1rem; font-size:0.85rem;">+ New Ledger</a>
+    </div>
+    <div class="card-glass" style="margin-top:0.7rem; overflow:hidden;">
+      <div class="coa-row group"><div class="coa-code">Code</div><div class="coa-name">Account</div><div class="coa-type">Type</div><div class="coa-balance">Balance</div><div style="width:110px; text-align:right;">Actions</div></div>
+      <div id="coa-body"></div>
+      <div id="coa-empty" class="text-muted-custom" style="display:none; padding:2rem; text-align:center;">No ledgers or groups match your search.</div>
+    </div>
+  </main>
+</div>
+<script src="assets/js/hardcode.js"></script>
+<script src="assets/js/mock-data.js"></script>
+<script src="assets/js/api.js"></script>
+<script src="assets/js/util.js"></script>
+<script src="assets/js/entry-common.js"></script>
+<script src="assets/js/drilldown.js"></script>
+<script src="assets/js/shell.js?v=6"></script>
+<script src="assets/js/page-accounts.js"></script>
+</body></html>

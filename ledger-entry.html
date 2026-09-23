@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en-GB"><head>
+<meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+<meta http-equiv="Pragma" content="no-cache" />
+<meta http-equiv="Expires" content="0" />
+<title>New Ledger — TRAVEL AGENCY</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
+<link href="assets/css/design-system.css" rel="stylesheet" />
+<link href="assets/css/app.css" rel="stylesheet" />
+</head><body>
+<header class="app-topnav" id="shell-topnav"></header>
+<div class="app-body">
+  <aside class="app-sidebar" id="shell-sidebar"></aside>
+  <main class="app-main" style="max-width:1400px;">
+    <h1 style="font-size:1.15rem;" id="page-title">New Ledger</h1>
+    <form id="ledger-form" style="margin-top:0.7rem;">
+
+      <div class="entry-section-title">Ledger detail</div>
+      <div class="entry-grid">
+        <div><label class="field-label">Ledger Name</label><input class="form-control-custom" id="name" required /><div class="field-hint" id="name_hint"></div></div>
+        <div><label class="field-label">Group</label><select class="form-control-custom" id="parent_id" required></select></div>
+        <div><label class="field-label">Opening Balance</label><input class="form-control-custom" type="number" id="opening_balance" value="0" min="0" step="0.01" /></div>
+        <div><label class="field-label">Opening Balance Type</label>
+          <select class="form-control-custom" id="opening_balance_type"><option value="Debit">Debit</option><option value="Credit">Credit</option></select>
+        </div>
+        <div id="agent-id-wrap" style="display:none;"><label class="field-label">Agent ID</label><input class="form-control-custom" id="agent_id" placeholder="e.g. AGT-001" /><div class="field-hint" id="agent_id_hint"></div></div>
+      </div>
+
+      <!-- BANK -->
+      <div id="section-bank" style="display:none;">
+        <div class="entry-section-title">Bank details</div>
+        <div class="entry-grid">
+          <div><label class="field-label">Bank A/c No.</label><input class="form-control-custom" id="bank_account_no" /></div>
+          <div><label class="field-label">Branch</label><input class="form-control-custom" id="bank_branch" /></div>
+          <div><label class="field-label">IFSC Code</label><input class="form-control-custom" id="ifsc_code" placeholder="e.g. HDFC0001234" /></div>
+          <div><label class="field-label">SWIFT Code</label><input class="form-control-custom" id="swift_code" placeholder="e.g. HDFCINBB" /></div>
+        </div>
+      </div>
+
+      <!-- DEBTOR — India -->
+      <div id="section-debtor-in" style="display:none;">
+        <div class="entry-section-title">Debtor detail — India</div>
+        <div class="entry-grid">
+          <div><label class="field-label">Alias Name</label><input class="form-control-custom" id="in_alias_name" /></div>
+          <div class="span-2"><label class="field-label">Address Line 1</label><input class="form-control-custom" id="in_address_line1" /></div>
+          <div class="span-2"><label class="field-label">Address Line 2</label><input class="form-control-custom" id="in_address_line2" /></div>
+          <div><label class="field-label">City</label><input class="form-control-custom" id="in_city" /></div>
+          <div><label class="field-label">Pincode</label><input class="form-control-custom" id="in_pincode" /></div>
+          <div><label class="field-label">State Name</label><select class="form-control-custom" id="in_state_name"></select></div>
+          <div><label class="field-label">GST No. <span id="gst-required-marker" style="color:var(--color-danger);">*</span></label><input class="form-control-custom" id="in_gst_no" placeholder="e.g. 33AAAAA0000A1Z5" /><div class="field-hint" id="in_gst_no_hint"></div></div>
+          <div><label class="field-label">GST Type</label>
+            <select class="form-control-custom" id="in_gst_type"><option>Regular</option><option>Composition</option><option>Unregistered</option><option>SEZ</option></select>
+          </div>
+          <div><label class="field-label">PAN No.</label><input class="form-control-custom" id="in_pan_no" placeholder="e.g. AAAAA0000A" /><div class="field-hint" id="in_pan_no_hint"></div></div>
+          <div><label class="field-label">Maintain Balance Bill-by-Bill</label><input class="form-control-custom" id="in_bill_wise" placeholder="Yes / No" /></div>
+          <div><label class="field-label">Place of Supply</label><select class="form-control-custom" id="in_place_of_supply"></select></div>
+        </div>
+      </div>
+
+      <!-- DEBTOR — UAE -->
+      <div id="section-debtor-ae" style="display:none;">
+        <div class="entry-section-title">Debtor detail — UAE</div>
+        <div class="entry-grid">
+          <div><label class="field-label">Alias Name</label><input class="form-control-custom" id="ae_alias_name" /></div>
+          <div class="span-2"><label class="field-label">Address Line 1</label><input class="form-control-custom" id="ae_address_line1" /></div>
+          <div class="span-2"><label class="field-label">Address Line 2</label><input class="form-control-custom" id="ae_address_line2" /></div>
+          <div><label class="field-label">Emirates</label>
+            <select class="form-control-custom" id="ae_emirate"><option>Dubai</option><option>Abu Dhabi</option><option>Sharjah</option><option>Ajman</option><option>Ras Al Khaimah</option><option>Fujairah</option><option>Umm Al Quwain</option></select>
+          </div>
+          <div><label class="field-label">PO Box No.</label><input class="form-control-custom" id="ae_po_box_no" /></div>
+          <div><label class="field-label">VAT TRN No.</label><input class="form-control-custom" id="ae_vat_trn_no" placeholder="e.g. 100234567800003" /></div>
+          <div><label class="field-label">Trade License No.</label><input class="form-control-custom" id="ae_trade_license_no" /></div>
+          <div><label class="field-label">Trade License Expiry</label><input class="form-control-custom" type="date" id="ae_trade_license_expiry" /></div>
+        </div>
+      </div>
+
+      <!-- CREDITOR -->
+      <div id="section-creditor" style="display:none;">
+        <div class="entry-section-title">Creditor detail</div>
+        <div class="entry-grid">
+          <div><label class="field-label">Creditor Type</label>
+            <select class="form-control-custom" id="creditor_type">
+              <option value="General Creditor">General Creditor</option>
+              <option value="Airline">Airline</option>
+              <option value="Consolidator">Consolidator</option>
+              <option value="Hotel">Hotel</option>
+              <option value="Visa">Visa</option>
+              <option value="Insurance">Insurance</option>
+              <option value="Rail">Rail</option>
+              <option value="Bus">Bus</option>
+              <option value="Package">Package</option>
+            </select>
+          </div>
+          <div><label class="field-label">Supplier Code</label><input class="form-control-custom" id="supplier_code" placeholder="e.g. SUP-001" /></div>
+          <div><label class="field-label">Office ID</label><input class="form-control-custom" id="creditor_office_id" placeholder="e.g. OFF-001" /></div>
+          <div><label class="field-label">Alias Name</label><input class="form-control-custom" id="cr_alias_name" /></div>
+          <div class="span-2"><label class="field-label">Address Line 1</label><input class="form-control-custom" id="cr_address_line1" /></div>
+          <div class="span-2"><label class="field-label">Address Line 2</label><input class="form-control-custom" id="cr_address_line2" /></div>
+          <div><label class="field-label">City</label><input class="form-control-custom" id="cr_city" /></div>
+          <div><label class="field-label">Pincode</label><input class="form-control-custom" id="cr_pincode" /></div>
+          <div><label class="field-label">State Name</label><input class="form-control-custom" id="cr_state_name" /></div>
+          <div><label class="field-label">GST No.</label><input class="form-control-custom" id="cr_gst_no" placeholder="e.g. 33AAAAA0000A1Z5" /><div class="field-hint" id="cr_gst_no_hint"></div></div>
+          <div><label class="field-label">GST Type</label>
+            <select class="form-control-custom" id="cr_gst_type"><option>Regular</option><option>Composition</option><option>Unregistered</option><option>SEZ</option></select>
+          </div>
+          <div><label class="field-label">PAN No.</label><input class="form-control-custom" id="cr_pan_no" placeholder="e.g. AAAAA0000A" /><div class="field-hint" id="cr_pan_no_hint"></div></div>
+          <div><label class="field-label">Place of Supply</label><select class="form-control-custom" id="cr_place_of_supply"></select></div>
+        </div>
+      </div>
+
+      <!-- INCOME / EXPENSE -->
+      <div id="section-taxledger" style="display:none;">
+        <div class="entry-section-title">Tax settings</div>
+        <div class="entry-grid">
+          <div><label class="field-label">GST Applicable</label>
+            <select class="form-control-custom" id="gst_applicable"><option value="false">No</option><option value="true">Yes</option></select>
+          </div>
+          <div><label class="field-label">GST Type</label>
+            <select class="form-control-custom" id="gst_tax_type"><option value="">—</option><option value="IGST">IGST</option><option value="CGST">CGST</option><option value="SGST">SGST</option></select>
+          </div>
+          <div><label class="field-label">GST Percentage</label><input class="form-control-custom" type="number" id="gst_percentage" value="0" min="0" step="0.01" /></div>
+          <div><label class="field-label">TDS Applicable</label>
+            <select class="form-control-custom" id="tds_applicable"><option value="false">No</option><option value="true">Yes</option></select>
+          </div>
+          <div><label class="field-label">TDS Percentage</label><input class="form-control-custom" type="number" id="tds_percentage" value="0" min="0" step="0.01" /></div>
+          <div><label class="field-label">HSN Code</label><input class="form-control-custom" id="hsn_code" placeholder="e.g. 9985" /></div>
+          <div><label class="field-label">TCS Applicable</label>
+            <select class="form-control-custom" id="tcs_applicable"><option value="false">No</option><option value="true">Yes</option></select>
+          </div>
+          <div><label class="field-label">TCS Percentage</label><input class="form-control-custom" type="number" id="tcs_percentage" value="0" min="0" step="0.01" /></div>
+        </div>
+      </div>
+
+      <!-- DUTIES & TAXES -->
+      <div id="section-duties-taxes" style="display:none;">
+        <div class="entry-section-title">Duty / tax detail</div>
+        <div class="entry-grid">
+          <div><label class="field-label">Tax Category</label>
+            <select class="form-control-custom" id="tax_category">
+              <option value="">Select...</option>
+              <option value="GST">GST</option>
+              <option value="TDS">TDS</option>
+              <option value="Others">Others</option>
+            </select>
+          </div>
+          <div id="tax-type-wrap" style="display:none;">
+            <label class="field-label">Type of Tax</label>
+            <select class="form-control-custom" id="tax_type">
+              <option value="IGST">IGST</option>
+              <option value="CGST">CGST</option>
+              <option value="SGST">SGST</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div class="entry-actions">
+        <a href="accounts.html" class="btn-outline-brand" id="cancel-link">Cancel</a>
+        <button type="submit" class="btn-brand" id="submit-btn">Save Ledger</button>
+      </div>
+    </form>
+  </main>
+</div>
+<script src="assets/js/hardcode.js"></script>
+<script src="assets/js/mock-data.js"></script>
+<script src="assets/js/api.js"></script>
+<script src="assets/js/util.js"></script>
+<script src="assets/js/shell.js?v=6"></script>
+<script src="assets/js/entry-common.js"></script>
+<script src="assets/js/page-ledger-entry.js"></script>
+</body></html>

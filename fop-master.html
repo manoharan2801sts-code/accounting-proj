@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="en-GB"><head>
+<meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+<meta http-equiv="Pragma" content="no-cache" />
+<meta http-equiv="Expires" content="0" />
+<title>FOP Master — TRAVEL AGENCY</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
+<link href="assets/css/design-system.css" rel="stylesheet" />
+<link href="assets/css/app.css" rel="stylesheet" />
+<style>
+
+  .fm-page-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    flex-wrap: wrap;
+    margin-bottom: 0.6rem;
+  }
+  .fm-page-head h1 {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    font-size: 1.15rem;
+    margin: 0;
+  }
+  #fm-type-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--color-primary);
+    background: var(--color-primary-tint);
+    border: 1px solid var(--color-primary);
+    padding: 0.3rem 0.65rem;
+    white-space: nowrap;
+  }
+
+  /* Separate Top Toolbar for Card Type Selection */
+  .fm-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1.5rem;
+    flex-wrap: wrap;
+    background: var(--color-white);
+    border: 1px solid var(--color-border);
+    padding: 0.75rem 1rem;
+    margin-bottom: 0.85rem;
+    box-shadow: var(--shadow-xs);
+  }
+  .fm-toolbar-field {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+  }
+  .fm-toolbar-field label {
+    font-size: 11.5px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    color: var(--color-text-muted);
+    text-transform: uppercase;
+    white-space: nowrap;
+    margin: 0;
+  }
+  .fm-toolbar-field select {
+    min-width: 220px;
+    height: 32px;
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  /* Master-Detail Split Layout */
+  .fm-split-layout {
+    display: grid;
+    grid-template-columns: 360px 1fr;
+    gap: 1.25rem;
+    align-items: stretch;
+  }
+  @media (max-width: 992px) {
+    .fm-split-layout {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  .fm-form-card, .fm-grid-card {
+    background: var(--color-white);
+    border: 1px solid var(--color-border);
+    box-shadow: var(--shadow-xs);
+    height: 480px; /* Equal fixed default height */
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* Left Form Card */
+  .fm-form-card {
+    display: flex;
+    flex-direction: column;
+  }
+  .fm-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.75rem 1rem;
+    background: var(--color-bg-subtle);
+    border-bottom: 1px solid var(--color-border);
+    flex-shrink: 0;
+  }
+  .fm-card-title {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--color-text-dark);
+  }
+  .fm-card-body {
+    padding: 1.15rem;
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    overflow-y: auto;
+  }
+
+  .fm-mode-badge {
+    font-size: 11px;
+    font-weight: 700;
+    padding: 2px 7px;
+    border-radius: 2px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+  .fm-mode-badge.new {
+    background: var(--color-primary-tint);
+    color: var(--color-primary);
+    border: 1px solid var(--color-primary-light);
+  }
+  .fm-mode-badge.edit {
+    background: #FEF3C7;
+    color: #B45309;
+    border: 1px solid #FCD34D;
+  }
+
+  .fm-form-group {
+    margin-bottom: 1.05rem;
+  }
+  .fm-form-group:last-of-type {
+    margin-bottom: 0;
+  }
+  .fm-form-group label {
+    display: block;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    color: var(--color-text-muted);
+    margin-bottom: 0.35rem;
+    text-transform: uppercase;
+  }
+  .fm-req {
+    color: var(--color-danger);
+  }
+
+  .fm-form-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    margin-top: auto;
+    padding-top: 1rem;
+    border-top: 1px solid var(--color-border-subtle);
+    flex-shrink: 0;
+  }
+  .fm-btn-save, .fm-btn-cancel {
+    border-radius: 2px !important;
+    font-size: 12.5px;
+    padding: 0.45rem 1.15rem;
+    height: 34px;
+    font-weight: 600;
+  }
+
+  /* Status Toggle */
+  .fm-toggle { position: relative; display: inline-block; width: 38px; height: 20px; flex-shrink: 0; }
+  .fm-toggle input { opacity: 0; width: 0; height: 0; }
+  .fm-toggle .fm-toggle-track {
+    position: absolute; inset: 0; background: var(--color-border-hover); cursor: pointer; transition: background var(--t-fast);
+  }
+  .fm-toggle .fm-toggle-track::before {
+    content: ""; position: absolute; width: 14px; height: 14px; left: 3px; top: 3px;
+    background: #FFFFFF; transition: transform var(--t-fast);
+  }
+  .fm-toggle input:checked + .fm-toggle-track { background: var(--color-primary); }
+  .fm-toggle input:checked + .fm-toggle-track::before { transform: translateX(18px); }
+  .fm-status-row { display: flex; align-items: center; gap: 0.55rem; font-size: 12.5px; font-weight: 600; }
+
+  /* Client Card Masking */
+  .fm-card-masked { display: flex; align-items: center; gap: 4px; }
+  .fm-card-mask-prefix {
+    font-family: var(--font-mono); letter-spacing: 1px; font-size: 13px;
+    color: var(--color-text-muted); user-select: none; white-space: nowrap;
+    background: var(--color-bg-subtle); border: 1px solid var(--color-border);
+    padding: 0.35rem 0.55rem; height: 32px; display: inline-flex; align-items: center;
+  }
+  .fm-card-last4 { width: 72px !important; max-width: 72px !important; text-align: center; height: 32px !important; }
+
+  /* Right Side Grid Card */
+  .fm-grid-card {
+    display: flex;
+    flex-direction: column;
+    height: 480px; /* Equal fixed default height */
+  }
+  .fm-header-left {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .fm-count-pill {
+    font-size: 11.5px;
+    font-weight: 700;
+    color: var(--color-primary);
+    background: var(--color-primary-tint);
+    border: 1px solid var(--color-primary-light);
+    padding: 2px 8px;
+    border-radius: 2px;
+  }
+
+  /* Internal Scrollable Table Container */
+  .fm-grid-scrollable {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: auto;
+  }
+
+  .fm-table {
+    width: 100%;
+    table-layout: fixed;
+    border-collapse: collapse;
+  }
+  .fm-table thead th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    text-align: left;
+    padding: 0.65rem 0.85rem;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--color-text-muted);
+    background: #F1F5F9;
+    border-bottom: 1px solid var(--color-border);
+  }
+  .fm-table tbody td {
+    padding: 0.55rem 0.85rem;
+    border-bottom: 1px solid var(--color-border-subtle);
+    font-size: 12.5px;
+    vertical-align: middle;
+  }
+  .fm-grid-row {
+    transition: background var(--t-fast);
+    cursor: pointer;
+  }
+  .fm-grid-row:hover {
+    background: #F8FAFC;
+  }
+  .fm-grid-row.is-selected {
+    background: #EBF3FC !important;
+  }
+  .fm-grid-row.is-selected td:first-child {
+    border-left: 3px solid var(--color-primary);
+  }
+
+  /* Minus Delete Button in Action column */
+  .fm-btn-minus {
+    width: 24px;
+    height: 24px;
+    border-radius: 3px;
+    border: 1px solid #FECACA;
+    background: #FEF2F2;
+    color: #DC2626;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    font-size: 16px;
+    font-weight: 700;
+    line-height: 1;
+    transition: all var(--t-fast);
+    padding: 0;
+  }
+  .fm-btn-minus:hover {
+    background: #DC2626;
+    color: #FFFFFF;
+    border-color: #DC2626;
+    transform: scale(1.08);
+  }
+
+  .fm-badge-status {
+    display: inline-block;
+    padding: 2px 7px;
+    font-size: 11px;
+    font-weight: 600;
+    border-radius: 2px;
+  }
+  .fm-badge-status.active {
+    background: #ECFDF5;
+    color: #059669;
+    border: 1px solid #A7F3D0;
+  }
+  .fm-badge-status.inactive {
+    background: #F1F5F9;
+    color: #64748B;
+    border: 1px solid #CBD5E1;
+  }
+</style>
+</head><body>
+<header class="app-topnav" id="shell-topnav"></header>
+<div class="app-body" style="height: calc(100vh - var(--topnav-height) - var(--menubar-height, 0px)); overflow-y: auto;">
+  <main class="app-main" style="max-width:1400px; margin-left:auto !important; margin-right:auto; padding-left:40px; padding-right:40px;">
+    
+    <div class="fm-page-head">
+      <div>
+        <h1>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="2" y="5" width="20" height="14" rx="1"/><path d="M2 10h20"/></svg>
+          FOP Master
+        </h1>
+      </div>
+      <div id="fm-type-badge" style="display:none;">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
+        <span>Card Type: <span id="fm-type-badge-name"></span></span>
+      </div>
+    </div>
+
+    <!-- Top Toolbar: Separate Dropdown for Card Type -->
+    <div class="fm-toolbar">
+      <div class="fm-toolbar-field">
+        <label for="fm-card-type-select">Card Type</label>
+        <select class="form-control-custom" id="fm-card-type-select" style="border-radius:0;">
+          <option value="">Select...</option>
+          <option value="Own Card">Own Card</option>
+          <option value="Client Card">Client Card</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- Master-Detail Split Layout -->
+    <div class="fm-split-layout" id="fm-split-layout" style="display:none;">
+      
+      <!-- Left: Form Entry & Edit Card -->
+      <div class="fm-form-card">
+        <div class="fm-card-header">
+          <div class="fm-card-title">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+            <span id="fm-form-title">Add Own Card</span>
+          </div>
+          <span id="fm-mode-badge" class="fm-mode-badge new">New</span>
+        </div>
+
+        <div class="fm-card-body">
+          <!-- Card Number - same masked format (12 X's + last 4 digits) for
+               both Own Card and Client Card -->
+          <div class="fm-form-group">
+            <label for="fm-card-last4">Card Number <span class="fm-req">*</span></label>
+            <div id="fm-client-card-wrap" class="fm-card-masked">
+              <span class="fm-card-mask-prefix">XXXXXXXXXXXX</span>
+              <input type="text" id="fm-card-last4" class="form-control-custom fm-card-last4" style="border-radius:0;" maxlength="4" inputmode="numeric" placeholder="1234" autocomplete="off" />
+            </div>
+          </div>
+
+          <!-- Bank Name (shown for both Own Card and Client Card) -->
+          <div class="fm-form-group" id="fm-bank-name-group" style="display:none;">
+            <label for="fm-bank-name">Bank Name <span class="fm-req">*</span></label>
+            <input type="text" id="fm-bank-name" class="form-control-custom" style="border-radius:0;" placeholder="Bank Name (e.g. HDFC Bank)" autocomplete="off" />
+          </div>
+
+          <!-- Card Master (Ledger) - Own Card only -->
+          <div class="fm-form-group" id="fm-card-master-group">
+            <label for="fm-card-master">Card Master <span class="fm-req">*</span></label>
+            <select id="fm-card-master" class="form-control-custom" style="border-radius:0;">
+              <option value="">- Select Ledger from Master -</option>
+            </select>
+          </div>
+
+          <!-- Status Toggle -->
+          <div class="fm-form-group">
+            <label>Status</label>
+            <div class="fm-status-row">
+              <label class="fm-toggle">
+                <input type="checkbox" id="fm-status-toggle" checked />
+                <span class="fm-toggle-track"></span>
+              </label>
+              <span id="fm-status-label" class="fm-status-label">Active</span>
+            </div>
+          </div>
+
+          <!-- Form Action Buttons -->
+          <div class="fm-form-actions">
+            <button type="button" id="fm-btn-save" class="btn btn-primary fm-btn-save">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
+              <span id="fm-btn-save-text">Save</span>
+            </button>
+            <button type="button" id="fm-btn-cancel" class="btn btn-outline-brand fm-btn-cancel">
+              Cancel
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right: Data Grid Card -->
+      <div class="fm-grid-card">
+        <div class="fm-card-header">
+          <div class="fm-header-left">
+            <div class="fm-card-title">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="2" y="5" width="20" height="14" rx="1"/><path d="M2 10h20"/></svg>
+              <span id="fm-grid-title">Own Cards List</span>
+            </div>
+            <span id="fm-cards-count" class="fm-count-pill">0 Cards</span>
+          </div>
+        </div>
+
+        <!-- Scrollable Grid with Sticky Headers -->
+        <div class="fm-grid-scrollable">
+          <table class="fm-table">
+            <thead id="fm-thead">
+              <!-- Dynamically rendered based on Card Type -->
+            </thead>
+            <tbody id="fm-tbody">
+              <!-- Populated by JS -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </div>
+  </main>
+</div>
+<script src="assets/js/hardcode.js"></script>
+<script src="assets/js/mock-data.js"></script>
+<script src="assets/js/api.js"></script>
+<script src="assets/js/util.js"></script>
+<script src="assets/js/entry-common.js"></script>
+<script src="assets/js/shell.js?v=6"></script>
+<script src="assets/js/page-fop-master.js?v=4"></script>
+</body></html>

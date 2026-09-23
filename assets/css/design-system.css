@@ -1,0 +1,364 @@
+/* ==========================================================================
+   Voyager ERP — Design System
+   Clean, Professional Accounting ERP — Deep Slate Navy + Rich Spruce Green / Teal
+   Includes Complete Light & Dark Theme Support
+   ========================================================================== */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+:root {
+  /* Brand Identity — TeSePr Book official palette */
+  --color-navy: #3B6DB5;
+  --color-navy-dark: #2F5994;
+  --color-navy-surface: #1E293B;
+
+  --color-blue: #3B6DB5;
+  --color-blue-dark: #2F5994;
+  --color-blue-light: #4D81CD;
+  --color-blue-glow: rgba(59, 109, 181, 0.28);
+
+  --color-gold: #16B5D9;
+  --color-gold-dark: #0FA0C1;
+  --color-gold-light: #38CCDD;
+  --color-gold-glow: rgba(22, 181, 217, 0.28);
+
+  --color-teal: #4DC0AD;
+  --color-teal-dark: #3AA392;
+  --color-teal-light: #6ED3C3;
+
+  --color-green: #4DC0AD;
+  --color-green-dark: #3AA392;
+  --color-green-light: #6ED3C3;
+  --color-green-glow: rgba(77, 192, 173, 0.25);
+
+  /* Backward-compatible primary aliases */
+  --color-primary: #3B6DB5;
+  --color-primary-dark: #2F5994;
+  --color-primary-light: #4D81CD;
+  --color-primary-tint: #F0F4FC;
+  --color-primary-tint-strong: #E2ECFA;
+  --color-secondary: #16B5D9;
+  --color-secondary-dark: #0FA0C1;
+  --color-secondary-light: #3C95D2;
+  --color-secondary-tint: #ECFEFF;
+  --color-secondary-tint-strong: #CFFAFE;
+
+  /* Surfaces & Backgrounds (Light Theme Defaults) */
+  --color-bg-canvas: #F8FAFC;
+  --color-bg-subtle: #F1F5F9;
+  --color-bg-tint: #F0F4FC;
+  --color-bg-tint-strong: #E2ECFA;
+  --color-white: #FFFFFF;
+  --color-border: #E2E8F0;
+  --color-border-subtle: #EDF2F7;
+  --color-border-hover: #CBD5E1;
+
+  /* Typography Colors */
+  --color-text-dark: #0F172A;
+  --color-text-body: #334155;
+  --color-text-muted: #475569;
+  --color-text-faint: #94A3B8;
+
+  /* Semantic Alerts */
+  --color-success: #10B981;
+  --color-success-bg: #ECFDF5;
+  --color-success-border: #A7F3D0;
+  --color-warning: #F59E0B;
+  --color-warning-bg: #FFFBEB;
+  --color-warning-border: #FDE68A;
+  --color-danger: #DC2626;
+  --color-danger-bg: #FEF2F2;
+  --color-danger-border: #FECACA;
+  --color-info: #16B5D9;
+  --color-info-bg: #ECFEFF;
+  --color-info-border: #CFFAFE;
+
+  /* Gradients */
+  --gradient-brand: linear-gradient(135deg, #0F172A 0%, #3B6DB5 100%);
+  --gradient-teal: #4DC0AD;
+  --gradient-green: linear-gradient(135deg, #6ED3C3 0%, #4DC0AD 100%);
+  --gradient-card: linear-gradient(180deg, #FFFFFF 0%, #F8FAFC 100%);
+
+  /* Typography - sans-serif throughout, with tabular (lining) figures so
+     numbers line up column-for-column in every table/ledger grid */
+  --font-display: 'Segoe UI', 'Plus Jakarta Sans', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-body: 'Segoe UI', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: 'Segoe UI', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+
+  /* Multi-layer Elevations */
+  --shadow-xs: 0 1px 2px rgba(15, 23, 42, 0.04);
+  --shadow-sm: 0 2px 6px rgba(15, 23, 42, 0.04), 0 1px 2px rgba(15, 23, 42, 0.02);
+  --shadow-md: 0 4px 16px rgba(15, 23, 42, 0.06), 0 1px 3px rgba(15, 23, 42, 0.03);
+  --shadow-lg: 0 12px 32px rgba(15, 23, 42, 0.08), 0 3px 8px rgba(15, 23, 42, 0.04);
+  --shadow-primary: 0 4px 14px rgba(59, 109, 181, 0.28);
+
+  /* Rounded Radii */
+  --radius-xs: 4px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-pill: 9999px;
+
+  --topnav-height: 64px;
+  --menubar-height: 44px;
+  --sidebar-width: 240px;
+  --sidebar-width-collapsed: 68px;
+
+  --ease: cubic-bezier(.4, 0, .2, 1);
+  --t-fast: 150ms var(--ease);
+  --t-med: 220ms var(--ease);
+}
+
+/* ==========================================================================
+   DARK THEME VARIABLES ([data-theme="dark"])
+   ========================================================================== */
+[data-theme="dark"] {
+  --color-bg-canvas: #0B0F19;
+  --color-bg-subtle: #151D2C;
+  --color-bg-tint: rgba(59, 109, 181, 0.18);
+  --color-bg-tint-strong: rgba(77, 129, 205, 0.28);
+  --color-white: #162032;
+  --color-border: #28364C;
+  --color-border-subtle: #1E2B3E;
+  --color-border-hover: #3E516D;
+
+  --color-text-dark: #F8FAFC;
+  --color-text-body: #CBD5E1;
+  --color-text-muted: #94A3B8;
+  --color-text-faint: #64748B;
+
+  --color-primary: #4D81CD;
+  --color-primary-dark: #3B6DB5;
+  --color-primary-light: #6E9AD9;
+  --color-primary-tint: rgba(77, 129, 205, 0.15);
+  --color-primary-tint-strong: rgba(77, 129, 205, 0.25);
+
+  --color-secondary: #38CCDD;
+  --color-secondary-dark: #16B5D9;
+  --color-secondary-light: #6EDCE8;
+
+  --color-teal: #6ED3C3;
+  --color-teal-dark: #4DC0AD;
+  --color-teal-light: #8FDECF;
+
+  --color-navy: #4D81CD;
+  --color-navy-dark: #3B6DB5;
+  --color-navy-surface: #1E293B;
+
+  --color-success-bg: rgba(16, 185, 129, 0.16);
+  --color-success-border: rgba(16, 185, 129, 0.35);
+  --color-warning-bg: rgba(245, 158, 11, 0.16);
+  --color-warning-border: rgba(245, 158, 11, 0.35);
+  --color-danger-bg: rgba(220, 38, 38, 0.16);
+  --color-danger-border: rgba(220, 38, 38, 0.35);
+  --color-info-bg: rgba(22, 181, 217, 0.16);
+  --color-info-border: rgba(22, 181, 217, 0.35);
+
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-sm: 0 2px 6px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.6);
+}
+
+* { box-sizing: border-box; }
+html { min-height: 100%; }
+body { min-height: 100%; overflow-x: hidden; overflow-y: auto; }
+
+/* Form controls and buttons don't inherit the page font by default in most
+   browsers (they use the OS UI font instead) - without this reset, every
+   <button>, <select>, <input> and dropdown menu built from them renders in
+   a different typeface than headings/labels even though both use the same
+   --font-body/--font-display variables. */
+button, input, select, textarea, optgroup, option {
+  font-family: inherit;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-body);
+  background: var(--color-bg-canvas);
+  color: var(--color-text-body);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  transition: background-color var(--t-med), color var(--t-med);
+  font-variant-numeric: tabular-nums lining-nums;
+  font-feature-settings: "tnum" 1, "lnum" 1;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-display);
+  color: var(--color-text-dark);
+  margin: 0 0 0.4em;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+/* Typography scale */
+.page-title  { font-size: 19px; font-weight: 700; letter-spacing: -0.02em; color: var(--color-text-dark); }
+.section-title { font-size: 17px; font-weight: 700; letter-spacing: -0.01em; color: var(--color-text-dark); }
+.kpi-number  { font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--color-text-dark); }
+.total-large { font-size: 30px; font-weight: 800; font-variant-numeric: tabular-nums; color: var(--color-text-dark); letter-spacing: -0.02em; }
+label, .field-label { font-size: 11.5px; font-weight: 600; color: var(--color-text-body); }
+
+.text-muted-custom { color: var(--color-text-muted) !important; }
+.figure, .tabular-nums { font-variant-numeric: tabular-nums; font-feature-settings: "tnum"; }
+
+a {
+  color: var(--color-primary);
+  text-decoration: none !important;
+  transition: color var(--t-fast);
+}
+a:hover, a:focus, a:active {
+  color: var(--color-primary-light);
+  text-decoration: none !important;
+}
+
+a:focus-visible, button:focus-visible, input:focus-visible,
+select:focus-visible, [tabindex]:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
+}
+
+/* --------------------------------------------------------------------------
+   Buttons
+   -------------------------------------------------------------------------- */
+.btn-brand, .btn-primary {
+  background: var(--color-primary);
+  border: 1px solid var(--color-primary);
+  color: #fff !important;
+  font-weight: 600;
+  font-size: 13.5px;
+  padding: 0.55rem 1.25rem;
+  border-radius: var(--radius-sm);
+  box-shadow: 0 3px 10px rgba(59, 109, 181, 0.22);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  cursor: pointer;
+  text-decoration: none !important;
+  transition: all var(--t-fast);
+}
+.btn-brand:hover, .btn-primary:hover {
+  background: var(--color-primary-dark);
+  border-color: var(--color-primary-dark);
+  color: #fff !important;
+  box-shadow: 0 5px 16px rgba(59, 109, 181, 0.32);
+  transform: translateY(-1px);
+  text-decoration: none !important;
+}
+.btn-brand:active, .btn-primary:active { transform: translateY(0); box-shadow: var(--shadow-xs); }
+.btn-brand:disabled, .btn-primary:disabled { opacity: 0.55; cursor: not-allowed; transform: none; box-shadow: none; }
+
+.btn-outline-brand {
+  background: var(--color-white);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-body);
+  font-weight: 600;
+  font-size: 13.5px;
+  padding: 0.52rem 1.15rem;
+  border-radius: var(--radius-sm);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  cursor: pointer;
+  box-shadow: var(--shadow-xs);
+  transition: all var(--t-fast);
+}
+.btn-outline-brand:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+  background: var(--color-bg-tint);
+  text-decoration: none !important;
+  transform: translateY(-1px);
+}
+
+.btn-danger-custom {
+  background: var(--color-danger);
+  border: 1px solid var(--color-danger);
+  color: #fff !important;
+  font-weight: 600;
+  font-size: 13.5px;
+  padding: 0.55rem 1.15rem;
+  border-radius: var(--radius-sm);
+  box-shadow: 0 2px 8px rgba(220, 38, 38, 0.22);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  cursor: pointer;
+  transition: all var(--t-fast);
+}
+.btn-danger-custom:hover { background: #B91C1C; border-color: #B91C1C; transform: translateY(-1px); }
+
+/* --------------------------------------------------------------------------
+   Panels / Cards
+   -------------------------------------------------------------------------- */
+.card-glass, .card-flat {
+  background: var(--color-white);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+  transition: box-shadow var(--t-med), border-color var(--t-med), background-color var(--t-med);
+}
+.card-glass:hover, .card-flat:hover {
+  box-shadow: var(--shadow-md);
+  border-color: var(--color-border-hover);
+}
+.card-pad { padding: 16px; }
+
+/* --------------------------------------------------------------------------
+   Status Pills & Badges
+   -------------------------------------------------------------------------- */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  padding: 0.25rem 0.65rem;
+  border-radius: var(--radius-pill);
+  text-decoration: none !important;
+}
+.pill-success { background: var(--color-success-bg); color: var(--color-success); border: 1px solid var(--color-success-border); }
+.pill-warning { background: var(--color-warning-bg); color: #F59E0B; border: 1px solid var(--color-warning-border); }
+.pill-danger  { background: var(--color-danger-bg);  color: var(--color-danger); border: 1px solid var(--color-danger-border); }
+.pill-neutral { background: var(--color-bg-tint);    color: var(--color-primary); border: 1px solid var(--color-info-border); }
+.pill-info    { background: var(--color-info-bg);    color: var(--color-info); border: 1px solid var(--color-info-border); }
+
+/* --------------------------------------------------------------------------
+   Form Controls
+   -------------------------------------------------------------------------- */
+.field-label {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--color-text-body);
+  margin-bottom: 0.2rem;
+  display: block;
+}
+.form-control-custom {
+  width: 100%;
+  height: 34px;
+  padding: 0.35rem 0.65rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border);
+  background: var(--color-white);
+  color: var(--color-text-dark);
+  font-family: var(--font-body);
+  font-size: 12.5px;
+  transition: border-color var(--t-fast), box-shadow var(--t-fast), background-color var(--t-fast);
+}
+.form-control-custom:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px rgba(59, 109, 181, 0.2);
+}
+.form-control-custom::placeholder { color: var(--color-text-faint); }

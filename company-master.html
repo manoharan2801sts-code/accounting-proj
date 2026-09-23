@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en-GB"><head>
+<meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+<meta http-equiv="Pragma" content="no-cache" />
+<meta http-equiv="Expires" content="0" />
+<title>Company Master — TRAVEL AGENCY</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
+<link href="assets/css/design-system.css" rel="stylesheet" />
+<link href="assets/css/app.css" rel="stylesheet" />
+<link rel="icon" type="image/png" href="assets/img/favicon.png" />
+<style>
+  /* Page-scoped tokens (cmx- prefix) - a self-contained ERP master-screen
+     look, independent of the shared .dom-* classes so its sizing/color
+     overrides can't leak into ticket-entry.html or any other page that
+     also uses .dom-form-grid. */
+  :root {
+    --cmx-blue: #3F6FB5;
+    --cmx-text: #183B70;
+    --cmx-border: #D8E1EC;
+    --cmx-bg: #F5F7FA;
+    --cmx-white: #FFFFFF;
+  }
+
+  .cmx-main { background: var(--cmx-bg); }
+
+  .cmx-main {
+    max-width: 100%; padding: 14px 24px; box-sizing: border-box;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    height: calc(100vh - var(--topnav-height) - var(--menubar-height, 0px)); overflow: hidden;
+  }
+
+  .cmx-card {
+    width: 100%; max-width: 1180px; background: var(--cmx-white);
+    border: 1px solid var(--cmx-border); border-radius: 4px;
+    box-shadow: 0 2px 10px rgba(24, 59, 112, 0.08);
+    display: flex; flex-direction: column; overflow: hidden;
+    max-height: 100%;
+  }
+
+  .cmx-titlebar {
+    background: var(--cmx-blue); color: var(--cmx-white);
+    font-size: 13px; font-weight: 700; padding: 9px 16px; flex-shrink: 0;
+  }
+
+  .cmx-body { padding: 12px 18px 6px; overflow: hidden; box-sizing: border-box; }
+
+  /* Desktop: 3 columns. Tightened row/column gaps keep the whole form
+     short enough to fit 100vh without scrolling. */
+  .cmx-grid {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px 20px; box-sizing: border-box;
+  }
+  .cmx-field { display: flex; flex-direction: column; gap: 3px; box-sizing: border-box; }
+  .cmx-field.cmx-full { grid-column: 1 / -1; }
+
+  .cmx-field label {
+    font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
+    color: var(--cmx-text); white-space: nowrap;
+  }
+  .cmx-field label .cmx-req { color: #D64545; margin-left: 2px; }
+
+  .cmx-field input, .cmx-field select {
+    height: 30px; font-size: 12.5px; padding: 0 8px; width: 100%; box-sizing: border-box;
+    border: 1px solid var(--cmx-border); border-radius: 3px; background: var(--cmx-white); color: #0F172A;
+  }
+  .cmx-field input:disabled {
+    background: var(--cmx-bg); color: #7C8AA0; border-color: var(--cmx-border);
+  }
+  .cmx-field input:focus, .cmx-field select:focus {
+    outline: none; border-color: var(--cmx-blue); box-shadow: 0 0 0 2px rgba(63, 111, 181, 0.15);
+  }
+
+  .cmx-field-hint {
+    font-size: 9.5px; color: #D64545; min-height: 11px; margin-top: -1px;
+  }
+  .cmx-field-hint.ok { color: #1B8A5A; }
+
+  .cmx-textarea-wrap { position: relative; }
+  .cmx-textarea {
+    resize: none; height: 44px; width: 100%; box-sizing: border-box;
+    border: 1px solid var(--cmx-border); border-radius: 3px; background: var(--cmx-white);
+    padding: 6px 8px; font-size: 12.5px; font-family: var(--font-body, inherit);
+    color: #0F172A; outline: none;
+  }
+  .cmx-textarea:focus { border-color: var(--cmx-blue); box-shadow: 0 0 0 2px rgba(63, 111, 181, 0.15); }
+  .cmx-textarea.cmx-short { height: 34px; }
+
+  .cmx-actions {
+    display: flex; justify-content: flex-end; gap: 8px; padding: 10px 18px; flex-shrink: 0;
+    border-top: 1px solid var(--cmx-border); background: var(--cmx-bg);
+  }
+  .cmx-btn {
+    height: 32px; padding: 0 18px; font-size: 12.5px; font-weight: 600; border-radius: 3px;
+    border: 1px solid var(--cmx-border); background: var(--cmx-white); color: var(--cmx-text); cursor: pointer;
+    box-sizing: border-box;
+  }
+  .cmx-btn:hover { background: #EEF2F7; }
+  .cmx-btn.cmx-primary { background: var(--cmx-blue); border-color: var(--cmx-blue); color: var(--cmx-white); }
+  .cmx-btn.cmx-primary:hover { background: #355F9E; }
+
+  /* Responsive: tablet = 2 columns, mobile = 1 column. */
+  @media (max-width: 1024px) {
+    .cmx-grid { grid-template-columns: repeat(2, 1fr); }
+  }
+  @media (max-width: 640px) {
+    .app-body { height: auto !important; overflow: visible !important; }
+    .cmx-main { height: auto; overflow: visible; padding: 10px; }
+    .cmx-card { max-height: none; }
+    .cmx-body { overflow: visible; }
+    .cmx-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head><body>
+<header class="app-topnav" id="shell-topnav"></header>
+<div class="app-body" style="height: calc(100vh - var(--topnav-height) - var(--menubar-height, 0px)); overflow: hidden;">
+  <main class="app-main cmx-main">
+    <div class="cmx-card">
+      <div class="cmx-titlebar">Company Master</div>
+
+      <div class="cmx-body">
+        <div class="cmx-grid">
+          <div class="cmx-field">
+            <label>Company Name<span class="cmx-req">*</span></label>
+            <input type="text" id="cm-company-name" placeholder="Company Name" autocomplete="off" />
+          </div>
+          <div class="cmx-field">
+            <label>Mailing Name</label>
+            <input type="text" id="cm-mailing-name" placeholder="Mailing Name" autocomplete="off" />
+          </div>
+          <div class="cmx-field">
+            <label>Country</label>
+            <input type="text" id="cm-country" value="India" disabled />
+          </div>
+
+          <div class="cmx-field">
+            <label>State</label>
+            <select id="cm-state"><option value="">Select...</option></select>
+          </div>
+          <div class="cmx-field">
+            <label>Pincode</label>
+            <input type="text" id="cm-pincode" inputmode="numeric" maxlength="6" placeholder="600001" autocomplete="off" />
+            <div class="cmx-field-hint" id="cm-pincode-hint"></div>
+          </div>
+          <div class="cmx-field">
+            <label>Telephone No.</label>
+            <input type="text" id="cm-telephone" inputmode="numeric" placeholder="Telephone No." autocomplete="off" />
+          </div>
+
+          <div class="cmx-field">
+            <label>Mobile No.</label>
+            <input type="text" id="cm-mobile" inputmode="numeric" maxlength="10" placeholder="Mobile No." autocomplete="off" />
+            <div class="cmx-field-hint" id="cm-mobile-hint"></div>
+          </div>
+          <div class="cmx-field">
+            <label>Email</label>
+            <input type="email" id="cm-email" placeholder="name@company.com" autocomplete="off" />
+            <div class="cmx-field-hint" id="cm-email-hint"></div>
+          </div>
+          <div class="cmx-field">
+            <label>Financial Year From</label>
+            <input type="date" id="cm-fy-from" />
+          </div>
+
+          <div class="cmx-field">
+            <label>Books Beginning From</label>
+            <input type="date" id="cm-books-from" />
+          </div>
+          <div class="cmx-field">
+            <label>GST Reg Type</label>
+            <select id="cm-gst-reg-type">
+              <option value="Regular">Regular</option>
+              <option value="Composition">Composition</option>
+              <option value="Unregistered">Unregistered</option>
+              <option value="SEZ">SEZ</option>
+            </select>
+          </div>
+          <div class="cmx-field">
+            <label>GST No.</label>
+            <input type="text" id="cm-gst-no" placeholder="33AAAAA0000A1Z5" autocomplete="off" style="text-transform:uppercase;" />
+            <div class="cmx-field-hint" id="cm-gst-no-hint"></div>
+          </div>
+
+          <div class="cmx-field">
+            <label>CIN Number</label>
+            <input type="text" id="cm-cin" placeholder="CIN Number" autocomplete="off" style="text-transform:uppercase;" />
+          </div>
+          <div class="cmx-field">
+            <label>TAN Number</label>
+            <input type="text" id="cm-tan" placeholder="TAN Number" autocomplete="off" style="text-transform:uppercase;" />
+          </div>
+          <div class="cmx-field">
+            <label>HSN/SAC</label>
+            <input type="text" id="cm-hsn-sac" placeholder="HSN/SAC" autocomplete="off" />
+          </div>
+
+          <div class="cmx-field cmx-full">
+            <label>Address</label>
+            <div class="cmx-textarea-wrap">
+              <textarea class="cmx-textarea" id="cm-address" placeholder="Registered / correspondence address..."></textarea>
+            </div>
+          </div>
+          <div class="cmx-field cmx-full">
+            <label>Description</label>
+            <div class="cmx-textarea-wrap">
+              <textarea class="cmx-textarea cmx-short" id="cm-description" placeholder="Notes about this company..."></textarea>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="cmx-actions">
+        <button type="button" class="cmx-btn" id="cm-new-btn">+ New</button>
+        <button type="button" class="cmx-btn cmx-primary" id="cm-save-btn">Save</button>
+      </div>
+    </div>
+  </main>
+</div>
+<script src="assets/js/hardcode.js"></script>
+<script src="assets/js/mock-data.js"></script>
+<script src="assets/js/api.js"></script>
+<script src="assets/js/util.js"></script>
+<script src="assets/js/entry-common.js"></script>
+<script src="assets/js/shell.js?v=6"></script>
+<script src="assets/js/page-company-master.js"></script>
+</body></html>

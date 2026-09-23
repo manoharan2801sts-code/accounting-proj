@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="en-GB"><head>
+<meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+<meta http-equiv="Pragma" content="no-cache" />
+<meta http-equiv="Expires" content="0" />
+<title>PG Master — TRAVEL AGENCY</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
+<link href="assets/css/design-system.css" rel="stylesheet" />
+<link href="assets/css/app.css" rel="stylesheet" />
+<style>
+
+  .pg-page-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    flex-wrap: wrap;
+    margin-bottom: 0.85rem;
+  }
+  .pg-page-head h1 {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    font-size: 1.15rem;
+    margin: 0;
+  }
+
+  /* Master-Detail Split Layout */
+  .pg-split-layout {
+    display: grid;
+    grid-template-columns: 360px 1fr;
+    gap: 1.25rem;
+    align-items: stretch;
+  }
+  @media (max-width: 992px) {
+    .pg-split-layout {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  .pg-form-card, .pg-grid-card {
+    background: var(--color-white);
+    border: 1px solid var(--color-border);
+    box-shadow: var(--shadow-xs);
+    height: 480px; /* Equal fixed default height matching FOP Master */
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* Left Form Card */
+  .pg-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.75rem 1rem;
+    background: var(--color-bg-subtle);
+    border-bottom: 1px solid var(--color-border);
+    flex-shrink: 0;
+  }
+  .pg-card-title {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--color-text-dark);
+  }
+  .pg-card-body {
+    padding: 1.15rem;
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    overflow-y: auto;
+  }
+
+  .pg-mode-badge {
+    font-size: 11px;
+    font-weight: 700;
+    padding: 2px 7px;
+    border-radius: 2px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+  .pg-mode-badge.new {
+    background: var(--color-primary-tint);
+    color: var(--color-primary);
+    border: 1px solid var(--color-primary-light);
+  }
+  .pg-mode-badge.edit {
+    background: #FEF3C7;
+    color: #B45309;
+    border: 1px solid #FCD34D;
+  }
+
+  .pg-form-group {
+    margin-bottom: 1.05rem;
+  }
+  .pg-form-group:last-of-type {
+    margin-bottom: 0;
+  }
+  .pg-form-group label {
+    display: block;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    color: var(--color-text-muted);
+    margin-bottom: 0.35rem;
+    text-transform: uppercase;
+  }
+  .pg-req {
+    color: var(--color-danger);
+  }
+
+  .pg-form-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    margin-top: auto;
+    padding-top: 1rem;
+    border-top: 1px solid var(--color-border-subtle);
+    flex-shrink: 0;
+  }
+  .pg-btn-save, .pg-btn-cancel {
+    border-radius: 2px !important;
+    font-size: 12.5px;
+    padding: 0.45rem 1.15rem;
+    height: 34px;
+    font-weight: 600;
+  }
+
+  /* Status Toggle */
+  .pg-toggle { position: relative; display: inline-block; width: 38px; height: 20px; flex-shrink: 0; }
+  .pg-toggle input { opacity: 0; width: 0; height: 0; }
+  .pg-toggle .pg-toggle-track {
+    position: absolute; inset: 0; background: var(--color-border-hover); cursor: pointer; transition: background var(--t-fast);
+  }
+  .pg-toggle .pg-toggle-track::before {
+    content: ""; position: absolute; width: 14px; height: 14px; left: 3px; top: 3px;
+    background: #FFFFFF; transition: transform var(--t-fast);
+  }
+  .pg-toggle input:checked + .pg-toggle-track { background: var(--color-primary); }
+  .pg-toggle input:checked + .pg-toggle-track::before { transform: translateX(18px); }
+  .pg-status-row { display: flex; align-items: center; gap: 0.55rem; font-size: 12.5px; font-weight: 600; }
+
+  /* Right Side Grid Card */
+  .pg-header-left {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .pg-count-pill {
+    font-size: 11.5px;
+    font-weight: 700;
+    color: var(--color-primary);
+    background: var(--color-primary-tint);
+    border: 1px solid var(--color-primary-light);
+    padding: 2px 8px;
+    border-radius: 2px;
+  }
+
+  /* Internal Scrollable Table Container */
+  .pg-grid-scrollable {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: auto;
+  }
+
+  .pg-table {
+    width: 100%;
+    table-layout: fixed;
+    border-collapse: collapse;
+  }
+  .pg-table thead th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    text-align: left;
+    padding: 0.65rem 0.85rem;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--color-text-muted);
+    background: #F1F5F9;
+    border-bottom: 1px solid var(--color-border);
+  }
+  .pg-table tbody td {
+    padding: 0.55rem 0.85rem;
+    border-bottom: 1px solid var(--color-border-subtle);
+    font-size: 12.5px;
+    vertical-align: middle;
+  }
+  .pg-grid-row {
+    transition: background var(--t-fast);
+    cursor: pointer;
+  }
+  .pg-grid-row:hover {
+    background: #F8FAFC;
+  }
+  .pg-grid-row.is-selected {
+    background: #EBF3FC !important;
+  }
+  .pg-grid-row.is-selected td:first-child {
+    border-left: 3px solid var(--color-primary);
+  }
+
+  /* Minus Delete Button in Action column */
+  .pg-btn-minus {
+    width: 24px;
+    height: 24px;
+    border-radius: 3px;
+    border: 1px solid #FECACA;
+    background: #FEF2F2;
+    color: #DC2626;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    font-size: 16px;
+    font-weight: 700;
+    line-height: 1;
+    transition: all var(--t-fast);
+    padding: 0;
+  }
+  .pg-btn-minus:hover {
+    background: #DC2626;
+    color: #FFFFFF;
+    border-color: #DC2626;
+    transform: scale(1.08);
+  }
+
+  .pg-badge-status {
+    display: inline-block;
+    padding: 2px 7px;
+    font-size: 11px;
+    font-weight: 600;
+    border-radius: 2px;
+  }
+  .pg-badge-status.active {
+    background: #ECFDF5;
+    color: #059669;
+    border: 1px solid #A7F3D0;
+  }
+  .pg-badge-status.inactive {
+    background: #F1F5F9;
+    color: #64748B;
+    border: 1px solid #CBD5E1;
+  }
+</style>
+</head><body>
+<header class="app-topnav" id="shell-topnav"></header>
+<div class="app-body" style="height: calc(100vh - var(--topnav-height) - var(--menubar-height, 0px)); overflow-y: auto;">
+  <main class="app-main" style="max-width:1400px; margin-left:auto !important; margin-right:auto; padding-left:40px; padding-right:40px;">
+    
+    <div class="pg-page-head">
+      <div>
+        <h1>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="vertical-align:-4px; margin-right:6px;"><rect x="2" y="5" width="20" height="14" rx="1"/><path d="M2 10h20"/></svg>
+          PG Master
+        </h1>
+      </div>
+    </div>
+
+    <!-- Master-Detail Split Layout -->
+    <div class="pg-split-layout">
+      
+      <!-- Left: Form Entry & Edit Card -->
+      <div class="pg-form-card">
+        <div class="pg-card-header">
+          <div class="pg-card-title">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+            <span id="pg-form-title">Add Payment Gateway</span>
+          </div>
+          <span id="pg-mode-badge" class="pg-mode-badge new">New</span>
+        </div>
+
+        <div class="pg-card-body">
+          <!-- Gateway Name -->
+          <div class="pg-form-group">
+            <label for="pg-form-name">Payment Gateway Name <span class="pg-req">*</span></label>
+            <input type="text" id="pg-form-name" class="form-control-custom" style="border-radius:0;" placeholder="e.g. Razorpay / CCAvenue" autocomplete="off" />
+          </div>
+
+          <!-- PG Master (Ledger) -->
+          <div class="pg-form-group">
+            <label for="pg-form-master">PG Master <span class="pg-req">*</span></label>
+            <select id="pg-form-master" class="form-control-custom" style="border-radius:0;">
+              <option value="">- Select Ledger from Master -</option>
+            </select>
+          </div>
+
+          <!-- PG Charges Master (Ledger) -->
+          <div class="pg-form-group">
+            <label for="pg-form-charges-master">PG Charges Master</label>
+            <select id="pg-form-charges-master" class="form-control-custom" style="border-radius:0;">
+              <option value="">- Select Ledger from Master -</option>
+            </select>
+          </div>
+
+          <!-- Status Toggle -->
+          <div class="pg-form-group">
+            <label>Status</label>
+            <div class="pg-status-row">
+              <label class="pg-toggle">
+                <input type="checkbox" id="pg-form-status" checked />
+                <span class="pg-toggle-track"></span>
+              </label>
+              <span id="pg-form-status-label" class="pg-status-label">Active</span>
+            </div>
+          </div>
+
+          <!-- Form Action Buttons -->
+          <div class="pg-form-actions">
+            <button type="button" id="pg-btn-save" class="btn btn-primary pg-btn-save">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
+              <span id="pg-btn-save-text">Save</span>
+            </button>
+            <button type="button" id="pg-btn-cancel" class="btn btn-outline-brand pg-btn-cancel">
+              Cancel
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right: Data Grid Card -->
+      <div class="pg-grid-card">
+        <div class="pg-card-header">
+          <div class="pg-header-left">
+            <div class="pg-card-title">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="2" y="5" width="20" height="14" rx="1"/><path d="M2 10h20"/></svg>
+              <span id="pg-grid-title">Payment Gateways List</span>
+            </div>
+            <span id="pg-gateways-count" class="pg-count-pill">0 Gateways</span>
+          </div>
+        </div>
+
+        <!-- Scrollable Grid with Sticky Headers -->
+        <div class="pg-grid-scrollable">
+          <table class="pg-table">
+            <thead>
+              <tr>
+                <th style="width:38px; text-align:center;">#</th>
+                <th style="width:200px;">Payment Gateway Name</th>
+                <th>PG Master</th>
+                <th>PG Charges Master</th>
+                <th style="width:90px; text-align:center;">Status</th>
+                <th style="width:65px; text-align:center;">Action</th>
+              </tr>
+            </thead>
+            <tbody id="pg-tbody">
+              <!-- Populated by JS -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </div>
+  </main>
+</div>
+<script src="assets/js/hardcode.js"></script>
+<script src="assets/js/mock-data.js"></script>
+<script src="assets/js/api.js"></script>
+<script src="assets/js/util.js"></script>
+<script src="assets/js/entry-common.js"></script>
+<script src="assets/js/shell.js?v=6"></script>
+<script src="assets/js/page-pg-master.js"></script>
+</body></html>
