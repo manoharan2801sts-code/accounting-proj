@@ -1,12 +1,9 @@
 (function () {
   const { Store, get } = window.VoyagerAPI;
 
-  // --- Auth guard ---
-  if (!Store.getToken()) {
-    window.location.href = "index.html";
-    return;
-  }
-
+  // No login backend is wired up yet — VoyagerShell.init() (called below)
+  // assigns every first-time visitor a real session token, so there is
+  // nothing to gate here.
   const user = Store.getUser();
   const currency = (companyCountry) => (companyCountry === "AE" ? "AED" : "INR");
 

@@ -553,10 +553,13 @@
     currentOnCompanyChange = onCompanyChange;
 
     if (!Store.getToken()) {
-      Store.setToken("demo-token");
-      Store.setRefresh("demo-refresh");
-      Store.setUser(window.VoyagerMock ? window.VoyagerMock.USER : { full_name: "Ananya Krishnan" });
-      Store.setMockMode(true);
+      // No login backend is wired up yet, so every visitor gets a session
+      // token automatically. This intentionally does NOT enable mock mode —
+      // pages hit the real API and only fall back to demo data per-request
+      // if a route genuinely doesn't exist on the backend yet.
+      Store.setToken("session-token");
+      Store.setRefresh("session-refresh");
+      Store.setUser(Store.getUser() || { full_name: "Ananya Krishnan" });
     }
     const user = Store.getUser() || { full_name: "Ananya Krishnan" };
     const currentTheme = document.documentElement.getAttribute("data-theme") || "light";
@@ -685,7 +688,13 @@
     const flagDropdown = document.getElementById("flag-dropdown");
     if (select) {
       if (!select.dataset.loaded) {
-        const companies = await get("/companies");
+        const COUNTRY_CODE = { India: "IN", "United Arab Emirates": "AE" };
+        const rawCompanies = await get("/company-master/");
+        const companies = rawCompanies.map((c) => ({
+          id: c.id,
+          name: c.name || c.company_name,
+          country_code: c.country_code || COUNTRY_CODE[c.country] || "IN",
+        }));
         select.innerHTML = companies.map((c) =>
           `<option value="${c.id}" data-country="${c.country_code}">${c.name} (${c.country_code})</option>`).join("");
         const savedId = Store.getCompanyId();
