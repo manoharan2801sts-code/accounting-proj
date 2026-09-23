@@ -468,7 +468,7 @@ JOIN (
     SELECT 'Direct Expenses', '5200', 'EXPENSE', 'Expenses' UNION ALL
     SELECT 'Indirect Expenses', '5300', 'EXPENSE', 'Expenses'
 ) AS v
-JOIN `Ledger_Groups` p ON p.company_id = c.company_id AND p.name = v.parent_name AND p.parent_id IS NULL;
+JOIN `Ledger_Groups` p ON p.company_id = c.company_id AND p.name = v.parent_name COLLATE utf8mb4_unicode_ci AND p.parent_id IS NULL;
 
 -- ----------------------------------------------------------------------------
 -- S4. Ledger_Groups — Level 3 Sub-Groups
@@ -489,7 +489,7 @@ JOIN (
     SELECT 'Stock-in-hand', '1350', 'ASSET', 'Current Assets' UNION ALL
     SELECT 'Tax Assets', '1360', 'ASSET', 'Current Assets'
 ) AS v
-JOIN `Ledger_Groups` p ON p.company_id = c.company_id AND p.name = v.parent_name AND p.parent_id IS NOT NULL;
+JOIN `Ledger_Groups` p ON p.company_id = c.company_id AND p.name = v.parent_name COLLATE utf8mb4_unicode_ci AND p.parent_id IS NOT NULL;
 
 -- ----------------------------------------------------------------------------
 -- S5. Ledgers — Base System Leaf Accounts
@@ -525,7 +525,7 @@ JOIN (
     SELECT 'Emirates', 'Sundry Creditors', 'LIABILITY', 'SUPPLIER' UNION ALL
     SELECT 'ABC Travels', 'Sundry Debtors', 'ASSET', 'CUSTOMER'
 ) AS v
-JOIN `Ledger_Groups` g ON g.company_id = c.company_id AND g.name = v.group_name;
+JOIN `Ledger_Groups` g ON g.company_id = c.company_id AND g.name = v.group_name COLLATE utf8mb4_unicode_ci;
 
 -- ----------------------------------------------------------------------------
 -- S6. MasterMapping — Airline Product Mappings
@@ -560,7 +560,7 @@ JOIN (
     SELECT 'GST and TDS', 5, 'Input CGST A/c', 'CGST A/c' UNION ALL
     SELECT 'GST and TDS', 5, 'Input SGST A/c', 'SGST A/c'
 ) AS m
-JOIN `Ledgers` l ON l.company_id = c.company_id AND l.name = m.match_ledger_name;
+JOIN `Ledgers` l ON l.company_id = c.company_id AND l.name = m.match_ledger_name COLLATE utf8mb4_unicode_ci;
 
 -- ----------------------------------------------------------------------------
 -- S7. FOPMaster — Form of Payment Cards Registry
@@ -577,7 +577,7 @@ JOIN (
     SELECT 'Own Card', '3782-8224-6310-0050', 'Amex', 'Amex Business Card' UNION ALL
     SELECT 'Client Card', '4000-1234-5678-9010', 'Client Bank', 'HDFC Corporate Credit Card'
 ) AS card
-JOIN `Ledgers` l ON l.company_id = c.company_id AND l.name = card.match_ledger_name;
+JOIN `Ledgers` l ON l.company_id = c.company_id AND l.name = card.match_ledger_name COLLATE utf8mb4_unicode_ci;
 
 -- ----------------------------------------------------------------------------
 -- S8. PGMaster — Payment Gateways Registry
@@ -592,7 +592,7 @@ JOIN (
     SELECT 'Stripe', 'Axis Corporate Card' UNION ALL
     SELECT 'CCAvenue', 'SBI Commercial Card'
 ) AS pg
-JOIN `Ledgers` l ON l.company_id = c.company_id AND l.name = pg.match_ledger_name;
+JOIN `Ledgers` l ON l.company_id = c.company_id AND l.name = pg.match_ledger_name COLLATE utf8mb4_unicode_ci;
 
 -- ----------------------------------------------------------------------------
 -- S9. SupplierCommissionRules — Supplier Master Commission Rules
