@@ -1134,9 +1134,15 @@ def _compute_jv_lines(ticket, lines, mapping_cache=None):
                 output_gst_emitted = True
                 combined_gst = round(role_amounts["gst"] + role_amounts["supp_gst"], 2)
                 if same_state:
-                    half = round(combined_gst / 2, 2)
-                    accounts.append(mapped_row("Credit", "GST and TDS", "Output CGST A/c", half))
-                    accounts.append(mapped_row("Credit", "GST and TDS", "Output SGST A/c", half))
+                    # Split combined_gst into two rows that always sum back to
+                    # it exactly - rounding both halves independently
+                    # (combined_gst / 2, twice) drops or adds a stray paisa
+                    # whenever combined_gst has an odd number of paisa,
+                    # unbalancing the whole JV by 0.01.
+                    cgst = round(combined_gst / 2, 2)
+                    sgst = round(combined_gst - cgst, 2)
+                    accounts.append(mapped_row("Credit", "GST and TDS", "Output CGST A/c", cgst))
+                    accounts.append(mapped_row("Credit", "GST and TDS", "Output SGST A/c", sgst))
                 else:
                     accounts.append(mapped_row("Credit", "GST and TDS", "Output IGST A/c", combined_gst))
             continue
