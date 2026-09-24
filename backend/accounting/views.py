@@ -346,7 +346,7 @@ def suppliers_list(request):
     return JsonResponse(data, safe=False)
 
 
-def _fop_payment_lines(ticket, lines):
+def _fop_payment_lines(ticket, lines, fop_cache=None):
     """
     Mirrors the FOP Payment tab in the JV modal (renderFopPaymentTab in
     page-ticket-entry.js) — only posts when the ticket's FOP != Cash
@@ -377,7 +377,10 @@ def _fop_payment_lines(ticket, lines):
     result = [(g["ledger"].id, g["amount"], 0) for g in supplier_groups.values() if g["ledger"]]
     if fop == "Own Card":
         card_number = lines[0].card_number or ""
-        card = FOPMaster.objects.filter(company_id=ticket.company_id, card_number=card_number).first()
+        if fop_cache is not None:
+            card = fop_cache.get(card_number)
+        else:
+            card = FOPMaster.objects.filter(company_id=ticket.company_id, card_number=card_number).first()
         if card:
             result.append((card.card_master_ledger_id, 0, total_amount))
     else:  # Client Card
@@ -385,7 +388,7 @@ def _fop_payment_lines(ticket, lines):
     return result
 
 
-def _pg_receipt_lines(ticket, lines):
+def _pg_receipt_lines(ticket, lines, pg_cache=None):
     """
     Mirrors the PG Receipts tab (renderPgReceiptsTab) — only posts when
     Payment Mode = "Payment Gateway". Credits Customer the full Total
@@ -413,10 +416,13 @@ def _pg_receipt_lines(ticket, lines):
     if customer_total == 0:
         return []
     result = [(ticket.customer_id, 0, customer_total)]
-    gateway = PGMaster.objects.filter(company_id=ticket.company_id, gateway_name=ticket.payment_gateway_ref or "").select_related("pg_charges_master_ledger").first()
+    if pg_cache is not None:
+        gateway = pg_cache.get(ticket.payment_gateway_ref or "")
+    else:
+        gateway = PGMaster.objects.filter(company_id=ticket.company_id, gateway_name=ticket.payment_gateway_ref or "").select_related("pg_charges_master_ledger").first()
     if gateway:
         pg_charges_total = round(sum(float(l.pg_charges or 0) for l in lines), 2)
-        pg_gst_pct = float(gateway.pg_charges_master_ledger.gst_percentage) if gateway.pg_charges_master_ledger_id else 0.0
+        pg_gst_pct = float(gateway.pg_charges_master_ledger.gst_percentage) if gateway.pg_charges_master_ledger_id and gateway.pg_charges_master_ledger else 0.0
         pg_gst_total = round(pg_charges_total * pg_gst_pct / 100, 2)
 
         gateway_debit_total = round(customer_total + pg_charges_total + pg_gst_total, 2)
@@ -434,26 +440,6 @@ def _ledger_balance_deltas(company_id, as_of_date=None):
     Net Debit-minus-Credit per ledger_id, accumulated from every posted
     transaction for this company — used to turn each Ledger's static
     opening_balance into its real, current running balance.
-
-    Sources, since ticket-driven JournalVoucher rows never persist their
-    per-ledger breakdown (only the aggregate total_debit/total_credit —
-    see ticket_create above), only manual Vouchers do:
-      1. Manual Vouchers (voucher-entry.html, its own separate table from
-         JournalVoucher) — lines_json already has a resolved
-         ledger_id/debit/credit per line, just sum those.
-      2. Every Ticket's Journal Voucher tab lines, recomputed live via
-         _compute_jv_lines (same formula the JV tab itself uses).
-      3. Every Ticket's FOP Payment tab lines (_fop_payment_lines).
-      4. Every Ticket's PG Receipts tab lines (_pg_receipt_lines).
-    All three JV-modal tabs post real ledger movements, not just the
-    first one — a ticket paid via Payment Gateway settles its Customer
-    debit right back out through the PG Receipts tab, for example, so
-    skipping tabs 3/4 overstates ledgers that are actually fully settled.
-
-    as_of_date (optional, "YYYY-MM-DD"): only include transactions dated
-    on or before it — a period-end "closing balance" snapshot (Cash &
-    Bank Book) instead of the always-current balance Chart of Accounts
-    and the Ledger report want.
     """
     deltas = {}
 
@@ -469,19 +455,33 @@ def _ledger_balance_deltas(company_id, as_of_date=None):
         for line in (v.lines_json or []):
             add(line.get("ledger_id"), line.get("debit"), line.get("credit"))
 
-    tickets = Ticket.objects.filter(company_id=company_id).select_related("customer", "supplier").prefetch_related("lines")
+    # Bulk pre-cache mappings, cards, gateways so we never hit DB in the ticket loop
+    mapping_cache = {
+        (m.masters_category, m.field_name): (m.ledger_id, m.ledger.alias_name or m.ledger.name if m.ledger else "")
+        for m in MasterMapping.objects.filter(company_id=company_id, product_type="Airline").select_related("ledger")
+    }
+    fop_cache = {
+        card.card_number: card
+        for card in FOPMaster.objects.filter(company_id=company_id)
+    }
+    pg_cache = {
+        pg.gateway_name: pg
+        for pg in PGMaster.objects.filter(company_id=company_id).select_related("pg_charges_master_ledger")
+    }
+
+    tickets = Ticket.objects.filter(company_id=company_id).select_related("customer", "supplier").prefetch_related("lines__supplier")
     if as_of_date:
         tickets = tickets.filter(invoice_date__lte=as_of_date)
     for t in tickets:
-        lines = list(t.lines.select_related("supplier").all())
+        lines = list(t.lines.all())
         if not lines:
             continue
-        accounts, _narration, _total_debit, _total_credit = _compute_jv_lines(t, lines)
+        accounts, _narration, _total_debit, _total_credit = _compute_jv_lines(t, lines, mapping_cache=mapping_cache)
         for a in accounts:
             add(a.get("ledger_id"), a.get("debit"), a.get("credit"))
-        for ledger_id, debit, credit in _fop_payment_lines(t, lines):
+        for ledger_id, debit, credit in _fop_payment_lines(t, lines, fop_cache=fop_cache):
             add(ledger_id, debit, credit)
-        for ledger_id, debit, credit in _pg_receipt_lines(t, lines):
+        for ledger_id, debit, credit in _pg_receipt_lines(t, lines, pg_cache=pg_cache):
             add(ledger_id, debit, credit)
 
     return deltas
@@ -490,13 +490,7 @@ def _ledger_balance_deltas(company_id, as_of_date=None):
 def accounts_list(request):
     """
     GET /api/accounts/?company_id=1
-    Groups + ledgers merged into ONE flat list, in the exact shape
-    page-accounts.js already expects (id, code, name, account_type,
-    is_group, parent_id, balance) — so the Chart of Accounts tree
-    renders new DB ledgers under their real group with zero frontend
-    rendering changes. Balance is opening_balance plus every posted
-    transaction's net Debit-minus-Credit against that ledger (see
-    _ledger_balance_deltas) — not just the static opening balance.
+    Groups + ledgers merged into ONE flat list.
     """
     if request.method != "GET":
         return HttpResponseNotAllowed(["GET"])
@@ -514,16 +508,22 @@ def accounts_list(request):
             "balance": None,
         })
     deltas = _ledger_balance_deltas(company_id)
+    used_ids = set(Ticket.objects.filter(company_id=company_id).values_list("customer_id", flat=True)) | \
+               set(Ticket.objects.filter(company_id=company_id).values_list("supplier_id", flat=True))
+
     for l in Ledger.objects.filter(company_id=company_id).select_related("group"):
-        in_use = Ticket.objects.filter(customer_id=l.id).exists() or Ticket.objects.filter(supplier_id=l.id).exists()
+        in_use = l.id in used_ids
+        group_code = l.group.code if l.group else ""
+        parent_id = f"g{l.group_id}" if l.group_id else None
         rows.append({
-            "id": l.id, "code": l.group.code or "", "name": l.name,
+            "id": l.id, "code": group_code or "", "name": l.name,
             "account_type": l.account_type, "is_group": False,
-            "parent_id": f"g{l.group_id}",
+            "parent_id": parent_id,
             "balance": float(l.signed_balance) + deltas.get(l.id, 0.0),
             "is_in_use": in_use,
         })
     return JsonResponse(rows, safe=False)
+
 
 
 def ledger_book_report(request):
@@ -854,7 +854,7 @@ def _next_voucher_no(model, company_id, category):
     return f"{prefix}-{count + 1}"
 
 
-def _compute_jv_lines(ticket, lines):
+def _compute_jv_lines(ticket, lines, mapping_cache=None):
     """
     Shared by both the auto-post-on-save (ticket_create) and the JV tab's
     read-only display (ticket_jv_preview) — one formula, used in exactly
@@ -938,7 +938,8 @@ def _compute_jv_lines(ticket, lines):
     # Cache Master Mapping lookups — several JV_LINE_MAP entries share the
     # same (masters_category, field_name) (e.g. the two "Markup A/c" Credit
     # lines), no need to hit the DB twice for the same one.
-    mapping_cache = {}
+    if mapping_cache is None:
+        mapping_cache = {}
     def mapped_ledger(masters_category, field_name):
         key = (masters_category, field_name)
         if key not in mapping_cache:
@@ -947,10 +948,12 @@ def _compute_jv_lines(ticket, lines):
                 masters_category=masters_category, field_name=field_name,
             ).select_related("ledger").first()
             mapping_cache[key] = (
-                (m.ledger_id, m.ledger.alias_name or m.ledger.name) if m
+                (m.ledger_id, m.ledger.alias_name or m.ledger.name) if m and m.ledger
+                else (m.ledger_id, field_name) if m
                 else (None, f"{field_name} (not mapped in Master Mapping)")
             )
         return mapping_cache[key]
+
 
     def mapped_row(dr_cr, masters_category, field_name, amount):
         debit, credit = dr_cr_amounts(dr_cr, amount)
