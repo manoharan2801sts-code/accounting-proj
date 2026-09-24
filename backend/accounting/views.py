@@ -400,10 +400,12 @@ def _pg_receipt_lines(ticket, lines, pg_cache=None):
 
     The gateway ledger's own Debit = Total Billed (compute_total(), same
     figure as the Customer credit — includes Sup Markup/Sup Addl
-    Markup/Sup Service Fee/Sup Addl Service Fee/Sup GST Amount) + PG
-    Charges + PG GST (PG Charges * that gateway's PG Charges Master
-    ledger's own GST% — display-only elsewhere, not part of GST Amount/
-    computed_gst, but included here in the gateway's own Debit total).
+    Markup/Sup Service Fee/Sup Addl Service Fee/Sup GST Amount) + PG GST
+    (PG Charges * that gateway's PG Charges Master ledger's own GST% —
+    display-only elsewhere, not part of GST Amount/computed_gst, but
+    included here in the gateway's own Debit total). PG Charges itself is
+    NOT added here - it gets its own balanced pair just below instead, so
+    adding it to this gross debit too would double-count it.
 
     PG Charges are then ALSO debited against that gateway's PG Master ->
     PG Charges Master ledger and credited back against the gateway
@@ -428,7 +430,14 @@ def _pg_receipt_lines(ticket, lines, pg_cache=None):
         pg_gst_pct = float(gateway.pg_charges_master_ledger.gst_percentage) if gateway.pg_charges_master_ledger_id and gateway.pg_charges_master_ledger else 0.0
         pg_gst_total = round(pg_charges_total * pg_gst_pct / 100, 2)
 
-        gateway_debit_total = round(customer_total + pg_charges_total + pg_gst_total, 2)
+        # NOT + pg_charges_total here - that amount already gets its own
+        # balanced pair below (debit the PG Charges Master ledger, credit
+        # this same gateway ledger back down by it), so folding it into
+        # the gateway's own gross debit too would double-count it: the
+        # gateway would be debited pg_charges_total twice (once here, once
+        # implicitly via the pair) against only one matching credit,
+        # unbalancing the whole JV by exactly pg_charges_total.
+        gateway_debit_total = round(customer_total + pg_gst_total, 2)
         result.append((gateway.payment_master_ledger_id, gateway_debit_total, 0))
         if pg_charges_total and gateway.pg_charges_master_ledger_id:
             result.append((gateway.pg_charges_master_ledger_id, pg_charges_total, 0))
