@@ -158,6 +158,14 @@ class Ledger(models.Model):
     maintain_balance_bill_wise = models.CharField(max_length=5, null=True, blank=True)  # "Yes" / "No"
     place_of_supply = models.CharField(max_length=60, null=True, blank=True)
 
+    # Credit terms — customer_type/credit_limit are Debtor-only (Customers
+    # page); credit_days applies to either side (Customers AND Suppliers
+    # pages both show it).
+    CUSTOMER_TYPE_CHOICES = [("RETAIL", "Retail"), ("CORPORATE", "Corporate"), ("AGENT", "Agent")]
+    customer_type = models.CharField(max_length=20, choices=CUSTOMER_TYPE_CHOICES, null=True, blank=True)
+    credit_limit = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True, default=0)
+    credit_days = models.IntegerField(null=True, blank=True, default=0)
+
     # Debtor — India
     city = models.CharField(max_length=60, null=True, blank=True)
     pincode = models.CharField(max_length=10, null=True, blank=True)

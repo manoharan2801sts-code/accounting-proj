@@ -182,6 +182,7 @@ LEDGER_FIELDS = [
     "bank_account_no", "bank_branch", "ifsc_code", "swift_code",
     "alias_name", "address_line1", "address_line2", "agent_id",
     "maintain_balance_bill_wise", "place_of_supply",
+    "customer_type", "credit_limit", "credit_days",
     "city", "pincode", "state_name", "gst_no", "gst_registration_type", "pan_no",
     "emirate", "po_box_no", "vat_trn_no", "trade_license_no", "trade_license_expiry",
     "creditor_type", "supplier_code", "office_id",
@@ -438,6 +439,73 @@ def suppliers_list(request):
     suppliers = Ledger.objects.filter(company_id=company_id, ledger_category="CREDITOR")
     data = [
         {"id": s.id, "name": s.name, "code": s.supplier_code or f"LED-{s.id:05d}", "office_id": s.office_id}
+        for s in suppliers
+    ]
+    return JsonResponse(data, safe=False)
+
+
+def parties_customers_list(request):
+    """
+    GET /api/parties/customers/?company_id=1
+    customers.html's own list view (credit limit/utilisation, running
+    outstanding) - a different shape than customers_list() above (which
+    only feeds Ticket Entry's customer picker), so kept as its own
+    endpoint rather than overloading that one. Same real Ledgers
+    (ledger_category='DEBTOR') either way - "outstanding" is opening
+    balance plus every posted transaction, same convention as Trial
+    Balance/Ledger Book (see _ledger_balance_deltas).
+    """
+    if request.method != "GET":
+        return HttpResponseNotAllowed(["GET"])
+
+    company_id = request.GET.get("company_id")
+    if not company_id:
+        return JsonResponse({"error": "company_id is required"}, status=400)
+
+    deltas = _ledger_balance_deltas(company_id)
+    customers = Ledger.objects.filter(company_id=company_id, ledger_category="DEBTOR")
+    data = [
+        {
+            "id": c.id, "name": c.alias_name or c.name, "code": f"LED-{c.id:05d}",
+            "customer_type": c.customer_type or "RETAIL",
+            "credit_limit": float(c.credit_limit or 0),
+            "credit_days": c.credit_days or 0,
+            "outstanding": round(float(c.signed_balance) + deltas.get(c.id, 0.0), 2),
+        }
+        for c in customers
+    ]
+    return JsonResponse(data, safe=False)
+
+
+def parties_suppliers_list(request):
+    """
+    GET /api/parties/suppliers/?company_id=1
+    suppliers.html's own list view - see parties_customers_list's
+    docstring, same reasoning. "outstanding" is shown as a positive
+    "amount we owe them" figure even though a Sundry Creditor's own
+    signed_balance is credit-heavy (negative), matching how Trial
+    Balance/this same Ledger's own Sundry Creditors group already
+    displays it.
+    """
+    if request.method != "GET":
+        return HttpResponseNotAllowed(["GET"])
+
+    company_id = request.GET.get("company_id")
+    if not company_id:
+        return JsonResponse({"error": "company_id is required"}, status=400)
+
+    deltas = _ledger_balance_deltas(company_id)
+    suppliers = Ledger.objects.filter(company_id=company_id, ledger_category="CREDITOR")
+    data = [
+        {
+            "id": s.id, "name": s.alias_name or s.name, "code": s.supplier_code or f"LED-{s.id:05d}",
+            "supplier_type": s.creditor_type or "General Creditor",
+            "credit_days": s.credit_days or 0,
+            # Clamped at 0 - a ledger that's actually net-debit (we're owed
+            # money, e.g. a payment gateway clearing account) isn't a
+            # negative "amount payable", it's simply nothing owed.
+            "outstanding": max(0.0, round(-(float(s.signed_balance) + deltas.get(s.id, 0.0)), 2)),
+        }
         for s in suppliers
     ]
     return JsonResponse(data, safe=False)

@@ -4,7 +4,7 @@
   let dt;
 
   async function load(companyId, country) {
-    const rows = await get(`/parties/customers?company_id=${companyId}`);
+    const rows = await get(`/parties/customers/?company_id=${companyId}`);
     const ccy = currencyFor(country);
     document.getElementById("row-count").textContent = `${rows.length} customers`;
     if (dt) dt.destroy();
