@@ -1,4 +1,5 @@
-(async function () {
+﻿(async function () {
+  const API_BASE = window.API_BASE || "/api";
   const { showToast } = window.VoyagerEntry;
   let activeCompanyId, activeCountry, groupsFlat = [];
   const editId = new URLSearchParams(window.location.search).get("id");
@@ -30,7 +31,7 @@
   await loadStatesFromXml();
   document.getElementById("cancel-link").href = returnTo;
 
-  const API = `${window.API_BASE || '/api'}`;
+  const API = `${API_BASE}`;
 
   const SECTIONS = ["section-bank", "section-debtor-in", "section-debtor-ae", "section-creditor", "section-taxledger", "section-duties-taxes"];
   function hideAllSections() { SECTIONS.forEach((id) => (document.getElementById(id).style.display = "none")); }

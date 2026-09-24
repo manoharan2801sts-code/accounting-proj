@@ -1,4 +1,5 @@
 (async function () {
+  const API_BASE = window.API_BASE || "/api";
   const { fmtMoney, fmtDate, currencyFor, titleCaseLabel } = window.VoyagerUtil;
   const { zoomInUrl } = window.VoyagerEntry;
 
@@ -8,15 +9,14 @@
 
   async function load(companyId, country) {
     let vouchers = [];
-    const API_BASE = window.API_BASE || "/api";
     try {
       const res = await fetch(`${API_BASE}/vouchers/?company_id=${companyId}`);
       if (!res.ok) throw new Error(`Vouchers API returned ${res.status}`);
       vouchers = await res.json();
     } catch (err) {
-      console.error("Could not load vouchers from the backend API", err);
+      console.error("Could not load vouchers from the Django API — is it running on localhost:8000?", err);
       document.getElementById("voucher-list").innerHTML =
-        `<p style="color:var(--color-danger); padding:16px;">Could not load vouchers from the database. Is the backend running?</p>`;
+        `<p style="color:var(--color-danger); padding:16px;">Could not load vouchers from the database. Is the Django backend running on localhost:8000?</p>`;
       return;
     }
 

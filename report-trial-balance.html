@@ -15,7 +15,7 @@
     .page-header-row { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 1.25rem; flex-wrap: wrap; }
     .page-title-group h1 { font-size: 1.25rem; font-weight: 700; margin: 0; display: flex; align-items: center; gap: 0.5rem; }
     .page-title-group .breadcrumb { font-size: 0.8rem; color: var(--color-text-muted); margin-bottom: 0.25rem; display: flex; gap: 0.4rem; align-items: center; }
-    
+
     .filter-card {
       background: var(--color-white); border: 1px solid var(--color-border);
       border-radius: var(--radius-md); padding: 1rem 1.25rem; margin-bottom: 1.25rem;
@@ -23,51 +23,46 @@
     }
     .filter-group { display: flex; flex-direction: column; gap: 0.35rem; }
     .filter-group label { font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--color-text-muted); letter-spacing: 0.03em; }
-    
-    .kpi-grid {
-      display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-      gap: 1rem; margin-bottom: 1.25rem;
-    }
-    .kpi-card {
-      background: var(--color-white); border: 1px solid var(--color-border);
-      border-radius: var(--radius-md); padding: 1rem 1.25rem;
-    }
-    .kpi-card .kpi-label { font-size: 12px; font-weight: 600; color: var(--color-text-muted); text-transform: uppercase; margin-bottom: 0.35rem; }
-    .kpi-card .kpi-val { font-size: 1.4rem; font-weight: 800; font-family: var(--font-display); color: var(--color-text-dark); }
-    .kpi-card.highlight { border-left: 4px solid var(--color-primary); }
-    .kpi-card.accent-success { border-left: 4px solid var(--color-success); }
-    .kpi-card.accent-warning { border-left: 4px solid var(--color-warning); }
-    
-    .table-container {
-      background: var(--color-white); border: 1px solid var(--color-border);
-      border-radius: var(--radius-md); overflow: hidden;
-    }
+
+    .table-container { background: var(--color-white); border: 1px solid var(--color-border); border-radius: var(--radius-md); overflow: hidden; }
     .table-toolbar {
       padding: 0.85rem 1.25rem; display: flex; align-items: center; justify-content: space-between;
       border-bottom: 1px solid var(--color-border); gap: 1rem; flex-wrap: wrap; background: #FAFBFD;
     }
     .table-search { max-width: 300px; width: 100%; }
-    .table-custom { width: 100%; border-collapse: collapse; text-align: left; }
-    .table-custom th {
-      padding: 0.75rem 1rem; background: #F8FAFC; border-bottom: 1px solid var(--color-border);
+
+    .tb-table { width: 100%; border-collapse: collapse; text-align: left; }
+    .tb-table th {
+      padding: 0.5rem 1rem; background: #F8FAFC; border-bottom: 1px solid var(--color-border);
       font-size: 11.5px; font-weight: 700; text-transform: uppercase; color: var(--color-text-muted); letter-spacing: 0.03em;
     }
-    .table-custom td {
-      padding: 0.75rem 1rem; border-bottom: 1px solid var(--color-border-subtle);
-      font-size: 13px; color: var(--color-text); vertical-align: middle;
-    }
-    .table-custom tbody tr:hover { background: #F8FAFC; }
-    .table-custom tbody tr:last-child td { border-bottom: none; }
-    .status-badge {
-      display: inline-flex; align-items: center; padding: 0.2rem 0.55rem;
-      border-radius: 4px; font-size: 11.5px; font-weight: 700; text-transform: uppercase;
-    }
-    .badge-issued, .badge-success { background: #DCFCE7; color: #166534; }
-    .badge-pending, .badge-warning { background: #FEF3C7; color: #92400E; }
-    .badge-cancelled, .badge-danger { background: #FEE2E2; color: #991B1B; }
-    .badge-rescheduled, .badge-info { background: #E0E7FF; color: #3730A3; }
-    
-    .amt { font-family: var(--font-mono); font-weight: 600; text-align: right; }
+    .tb-table th.tb-amt { text-align: right; }
+    .tb-table td { padding: 0.55rem 1rem; border-bottom: 1px solid var(--color-border-subtle); font-size: 13px; color: var(--color-text); vertical-align: middle; }
+    .tb-table tbody tr:last-child td { border-bottom: none; }
+    .tb-amt { font-family: var(--font-mono); font-weight: 600; text-align: right; white-space: nowrap; }
+
+    /* "Group" rows (primary groups at top level, or any sub-group row,
+       wherever it appears) always get Tally's gold/amber styling and are
+       always clickable - drilling in via ?group_id=. "Ledger" rows are
+       plain/italic and link straight to the Ledger report instead. */
+    .tb-group-row td { background: #FDF6E3; font-weight: 700; color: #7A5B00; }
+    .tb-group-row { cursor: pointer; }
+    .tb-group-row:hover td { background: #FBEBC0; }
+    .tb-ledger-row { cursor: pointer; }
+    .tb-ledger-row td:first-child { font-style: italic; color: var(--color-text-dark); }
+    .tb-ledger-row:hover { background: #F8FAFC; }
+    /* Only used in the top-level "Detailed View" - a group row's own
+       immediate children, indented beneath it. */
+    .tb-indent td:first-child { padding-left: 2rem; }
+    .tb-grand-total-row td { border-top: 2px solid var(--color-border); font-weight: 800; font-size: 13.5px; background: #FAFBFD; }
+
+    .tb-detailed-toggle { display: flex; align-items: center; gap: 0.5rem; font-size: 13px; color: var(--color-text-dark); cursor: pointer; user-select: none; }
+    .tb-detailed-toggle input { width: 16px; height: 16px; cursor: pointer; }
+
+    .tb-back-row { padding: 0.85rem 1.25rem; border-top: 1px solid var(--color-border); background: #FAFBFD; }
+    .tb-back-link { display: inline-flex; align-items: center; gap: 0.4rem; font-size: 13px; font-weight: 600; color: var(--color-primary); text-decoration: none; cursor: pointer; }
+    .tb-back-link:hover { text-decoration: underline; }
+
     th.amt-header { text-align: right; }
   </style>
 </head>
@@ -96,138 +91,53 @@
       <div class="filter-card">
         <div class="filter-group">
           <label>From Date</label>
-          <input type="date" class="form-control-custom" id="filter-from" value="2026-09-01" style="height:34px; padding:0.25rem 0.6rem;" />
+          <input type="date" class="form-control-custom" id="filter-from" style="height:34px; padding:0.25rem 0.6rem;" />
         </div>
         <div class="filter-group">
           <label>To Date</label>
-          <input type="date" class="form-control-custom" id="filter-to" value="2026-09-21" style="height:34px; padding:0.25rem 0.6rem;" />
+          <input type="date" class="form-control-custom" id="filter-to" style="height:34px; padding:0.25rem 0.6rem;" />
         </div>
-        <div class="filter-group">
-          <label>Branch / Office</label>
-          <select class="form-control-custom" style="height:34px; min-width:140px;">
-            <option value="">All Branches</option>
-            <option value="DEL">Delhi HQ</option>
-            <option value="BOM">Mumbai Branch</option>
-            <option value="DXB">Dubai Branch</option>
-          </select>
-        </div>
-        <div class="filter-group">
-          <label>Status</label>
-          <select class="form-control-custom" style="height:34px; min-width:120px;">
-            <option value="">All Statuses</option>
-            <option value="ISSUED">Confirmed / Issued</option>
-            <option value="PENDING">Pending</option>
-            <option value="CANCELLED">Cancelled</option>
-          </select>
-        </div>
-        <button type="button" class="dom-nav-btn btn-primary" style="height:34px;" onclick="voyagerAlert('Filters applied successfully.')">Apply</button>
+        <button type="button" class="dom-nav-btn btn-primary" style="height:34px;" onclick="loadTrialBalance()">Apply</button>
+        <label class="tb-detailed-toggle" id="tb-detailed-toggle-wrap">
+          <input type="checkbox" id="tb-detailed-view" checked onchange="loadTrialBalance()" />
+          Detailed View
+        </label>
       </div>
-
-      <div class="kpi-grid">
-  <div class="kpi-card highlight">
-    <div class="kpi-label">Total Debit Balance</div>
-    <div class="kpi-val">₹84,21,450</div>
-  </div>
-  <div class="kpi-card highlight">
-    <div class="kpi-label">Total Credit Balance</div>
-    <div class="kpi-val">₹84,21,450</div>
-  </div>
-  <div class="kpi-card accent-success">
-    <div class="kpi-label">Difference</div>
-    <div class="kpi-val">₹0.00</div>
-  </div>
-  <div class="kpi-card standard">
-    <div class="kpi-label">Total Accounts</div>
-    <div class="kpi-val">41 Active</div>
-  </div>
-</div>
 
       <div class="table-container">
         <div class="table-toolbar">
-          <div style="font-weight:700; font-size:0.92rem; color:var(--color-text-dark);">Comprehensive Chart of Accounts Trial Balance</div>
+          <div style="font-weight:700; font-size:0.92rem; color:var(--color-text-dark);" id="tb-title">Trial Balance</div>
           <input type="text" class="form-control-custom table-search" placeholder="Search records..." oninput="filterTable(this.value)" />
         </div>
         <div style="overflow-x:auto;">
-          <table class="table-custom" id="main-data-table">
+          <table class="tb-table" id="main-data-table">
             <thead>
               <tr>
-                  <th class="">Account Code</th>
-  <th class="">Account / Ledger Name</th>
-  <th class="">Account Group</th>
-  <th class="">Type</th>
-  <th class="amt-header">Debit Balance</th>
-  <th class="amt-header">Credit Balance</th>
-
+                <th rowspan="2">Particulars</th>
+                <th colspan="2" style="text-align:center;" id="tb-range-header">Closing Balance</th>
+              </tr>
+              <tr>
+                <th class="tb-amt">Debit</th>
+                <th class="tb-amt">Credit</th>
               </tr>
             </thead>
-            <tbody>
-              <tr>
-  <td class="">1310</td>
-  <td class="">Sundry Debtors</td>
-  <td class="">Current Assets</td>
-  <td class="">ASSET</td>
-  <td class="amt">₹18,40,000</td>
-  <td class="amt">-</td>
-</tr>
-<tr>
-  <td class="">1320</td>
-  <td class="">Bank Account - Main</td>
-  <td class="">Current Assets</td>
-  <td class="">ASSET</td>
-  <td class="amt">₹27,98,100</td>
-  <td class="amt">-</td>
-</tr>
-<tr>
-  <td class="">1330</td>
-  <td class="">Cash in Hand</td>
-  <td class="">Current Assets</td>
-  <td class="">ASSET</td>
-  <td class="amt">₹1,45,200</td>
-  <td class="amt">-</td>
-</tr>
-<tr>
-  <td class="">2310</td>
-  <td class="">Sundry Creditors (Airlines / Suppliers)</td>
-  <td class="">Current Liabilities</td>
-  <td class="">LIABILITY</td>
-  <td class="amt">-</td>
-  <td class="amt">₹32,15,400</td>
-</tr>
-<tr>
-  <td class="">2320</td>
-  <td class="">Duties & Taxes (GST / TDS)</td>
-  <td class="">Current Liabilities</td>
-  <td class="">LIABILITY</td>
-  <td class="amt">-</td>
-  <td class="amt">₹4,12,300</td>
-</tr>
-<tr>
-  <td class="">4100</td>
-  <td class="">Ticket Sales Revenue</td>
-  <td class="">Sales Accounts</td>
-  <td class="">INCOME</td>
-  <td class="amt">-</td>
-  <td class="amt">₹38,20,000</td>
-</tr>
-<tr>
-  <td class="">4200</td>
-  <td class="">Commission & Service Fee Income</td>
-  <td class="">Direct Income</td>
-  <td class="">INCOME</td>
-  <td class="amt">-</td>
-  <td class="amt">₹5,84,000</td>
-</tr>
-<tr>
-  <td class="">5100</td>
-  <td class="">Purchase Accounts (Airlines / Hotels)</td>
-  <td class="">Purchase Accounts</td>
-  <td class="">EXPENSE</td>
-  <td class="amt">₹32,48,450</td>
-  <td class="amt">-</td>
-</tr>
-
+            <tbody id="main-data-tbody">
+              <tr><td colspan="3" style="text-align:center; padding:2rem; color:var(--color-text-muted);">Loading...</td></tr>
             </tbody>
+            <tfoot>
+              <tr class="tb-grand-total-row">
+                <td>Grand Total</td>
+                <td class="tb-amt" id="tb-grand-debit">0.00</td>
+                <td class="tb-amt" id="tb-grand-credit">0.00</td>
+              </tr>
+            </tfoot>
           </table>
+        </div>
+        <div class="tb-back-row" id="tb-back-row" style="display:none;">
+          <a href="#" class="tb-back-link" id="tb-back-link">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+            <span id="tb-back-label">Back</span>
+          </a>
         </div>
       </div>
     </main>
@@ -242,12 +152,167 @@
     // by the app's SPA navigation (shell.js's navigateTo) into a document
     // that already finished loading, so DOMContentLoaded never fires again
     // and this would silently never run except on a hard refresh.
-    VoyagerShell.init({ activeKey: "rep-trial-balance" });
+    //
+    // Wrapped in an IIFE (unlike a naive top-level script) because
+    // shell.js re-executes this exact block every time this page is
+    // navigated to - a second execution's top-level `let`/`const` in the
+    // SAME document throws "Identifier has already been declared" (a
+    // classic-script global lexical environment persists across separately
+    // executed <script> tags), which silently aborts the whole block and
+    // leaves the page stuck on its static "Loading..." forever until a
+    // hard refresh starts the document fresh. Functions the page's own
+    // onclick="..." attributes call are exposed on window explicitly,
+    // since they're no longer implicitly global once wrapped.
+    (function () {
+    let activeCompanyId;
+    let lastLoadedData = null;
+    // The group currently being viewed (?group_id= in the URL) - null at
+    // the plain top-level Trial Balance. Drilling in/out is just this
+    // page re-fetching with a different group_id, never a real navigation
+    // to a separate HTML file, so the from/to date filters and the
+    // Detailed View checkbox stay put as you go up and down the hierarchy.
+    let currentGroupId = new URLSearchParams(window.location.search).get("group_id") || null;
+
+    (async function init() {
+      try {
+        const active = await VoyagerShell.init({ activeKey: "rep-trial-balance" });
+        if (active) activeCompanyId = Number(active.id);
+      } catch (err) {
+        console.error("Shell init failed", err);
+      }
+      setDefaultDates();
+      await loadTrialBalance();
+    })();
+
+    // Defaults to this financial year: 1-Apr of the current (or, before
+    // April, previous) year through today - same "FY" convention the
+    // top-nav's own FY chip already uses elsewhere in the app.
+    function setDefaultDates() {
+      const today = new Date();
+      const fyStartYear = today.getMonth() >= 3 ? today.getFullYear() : today.getFullYear() - 1;
+      const fyStart = `${fyStartYear}-04-01`;
+      const todayStr = today.toISOString().slice(0, 10);
+      document.getElementById("filter-from").value = fyStart;
+      document.getElementById("filter-to").value = todayStr;
+    }
+
+    function fmtAmt(n) {
+      const v = Number(n) || 0;
+      return v.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+    function fmtDateDisplay(iso) {
+      if (!iso) return "";
+      const d = new Date(iso + "T00:00:00");
+      if (isNaN(d)) return iso;
+      return d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "2-digit" }).replace(/ /g, "-");
+    }
+
+    async function loadTrialBalance() {
+      const tbody = document.getElementById("main-data-tbody");
+      tbody.innerHTML = `<tr><td colspan="3" style="text-align:center; padding:2rem; color:var(--color-text-muted);">Loading...</td></tr>`;
+
+      const fromDate = document.getElementById("filter-from").value;
+      const toDate = document.getElementById("filter-to").value;
+      const detailed = document.getElementById("tb-detailed-view").checked;
+      let params = `company_id=${activeCompanyId}`;
+      if (fromDate) params += `&from_date=${fromDate}`;
+      if (toDate) params += `&to_date=${toDate}`;
+      if (currentGroupId) {
+        params += `&group_id=${currentGroupId}`;
+      } else if (detailed) {
+        // Detailed View only means anything at the plain top level -
+        // once drilled into a specific group, that group's own children
+        // are always shown in full (there's no separate collapsed variant
+        // of a drill-down page).
+        params += `&detailed=1`;
+      }
+      // Detailed View has nothing to toggle once you've drilled into a
+      // group - hide it there instead of leaving a checkbox that does
+      // nothing.
+      document.getElementById("tb-detailed-toggle-wrap").style.display = currentGroupId ? "none" : "";
+
+      try {
+        const res = await fetch(`${window.API_BASE || "/api"}/trial-balance/?${params}`);
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || `Server returned ${res.status}`);
+        lastLoadedData = data;
+
+        document.getElementById("tb-range-header").textContent = data.from_date && data.to_date
+          ? `${fmtDateDisplay(data.from_date)} to ${fmtDateDisplay(data.to_date)}` : "Closing Balance";
+        document.getElementById("tb-title").textContent = data.context ? data.context.name : "Trial Balance";
+        document.getElementById("tb-back-row").style.display = data.back ? "" : "none";
+        if (data.back) document.getElementById("tb-back-label").textContent = `Back to ${data.back.label}`;
+
+        renderTable(data);
+      } catch (err) {
+        console.error("Could not load the trial balance - is the Django backend running?", err);
+        tbody.innerHTML = `<tr><td colspan="3" style="text-align:center; padding:2rem; color:var(--color-text-muted);">Could not load data. Is the Django backend running on localhost:8000?</td></tr>`;
+      }
+    }
+
+    function rowHtml(row, indent) {
+      const isLedger = row.type === "ledger";
+      const cls = (isLedger ? "tb-ledger-row" : "tb-group-row") + (indent ? " tb-indent" : "");
+      const attrs = isLedger ? `data-ledger-id="${row.id}" title="Click to view this ledger's statement"`
+        : `data-group-id="${row.id}" title="Click to view this group's breakdown"`;
+      return `
+        <tr class="${cls}" ${attrs}>
+          <td>${row.name}</td>
+          <td class="tb-amt">${row.debit ? fmtAmt(row.debit) : ""}</td>
+          <td class="tb-amt">${row.credit ? fmtAmt(row.credit) : ""}</td>
+        </tr>`;
+    }
+
+    function renderTable(data) {
+      const tbody = document.getElementById("main-data-tbody");
+      if (!data.rows.length) {
+        tbody.innerHTML = `<tr><td colspan="3" style="text-align:center; padding:2rem; color:var(--color-text-muted);">No ledger balances found for this period.</td></tr>`;
+        document.getElementById("tb-grand-debit").textContent = fmtAmt(0);
+        document.getElementById("tb-grand-credit").textContent = fmtAmt(0);
+        return;
+      }
+
+      let rows = "";
+      data.rows.forEach((row) => {
+        rows += rowHtml(row, false);
+        (row.children || []).forEach((c) => { rows += rowHtml(c, true); });
+      });
+      tbody.innerHTML = rows;
+
+      tbody.querySelectorAll(".tb-ledger-row").forEach((row) => {
+        row.addEventListener("click", () => {
+          window.location.href = `report-ledger-book.html?ledger_id=${row.dataset.ledgerId}`;
+        });
+      });
+      tbody.querySelectorAll(".tb-group-row").forEach((row) => {
+        row.addEventListener("click", () => {
+          currentGroupId = row.dataset.groupId;
+          const url = new URL(window.location.href);
+          url.searchParams.set("group_id", currentGroupId);
+          window.history.pushState({}, "", url);
+          loadTrialBalance();
+        });
+      });
+
+      document.getElementById("tb-grand-debit").textContent = fmtAmt(data.total_debit);
+      document.getElementById("tb-grand-credit").textContent = fmtAmt(data.total_credit);
+    }
+
+    document.getElementById("tb-back-link").addEventListener("click", (e) => {
+      e.preventDefault();
+      const back = lastLoadedData && lastLoadedData.back;
+      currentGroupId = back ? back.group_id : null;
+      const url = new URL(window.location.href);
+      if (currentGroupId) url.searchParams.set("group_id", currentGroupId);
+      else url.searchParams.delete("group_id");
+      window.history.pushState({}, "", url);
+      loadTrialBalance();
+    });
 
     function filterTable(query) {
       const q = query.toLowerCase();
       const rows = document.querySelectorAll("#main-data-table tbody tr");
-      rows.forEach(r => {
+      rows.forEach((r) => {
         r.style.display = r.textContent.toLowerCase().includes(q) ? "" : "none";
       });
     }
@@ -255,16 +320,23 @@
     function exportCSV() {
       let csv = [];
       const rows = document.querySelectorAll("#main-data-table tr");
-      rows.forEach(row => {
-        let cols = Array.from(row.querySelectorAll("th, td")).map(td => `"${td.innerText.replace(/"/g, '""')}"`);
+      rows.forEach((row) => {
+        let cols = Array.from(row.querySelectorAll("th, td")).map((td) => `"${td.innerText.replace(/"/g, '""')}"`);
         csv.push(cols.join(","));
       });
       const blob = new Blob([csv.join("\n")], { type: "text/csv;charset=utf-8;" });
       const link = document.createElement("a");
       link.href = URL.createObjectURL(blob);
-      link.download = "rep-trial-balance.csv";
+      link.download = "trial-balance.csv";
       link.click();
     }
+
+    // Called from onclick="..." attributes above, which always run in the
+    // real global scope regardless of this IIFE.
+    window.exportCSV = exportCSV;
+    window.loadTrialBalance = loadTrialBalance;
+    window.filterTable = filterTable;
+    })();
   </script>
 </body>
 </html>

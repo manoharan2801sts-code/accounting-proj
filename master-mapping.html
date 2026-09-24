@@ -11,6 +11,10 @@
 <link href="assets/css/app.css" rel="stylesheet" />
 <link href="assets/css/loader.css" rel="stylesheet" />
 <style>
+  /* Locks the outer page to the viewport so the browser's own scrollbar
+     never appears, same pattern as ticket-entry.html — this page's content
+     is short enough to always fit without it. */
+  html, body { height: 100%; overflow: hidden; margin: 0; }
 
   .mm-page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
   .mm-page-head h1 { display: flex; align-items: center; gap: 0.5rem; }

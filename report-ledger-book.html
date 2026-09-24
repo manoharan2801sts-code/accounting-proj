@@ -285,6 +285,18 @@
     // by the app's SPA navigation (shell.js's navigateTo) into a document
     // that already finished loading, so DOMContentLoaded never fires again
     // and this would silently never run except on a hard refresh.
+    //
+    // Wrapped in an IIFE (unlike a naive top-level script) because
+    // shell.js re-executes this exact block every time this page is
+    // navigated to - a second execution's top-level `let`/`const` in the
+    // SAME document throws "Identifier has already been declared" (a
+    // classic-script global lexical environment persists across separately
+    // executed <script> tags), which silently aborts the whole block and
+    // leaves the page stuck on its static "Loading..." forever until a
+    // hard refresh starts the document fresh. Functions the page's own
+    // onclick="..." attributes call are exposed on window explicitly,
+    // since they're no longer implicitly global once wrapped.
+    (function () {
     let activeCompanyId;
     let allLedgers = [];
     let currentLedgerId = null;
@@ -314,13 +326,12 @@
     // "select a ledger" prompt before showing its statement.
     // ============================================================
     async function loadLedgerList() {
-      const API_BASE = window.API_BASE || "/api";
       try {
-        const res = await fetch(`${API_BASE}/accounts/?company_id=${activeCompanyId}`);
+        const res = await fetch(`${window.API_BASE || "/api"}/accounts/?company_id=${activeCompanyId}`);
         const rows = res.ok ? await res.json() : [];
         allLedgers = rows.filter((r) => !r.is_group).sort((a, b) => a.name.localeCompare(b.name));
       } catch (err) {
-        console.error("Could not load ledgers - is the backend running?", err);
+        console.error("Could not load ledgers - is the Django backend running?", err);
         allLedgers = [];
       }
     }
@@ -421,9 +432,8 @@
       if (fromDate) params += `&from_date=${fromDate}`;
       if (toDate) params += `&to_date=${toDate}`;
 
-      const API_BASE = window.API_BASE || "/api";
       try {
-        const res = await fetch(`${API_BASE}/ledger-book/?${params}`);
+        const res = await fetch(`${window.API_BASE || "/api"}/ledger-book/?${params}`);
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || `Server returned ${res.status}`);
 
@@ -682,6 +692,12 @@
       link.download = "ledger-book.csv";
       link.click();
     }
+
+    // Called from onclick="..." attributes above, which always run in the
+    // real global scope regardless of this IIFE.
+    window.exportCSV = exportCSV;
+    window.loadLedgerBook = loadLedgerBook;
+    })();
   </script>
 </body>
 </html>

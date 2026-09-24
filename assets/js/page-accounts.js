@@ -1,4 +1,5 @@
-(async function () {
+﻿(async function () {
+  const API_BASE = window.API_BASE || "/api";
   const { get } = window.VoyagerAPI;
   const { fmtMoney, currencyFor } = window.VoyagerUtil;
   let allAccounts = [], byParent = {}, byId = {}, currentCcy = "INR", currentCompanyId, currentCountryCode;
@@ -96,20 +97,20 @@
         );
         if (!ok) return;
         try {
-          const res = await fetch(`${window.API_BASE || '/api'}/ledgers/${btn.dataset.id}/delete/?company_id=${currentCompanyId}`, {
+          const res = await fetch(`${API_BASE}/ledgers/${btn.dataset.id}/delete/?company_id=${currentCompanyId}`, {
             method: "DELETE",
           });
           const result = await res.json();
           if (!res.ok) throw new Error(result.error || "Could not delete this ledger.");
           load(currentCompanyId, currentCountryCode);
         } catch (err) {
-          voyagerAlert(err.message || "Could not delete this ledger.", { icon: "error" });
+          voyagerAlert(err.message || "Could not delete this ledger. Is the Django backend running?", { icon: "error" });
         }
       });
     });
   }
 
-  const ACCOUNTS_API = `${window.API_BASE || '/api'}/accounts/`;
+  const ACCOUNTS_API = `${API_BASE}/accounts/`;
 
   async function load(companyId, country) {
     currentCompanyId = companyId; currentCountryCode = country;

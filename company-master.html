@@ -24,7 +24,7 @@
     --cmx-white: #FFFFFF;
   }
 
-  .cmx-main { background: var(--cmx-bg); }
+  html, body { height: 100%; overflow: hidden; margin: 0; background: var(--cmx-bg); }
 
   .cmx-main {
     max-width: 100%; padding: 14px 24px; box-sizing: border-box;
@@ -105,7 +105,7 @@
     .cmx-grid { grid-template-columns: repeat(2, 1fr); }
   }
   @media (max-width: 640px) {
-    .app-body { height: auto !important; overflow: visible !important; }
+    html, body { overflow: auto; }
     .cmx-main { height: auto; overflow: visible; padding: 10px; }
     .cmx-card { max-height: none; }
     .cmx-body { overflow: visible; }

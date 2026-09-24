@@ -1,7 +1,12 @@
 (async function () {
-  const COMPANY_MASTER_API = `${window.API_BASE || '/api'}/company-master/`;
-  let allCompanies = [];
-  let editId = null; // currently loaded company's id, null while adding a new one
+  const API_BASE = window.API_BASE || "/api";
+  const COMPANY_MASTER_API = `${API_BASE}/company-master/`;
+  let activeCompanyId = null;
+  // This page always edits ONE row - whichever CompanyMaster row's id
+  // matches the active company from the top-nav switcher (creating it on
+  // first Save if it doesn't exist yet). CompanyMaster.id IS the same
+  // company_id every other table in the app scopes its data by, so this
+  // is never null/auto-assigned the way editId briefly used to be.
 
   // ============================================================
   // State dropdown - loaded from assets/data/india-states.xml
@@ -93,7 +98,6 @@
   function set(id, value) { document.getElementById(id).value = value || ""; }
 
   function clearForm() {
-    editId = null;
     ["cm-company-name", "cm-mailing-name", "cm-address", "cm-state", "cm-pincode", "cm-telephone",
       "cm-mobile", "cm-email", "cm-fy-from", "cm-books-from", "cm-cin", "cm-tan", "cm-hsn-sac", "cm-description"]
       .forEach((id) => { document.getElementById(id).value = ""; });
@@ -103,7 +107,6 @@
   }
 
   function fillForm(c) {
-    editId = c.id;
     set("cm-company-name", c.company_name);
     set("cm-mailing-name", c.mailing_name);
     document.getElementById("cm-address").value = c.address || "";
@@ -122,16 +125,22 @@
     document.getElementById("cm-description").value = c.description || "";
   }
 
-  // No grid on this page anymore - just keeps allCompanies populated for
-  // the direct-link (?id=X) lookup below.
-  async function loadCompanies() {
+  // Loads (or blanks the form for) whichever CompanyMaster row matches
+  // the active company - not a list of every company in the system.
+  async function loadActiveCompany() {
+    if (!activeCompanyId) return;
     try {
-      const res = await fetch(COMPANY_MASTER_API);
-      allCompanies = res.ok ? await res.json() : [];
+      const res = await fetch(`${COMPANY_MASTER_API}?id=${activeCompanyId}`);
+      if (res.ok) {
+        fillForm(await res.json());
+        return;
+      }
     } catch (err) {
-      console.error("Could not load companies - is the Django backend running?", err);
-      allCompanies = [];
+      console.error("Could not load Company Master - is the Django backend running?", err);
     }
+    // No row saved yet for this company (a fresh 404, or a network miss) -
+    // start blank, ready for the first Save to create it.
+    clearForm();
   }
 
   // ============================================================
@@ -140,6 +149,10 @@
   document.getElementById("cm-new-btn").addEventListener("click", clearForm);
 
   document.getElementById("cm-save-btn").addEventListener("click", async () => {
+    if (!activeCompanyId) {
+      voyagerAlert("No active company selected.");
+      return;
+    }
     if (!document.getElementById("cm-company-name").value.trim()) {
       voyagerAlert("Company Name is required.");
       return;
@@ -171,8 +184,8 @@
       tan_number: document.getElementById("cm-tan").value.trim().toUpperCase(),
       hsn_sac: document.getElementById("cm-hsn-sac").value.trim(),
       description: document.getElementById("cm-description").value.trim(),
+      id: activeCompanyId,
     };
-    if (editId) payload.id = Number(editId);
 
     try {
       const res = await fetch(`${COMPANY_MASTER_API}save/`, {
@@ -181,22 +194,23 @@
       const data = await res.json().catch(() => null);
       if (!res.ok) throw new Error((data && data.error) || `Save failed: ${res.status}`);
       await voyagerAlert("Company details saved.", { icon: "success" });
-      editId = data.id;
-      await loadCompanies();
+      fillForm(data);
     } catch (err) {
       voyagerAlert(err.message || "Could not save. Is the Django backend running?", { icon: "error" });
     }
   });
 
   await loadStates();
-  await loadCompanies();
 
-  // A direct link (?id=X) still loads straight into edit mode.
-  const initialId = new URLSearchParams(window.location.search).get("id");
-  if (initialId) {
-    const c = allCompanies.find((x) => String(x.id) === String(initialId));
-    if (c) fillForm(c);
+  const active = await VoyagerShell.init({
+    activeKey: "company-master",
+    onCompanyChange: async (id) => {
+      activeCompanyId = Number(id);
+      await loadActiveCompany();
+    },
+  });
+  if (active) {
+    activeCompanyId = Number(active.id);
+    await loadActiveCompany();
   }
-
-  await VoyagerShell.init({ activeKey: "company-master" });
 })();

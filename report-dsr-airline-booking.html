@@ -12,7 +12,9 @@
 <link href="assets/css/loader.css" rel="stylesheet" />
   <link rel="icon" type="image/png" href="assets/img/favicon.png" />
   <style>
-    /* DSR Airline Booking viewport layout */
+    /* Locked to the viewport - only the grid body scrolls, not the whole
+       page (same pattern as ticket-entry.html/company-master.html). */
+    html, body { height: 100%; overflow: hidden; margin: 0; }
     .dsr-main {
       display: flex; flex-direction: column;
       height: calc(100vh - var(--topnav-height) - var(--menubar-height, 0px));
@@ -105,7 +107,7 @@
 <body>
 <script src="assets/js/loader.js?v=2"></script>
   <header class="app-topnav" id="shell-topnav"></header>
-  <div class="app-body" style="height: calc(100vh - var(--topnav-height) - var(--menubar-height, 0px)); overflow: hidden;">
+  <div class="app-body">
     <main class="app-main dsr-main" style="max-width: 1440px; margin: 0 auto;">
       <div class="page-header-row">
         <div class="page-title-group">
@@ -227,13 +229,25 @@
   <script src="assets/js/entry-common.js"></script>
   <script src="assets/js/shell.js"></script>
   <script>
-    let activeCompanyId;
     // Not gated on DOMContentLoaded - when this page is opened via the
     // app's SPA navigation (shell.js's navigateTo), its <script> tags are
     // injected into a document that already finished loading long ago, so
     // DOMContentLoaded has already fired and never fires again. Gating
     // init on it meant loadReport() silently never ran except on a hard
     // refresh, matching every other page's plain top-level async IIFE.
+    //
+    // Wrapped in an IIFE (unlike a naive top-level script) because
+    // shell.js re-executes this exact block every time this page is
+    // navigated to - a second execution's top-level `let`/`const` in the
+    // SAME document throws "Identifier has already been declared" (a
+    // classic-script global lexical environment persists across separately
+    // executed <script> tags), which silently aborts the whole block and
+    // leaves the page stuck on its static "Loading..." forever until a
+    // hard refresh starts the document fresh. Functions the page's own
+    // onclick="..." attributes call are exposed on window explicitly,
+    // since they're no longer implicitly global once wrapped.
+    (function () {
+    let activeCompanyId;
     (async function initDsrPage() {
       try {
         const active = await VoyagerShell.init({ activeKey: "rep-dsr" });
@@ -258,8 +272,7 @@
     // from the Django backend (same /api/tickets/ endpoint ticket-entry.js
     // and tickets.html already use).
     // ============================================================
-    const API_BASE = window.API_BASE || "/api";
-    const TICKETS_API = `${API_BASE}/tickets/`;
+    const TICKETS_API = `${window.API_BASE || "/api"}/tickets/`;
     let allRows = [];
 
     function fmtAmt(n) {
@@ -448,6 +461,12 @@
       link.download = "rep-dsr-airline-booking.csv";
       link.click();
     }
+
+    // Called from onclick="..." attributes above, which always run in the
+    // real global scope regardless of this IIFE.
+    window.exportCSV = exportCSV;
+    window.applyFiltersAndRender = applyFiltersAndRender;
+    })();
   </script>
 </body>
 </html>

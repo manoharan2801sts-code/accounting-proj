@@ -223,7 +223,6 @@ class Ledger(models.Model):
 class Ticket(models.Model):
     """The invoice/booking header — Part 1 + Part 2 of the New Ticket form."""
 
-    INVOICE_TYPE_CHOICES = [("Tax Invoice", "Tax Invoice"), ("Others", "Others")]
     BOOKING_MODE_CHOICES = [("Manual", "Manual"), ("Auto Push", "Auto Push")]
     BOOKING_STATUS_CHOICES = [("Confirmed", "Confirmed"), ("Re-Scheduled", "Re-Scheduled")]
     TRAVEL_TYPE_CHOICES = [("Domestic", "Domestic"), ("International", "International")]
@@ -236,7 +235,10 @@ class Ticket(models.Model):
 
     invoice_number = models.CharField(max_length=20)
     invoice_date = models.DateField()
-    invoice_type = models.CharField(max_length=20, choices=INVOICE_TYPE_CHOICES, null=True, blank=True)
+    # Free text, matched against VoucherType.name (Masters > Voucher Type) -
+    # no longer a fixed choices list, since the dropdown is now populated
+    # from whatever voucher types the company has defined there.
+    invoice_type = models.CharField(max_length=100, null=True, blank=True)
     booking_mode = models.CharField(max_length=20, choices=BOOKING_MODE_CHOICES, default="Manual")
     booking_type = models.CharField(max_length=30, null=True, blank=True)
     booking_status = models.CharField(max_length=20, choices=BOOKING_STATUS_CHOICES, null=True, blank=True)
@@ -616,6 +618,64 @@ class Voucher(models.Model):
         return f"{self.voucher_type} #{self.id}"
 
 
+class VoucherType(models.Model):
+    """
+    Masters > Voucher Type page (voucher-type.html) — one row per voucher
+    type a company defines (Sales, Petty Cash Payment, etc). "Additional
+    Numbering Details" is a set of columns on this same row (an_ prefix),
+    not a separate table, since it's a 1:1 sub-block of one voucher type,
+    only meaningful when allow_additional_numbering is True.
+    """
+    CATEGORY_CHOICES = [
+        ("General", "General"), ("Journal", "Journal"), ("Payment", "Payment"),
+        ("Receipt", "Receipt"), ("Debit Note", "Debit Note"), ("Credit Note", "Credit Note"),
+    ]
+    NUMBER_METHOD_CHOICES = [
+        ("Automatic", "Automatic"), ("Manual", "Manual"),
+        ("Automatic & Manual Override", "Automatic & Manual Override"),
+    ]
+    PERIOD_CHOICES = [
+        ("Daily", "Daily"), ("Weekly", "Weekly"), ("Monthly", "Monthly"),
+        ("Yearly", "Yearly"), ("None", "None"),
+    ]
+
+    company_id = models.IntegerField()
+
+    name = models.CharField(max_length=100)
+    alias_name = models.CharField(max_length=100, null=True, blank=True)
+
+    voucher_category = models.CharField(max_length=20, choices=CATEGORY_CHOICES, default="General")
+    is_active = models.BooleanField(default=True)
+    number_method = models.CharField(max_length=30, choices=NUMBER_METHOD_CHOICES, default="Automatic")
+
+    allow_additional_numbering = models.BooleanField(default=False)
+    allow_effective_dates = models.BooleanField(default=False)
+    allow_zero_value_transaction = models.BooleanField(default=False)
+    allow_narration = models.BooleanField(default=True)
+    allow_narration_in_each_ledger = models.BooleanField(default=False)
+
+    # Additional Numbering Details popup — only meaningful when
+    # allow_additional_numbering is True.
+    an_width_of_invoice_number = models.IntegerField(null=True, blank=True)
+    an_prefill_with_zero = models.BooleanField(default=False)
+    an_restart_applicable_from = models.DateField(null=True, blank=True)
+    an_restart_starting_number = models.IntegerField(null=True, blank=True)
+    an_restart_period = models.CharField(max_length=10, choices=PERIOD_CHOICES, default="None")
+    an_prefix_details = models.CharField(max_length=20, null=True, blank=True)
+    an_suffix_details = models.CharField(max_length=20, null=True, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "VoucherType"
+        constraints = [models.UniqueConstraint(fields=["company_id", "name"], name="uq_voucher_type_company_name")]
+        indexes = [models.Index(fields=["company_id"], name="voucher_type_company_idx")]
+
+    def __str__(self):
+        return self.name
+
+
 class SupplierCommissionRule(models.Model):
     """
     Supplier Master — Commission Rules grid (supplier-master.html). Each row
@@ -782,6 +842,11 @@ class PGMaster(models.Model):
         related_name="pg_master_charges_rows", db_column="pg_charges_master_ledger_id"
     )
     pg_charges_master_ledger_name = models.CharField(max_length=200, null=True, blank=True)
+
+    # The gateway's own transaction charge rate (e.g. Razorpay's 2%) - a
+    # plain number set here, separate from pg_charges_master_ledger's GST%
+    # (which is the ledger's tax rate, not the gateway's fee rate).
+    pg_charges_percentage = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
 
     is_active = models.BooleanField(default=True)
 

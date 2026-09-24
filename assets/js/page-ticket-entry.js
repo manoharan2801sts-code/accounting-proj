@@ -1,8 +1,11 @@
 (async function () {
+  const API_BASE = window.API_BASE || "/api";
   const OPT = window.VoyagerHardcode.TICKET_FORM_OPTIONS;
   const params = new URLSearchParams(window.location.search);
   const editId = params.get("id");
   let activeCompanyId, activeCountry, allCustomers = [], allSuppliers = [], existingTickets = [];
+  let voucherTypes = []; // active Voucher Types for the active company - drives the Invoice Type dropdown + Invoice Number auto-numbering
+  const VOUCHER_TYPE_API = `${API_BASE}/voucher-type/`;
   let fopMasterCards = []; // active FOP Master cards for the active company, refreshed by populateFopOptions
   let pgMasterGateways = []; // PG Master gateways for the active company, refreshed by populatePgOptions
   let passengers = []; // array of passenger objects - source of truth for the register table
@@ -22,7 +25,7 @@
     el.innerHTML = (placeholder ? `<option value="">${placeholder}</option>` : "") +
       values.map((v) => `<option value="${v}">${v}</option>`).join("");
   }
-  fillPlain(document.getElementById("invoice_type"), OPT.invoiceTypes, "Select...");
+  fillPlain(document.getElementById("invoice_type"), [], "Select...");
   fillPlain(document.getElementById("booking_type"), OPT.bookingTypes, "Select...");
   fillPlain(document.getElementById("booking_status"), OPT.bookingStatuses, "Select...");
   fillPlain(document.getElementById("travel_type"), OPT.travelTypes, "Select...");
@@ -46,8 +49,29 @@
     const pgCharges = parseFloat(pgChargesInput.value) || 0;
     el.textContent = (pgCharges * pct / 100).toFixed(2);
   }
-  document.getElementById("modal-pg-charges").addEventListener("input", updatePgGstDisplay);
-  document.getElementById("payment_gateway_ref").addEventListener("change", updatePgGstDisplay);
+
+  // PG Charges (Passenger Fare modal) is non-editable - auto-computed as
+  // this passenger's own Total Billed times the selected gateway's PG
+  // Master -> PG Charges Percentage (pg-master.html), not typed by hand.
+  // Reads Total Billed off #modal-total-computed, which recalcModalTotal()
+  // keeps current before calling this.
+  function updatePgCharges() {
+    const input = document.getElementById("modal-pg-charges");
+    if (!input) return;
+    const isGateway = document.getElementById("payment_mode").value === "Payment Gateway";
+    if (!isGateway) {
+      input.value = "0.00";
+      updatePgGstDisplay();
+      return;
+    }
+    const gatewayName = document.getElementById("payment_gateway_ref").value;
+    const gateway = pgMasterGateways.find((g) => g.gateway_name === gatewayName);
+    const pct = gateway ? Number(gateway.pg_charges_percentage) || 0 : 0;
+    const totalBilled = parseFloat(document.getElementById("modal-total-computed").textContent) || 0;
+    input.value = (totalBilled * pct / 100).toFixed(2);
+    updatePgGstDisplay();
+  }
+  document.getElementById("payment_gateway_ref").addEventListener("change", updatePgCharges);
 
   function updateGatewayRefField() {
     const isGateway = document.getElementById("payment_mode").value === "Payment Gateway";
@@ -56,16 +80,13 @@
     // PG Charges (Passenger Fare modal) only makes sense - and only gets
     // saved - when this ticket is actually being paid via Payment Gateway.
     const pgChargesField = document.getElementById("modal-pg-charges-field");
-    if (pgChargesField) {
-      pgChargesField.style.display = isGateway ? "" : "none";
-      if (!isGateway) document.getElementById("modal-pg-charges").value = "0.00";
-    }
-    updatePgGstDisplay();
+    if (pgChargesField) pgChargesField.style.display = isGateway ? "" : "none";
+    updatePgCharges();
   }
   document.getElementById("payment_mode").addEventListener("change", (e) => {
     updateGatewayRefField();
     if (e.target.value !== "Payment Gateway") document.getElementById("payment_gateway_ref").value = "";
-    updatePgGstDisplay();
+    updatePgCharges();
   });
   // Runs once immediately so the field is visible (read-only) from the very
   // first load of a brand-new ticket too - not just after a "change" event
@@ -94,7 +115,6 @@
   // ============================================================
   // Customers / Suppliers - real backend
   // ============================================================
-  const API_BASE = window.API_BASE || "/api";
   const CUSTOMERS_API = `${API_BASE}/customers/`;
   const SUPPLIERS_API = `${API_BASE}/suppliers/`;
 
@@ -119,9 +139,27 @@
     document.getElementById("modal-office-id-options").innerHTML = allSuppliers
       .filter((s) => s.office_id)
       .map((s) => `<option value="${s.office_id}">`).join("");
+    await populateVoucherTypeOptions(companyId);
     await populateFopOptions(companyId);
     await populatePgOptions(companyId);
     await populateMappedFieldNames(companyId);
+    await populateCompanyState(companyId);
+  }
+
+  // Company Master's own State (company-master.html) - the "us" side of
+  // the same-state/different-state comparison the JV's Output GST lines
+  // use (see _compute_jv_lines server-side, and renderPgReceiptsTab below
+  // for the PG Receipts tab's own copy of that same comparison).
+  let companyState = "";
+  const COMPANY_MASTER_API = `${API_BASE}/company-master/`;
+  async function populateCompanyState(companyId) {
+    try {
+      const res = await fetch(`${COMPANY_MASTER_API}?id=${companyId}`);
+      companyState = res.ok ? ((await res.json()).state || "") : "";
+    } catch (err) {
+      console.error("Could not load Company Master state", err);
+      companyState = "";
+    }
   }
 
   // JV account guard - fare fields whose JV posting line (see
@@ -135,6 +173,11 @@
   // compute GST Amount per-component instead of one flat GST% - see
   // computeFareLine().
   let fieldLedgerGstPct = {};
+  // field_name -> its mapped ledger's display name (or a "not mapped"
+  // placeholder) - used by the JV PG Receipts tab's Output CGST/SGST/IGST
+  // rows (see renderPgReceiptsTab), same convention as the backend's
+  // mapped_ledger() in views._compute_jv_lines.
+  let mappedFieldLedgerName = {};
   const MASTER_MAPPING_API = `${API_BASE}/master-mapping/`;
   async function populateMappedFieldNames(companyId) {
     try {
@@ -142,11 +185,16 @@
       const rows = res.ok ? await res.json() : [];
       mappedFieldNames = new Set(rows.map((r) => r.field_name));
       fieldLedgerGstPct = {};
-      rows.forEach((r) => { fieldLedgerGstPct[r.field_name] = Number(r.ledger_gst_percentage) || 0; });
+      mappedFieldLedgerName = {};
+      rows.forEach((r) => {
+        fieldLedgerGstPct[r.field_name] = Number(r.ledger_gst_percentage) || 0;
+        mappedFieldLedgerName[r.field_name] = r.ledger_name || `${r.field_name} (not mapped in Master Mapping)`;
+      });
     } catch (err) {
       console.error("Could not load Master Mapping field list", err);
       mappedFieldNames = new Set();
       fieldLedgerGstPct = {};
+      mappedFieldLedgerName = {};
     }
   }
   const JV_GUARDED_FIELDS = {
@@ -160,6 +208,36 @@
   };
   const jvGuardWarned = new Set();
   document.addEventListener("focusin", (e) => { jvGuardWarned.delete(e.target.id); });
+
+  // Same guard, for the JV PG Receipts tab's auto-filled PG Charges row -
+  // it's not typed by hand so it can't be reverted/blocked like
+  // JV_GUARDED_FIELDS above, but it still posts against the gateway's PG
+  // Charges Master ledger (PG Master), which is optional there. Warn once
+  // per gateway (not on every JV refresh) if that ledger isn't mapped
+  // while PG Charges holds a real amount.
+  const pgLedgerWarned = new Set();
+  function warnUnmappedPgLedger(gatewayName) {
+    if (pgLedgerWarned.has(gatewayName)) return;
+    pgLedgerWarned.add(gatewayName);
+    voyagerAlert(
+      `"${gatewayName}" has no PG Charges Master ledger mapped in PG Master. PG Charges is still auto-filled on this ticket, but won't post to a real ledger in the JV until one is mapped there.`,
+      { icon: "warning" }
+    );
+  }
+
+  // Same idea, for the PG Receipts tab's Output CGST/SGST/IGST A/c
+  // line(s) (PG GST's Credit side) - these resolve via Master Mapping
+  // (GST and TDS), not PG Master, so they get their own "not mapped"
+  // warning, keyed by field name rather than gateway name.
+  const gstFieldWarned = new Set();
+  function warnUnmappedGstField(fieldName) {
+    if (gstFieldWarned.has(fieldName)) return;
+    gstFieldWarned.add(fieldName);
+    voyagerAlert(
+      `"${fieldName}" has no ledger mapped in Master Mapping (GST and TDS). PG GST is still auto-filled on this ticket, but won't post to a real ledger in the JV until one is mapped there.`,
+      { icon: "warning" }
+    );
+  }
   document.addEventListener("input", (e) => {
     const fieldName = JV_GUARDED_FIELDS[e.target.id];
     if (!fieldName || mappedFieldNames.has(fieldName) || viewMode) return;
@@ -185,8 +263,60 @@
     }
     const names = pgMasterGateways.filter((g) => g.is_active).map((g) => g.gateway_name);
     fillPlain(document.getElementById("payment_gateway_ref"), names, "Select...");
-    updatePgGstDisplay();
+    updatePgCharges();
   }
+
+  // Invoice Type dropdown is populated from Masters > Voucher Type
+  // (voucher-type.html) - only active voucher types, by name. Picking one
+  // drives Invoice Number auto-numbering per that voucher type's own
+  // Number Method (see applyInvoiceNumbering below).
+  async function populateVoucherTypeOptions(companyId) {
+    const select = document.getElementById("invoice_type");
+    const current = select.value;
+    try {
+      const res = await fetch(`${VOUCHER_TYPE_API}?company_id=${companyId}`);
+      voucherTypes = res.ok ? await res.json() : [];
+    } catch (err) {
+      console.error("Could not load Voucher Types", err);
+      voucherTypes = [];
+    }
+    const activeNames = voucherTypes.filter((vt) => vt.is_active).map((vt) => vt.name);
+    fillPlain(select, activeNames, "Select...");
+    select.value = activeNames.includes(current) ? current : "";
+  }
+
+  // Invoice Number follows the selected Invoice Type's (=VoucherType)
+  // Number Method: Manual leaves it a plain editable box, Automatic locks
+  // it to the server-computed next number, Automatic & Manual Override
+  // prefills that same suggestion but still lets the user change it.
+  async function applyInvoiceNumbering() {
+    const invoiceNumberInput = document.getElementById("invoice_number");
+    const typeName = document.getElementById("invoice_type").value;
+    const vt = voucherTypes.find((v) => v.name === typeName);
+
+    if (!vt || vt.number_method === "Manual") {
+      invoiceNumberInput.readOnly = false;
+      return;
+    }
+
+    const dateGroup = document.getElementById("invoice_date");
+    const nativeDate = dateGroup ? dateGroup.querySelector(".dg-native") : null;
+    const voucherDate = nativeDate && nativeDate.value ? nativeDate.value : "";
+
+    try {
+      const qs = new URLSearchParams({ company_id: activeCompanyId, name: typeName });
+      if (voucherDate) qs.set("voucher_date", voucherDate);
+      const res = await fetch(`${VOUCHER_TYPE_API}next-number/?${qs}`);
+      const data = await res.json();
+      if (res.ok && data.next_number) {
+        invoiceNumberInput.value = data.next_number;
+      }
+    } catch (err) {
+      console.error("Could not compute the next Invoice Number", err);
+    }
+    invoiceNumberInput.readOnly = vt.number_method === "Automatic";
+  }
+  document.getElementById("invoice_type").addEventListener("change", applyInvoiceNumbering);
 
   // FOP dropdown starts Cash-only; "Own Card"/"Client Card" are only added
   // when FOP Master (fop-master.html) has at least one ACTIVE card of that
@@ -590,6 +720,7 @@
     document.getElementById("modal-taxable-amount").textContent =
       (p.service_fee + p.addl_service_fee + p.ssr_service_fee).toFixed(2);
     document.getElementById("modal-total-computed").textContent = r.total.toFixed(2);
+    updatePgCharges();
     return r;
   }
 
@@ -652,8 +783,9 @@
     // below doesn't derive the discount from a still-blank Amount field.
     if (p.disc_type === "Flat") document.getElementById("modal-disc-computed").value = p.disc_value.toFixed(2);
     document.getElementById("modal-tds-per").value = p.tds_per.toFixed(2);
-    document.getElementById("modal-pg-charges").value = (p.pg_charges || 0).toFixed(2);
-    updatePgGstDisplay();
+    // PG Charges itself is not seeded here - it's non-editable and gets
+    // recomputed fresh (against the CURRENT PG Master percentage) by the
+    // recalcModalTotal() call below, via updatePgCharges().
     document.getElementById("modal-markup").value = p.markup.toFixed(2); document.getElementById("modal-addl-markup").value = p.addl_markup.toFixed(2);
     document.getElementById("modal-ssr-markup").value = (p.ssr_markup || 0).toFixed(2);
     document.getElementById("modal-service-fee").value = p.service_fee.toFixed(2); document.getElementById("modal-addl-service-fee").value = p.addl_service_fee.toFixed(2);
@@ -1271,6 +1403,13 @@
     const pgGstPct = gateway ? Number(gateway.pg_charges_master_ledger_gst_percentage) || 0 : 0;
     const pgGstTotal = Math.round(pgChargesTotal * pgGstPct / 100 * 100) / 100;
 
+    // These are auto-filled straight into the JV, not typed - so if the
+    // gateway has no PG Charges Master ledger mapped, warn instead of
+    // silently posting them under the literal "PG Charges"/"PG GST" text.
+    if ((pgChargesTotal > 0 || pgGstTotal > 0) && gateway && !gateway.pg_charges_master_ledger_id) {
+      warnUnmappedPgLedger(gatewayRef);
+    }
+
     // PG Platform Debit = Total Billed (computeFareLine's own `total`,
     // which already includes Sup Markup/Sup Addl Markup/Sup Service
     // Fee/Sup Addl Service Fee/Sup GST Amount) + PG Charges + PG GST.
@@ -1281,17 +1420,44 @@
       return sum + r.total + pgCharges + pgGst;
     }, 0);
 
+    const pgLedgerUnmapped = gateway && !gateway.pg_charges_master_ledger_id;
+    const unmappedSuffix = ' <span style="color:#DC2626; font-weight:700;" title="No PG Charges Master ledger mapped in PG Master">(unmapped)</span>';
+
+    // PG GST's Credit line(s) - same Company State vs Customer State
+    // (Ledger Master) comparison the main Journal Voucher tab's Output GST
+    // uses (see _compute_jv_lines server-side): same state = split
+    // half/half into Output CGST A/c + Output SGST A/c, different state =
+    // one combined Output IGST A/c line. Resolved via Master Mapping
+    // (same "GST and TDS" ledgers the main tab posts to) - NOT PG
+    // Master's own PG Charges Master ledger, which is only for the
+    // separate PG Charges row above.
+    const custLedger = allCustomers.find((c) => c.name === document.getElementById("customer").value);
+    const customerState = (custLedger && custLedger.state_name) || "";
+    const sameState = !!companyState && !!customerState
+      && companyState.trim().toLowerCase() === customerState.trim().toLowerCase();
+    function gstMappedName(fieldName) {
+      if (!mappedFieldNames.has(fieldName)) warnUnmappedGstField(fieldName);
+      return mappedFieldLedgerName[fieldName] || `${fieldName} (not mapped in Master Mapping)`;
+    }
+
     let rowsHtml = jvRowHtml(1, customerRow.ledger_name, 0, creditAmount) + jvRowHtml(2, pgLedgerName, debitAmount, 0);
     let totalDebit = debitAmount;
     let totalCredit = creditAmount;
     let rowNum = 2;
     if (pgChargesTotal > 0) {
-      rowsHtml += jvRowHtml(++rowNum, pgChargesLedgerName, 0, pgChargesTotal);
+      rowsHtml += jvRowHtml(++rowNum, pgChargesLedgerName + (pgLedgerUnmapped ? unmappedSuffix : ""), 0, pgChargesTotal);
       totalCredit += pgChargesTotal;
     }
     if (pgGstTotal > 0) {
-      rowsHtml += jvRowHtml(++rowNum, "PG GST", 0, pgGstTotal);
-      totalCredit += pgGstTotal;
+      if (sameState) {
+        const half = Math.round(pgGstTotal / 2 * 100) / 100;
+        rowsHtml += jvRowHtml(++rowNum, gstMappedName("Output CGST A/c"), 0, half);
+        rowsHtml += jvRowHtml(++rowNum, gstMappedName("Output SGST A/c"), 0, half);
+        totalCredit += half * 2;
+      } else {
+        rowsHtml += jvRowHtml(++rowNum, gstMappedName("Output IGST A/c"), 0, pgGstTotal);
+        totalCredit += pgGstTotal;
+      }
     }
     document.getElementById("jv-pg-table-body").innerHTML = rowsHtml;
     document.getElementById("jv-pg-total-debit").textContent = totalDebit.toFixed(2);

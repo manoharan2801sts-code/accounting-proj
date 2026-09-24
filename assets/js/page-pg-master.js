@@ -1,4 +1,5 @@
 (async function () {
+  const API_BASE = window.API_BASE || "/api";
   let activeCompanyId;
   let allGateways = []; // local cache of gateways for active company
   let ledgers = []; // "Current Liabilities" ledgers, loaded once per company
@@ -7,13 +8,14 @@
 
   const LEDGER_GROUP = "Current Liabilities";
   const CHARGES_LEDGER_GROUP = "Expenses";
-  const PG_MASTER_API = `${window.API_BASE || '/api'}/pg-master/`;
-  const LEDGERS_BY_GROUP_API = `${window.API_BASE || '/api'}/ledgers-by-group/`;
+  const PG_MASTER_API = `${API_BASE}/pg-master/`;
+  const LEDGERS_BY_GROUP_API = `${API_BASE}/ledgers-by-group/`;
 
   // DOM Elements - Left Form
   const formName = document.getElementById("pg-form-name");
   const formMaster = document.getElementById("pg-form-master");
   const formChargesMaster = document.getElementById("pg-form-charges-master");
+  const formChargesPercentage = document.getElementById("pg-form-charges-percentage");
   const formStatus = document.getElementById("pg-form-status");
   const formStatusLabel = document.getElementById("pg-form-status-label");
   const btnSave = document.getElementById("pg-btn-save");
@@ -74,7 +76,7 @@
 
     if (allGateways.length === 0) {
       tbody.innerHTML = `<tr>
-        <td colspan="6" style="text-align:center; padding:2.5rem 1rem; color:var(--color-text-muted);">
+        <td colspan="7" style="text-align:center; padding:2.5rem 1rem; color:var(--color-text-muted);">
           <div style="font-size:13px; font-weight:600; margin-bottom:4px;">No Payment Gateways found</div>
           <div style="font-size:12px; color:var(--color-text-faint);">Use the form on the left to add a new gateway.</div>
         </td>
@@ -96,6 +98,7 @@
         <td><strong style="color:var(--color-text-dark);">${gw.gateway_name}</strong></td>
         <td style="color:var(--color-text-dark); font-weight:500;">${gw.payment_master_ledger_name || "-"}</td>
         <td style="color:var(--color-text-dark); font-weight:500;">${gw.pg_charges_master_ledger_name || "-"}</td>
+        <td style="text-align:center; color:var(--color-text-dark); font-weight:500;">${gw.pg_charges_percentage != null ? `${gw.pg_charges_percentage}%` : "-"}</td>
         <td style="text-align:center;">${statusHtml}</td>
         <td style="text-align:center;">${minusBtnHtml}</td>
       `;
@@ -110,6 +113,7 @@
     formName.value = gw.gateway_name || "";
     populateLedgerOptions(gw.payment_master_ledger_id);
     populateChargesLedgerOptions(gw.pg_charges_master_ledger_id);
+    formChargesPercentage.value = gw.pg_charges_percentage != null ? gw.pg_charges_percentage : "";
     formStatus.checked = !!gw.is_active;
     formStatusLabel.textContent = gw.is_active ? "Active" : "Inactive";
 
@@ -136,6 +140,7 @@
     formName.value = "";
     formMaster.value = "";
     formChargesMaster.value = "";
+    formChargesPercentage.value = "";
     formStatus.checked = true;
     formStatusLabel.textContent = "Active";
 
@@ -165,11 +170,19 @@
     const isActive = formStatus.checked;
     const chargesLedgerId = formChargesMaster.value;
 
+    const chargesPercentageRaw = formChargesPercentage.value.trim();
+    if (chargesPercentageRaw && (isNaN(Number(chargesPercentageRaw)) || Number(chargesPercentageRaw) < 0 || Number(chargesPercentageRaw) > 100)) {
+      voyagerAlert("PG Charges Percentage must be a number between 0 and 100.");
+      formChargesPercentage.focus();
+      return;
+    }
+
     const payload = {
       company_id: activeCompanyId,
       gateway_name: gatewayName,
       payment_master_ledger_id: Number(ledgerId),
       pg_charges_master_ledger_id: chargesLedgerId ? Number(chargesLedgerId) : null,
+      pg_charges_percentage: chargesPercentageRaw ? Number(chargesPercentageRaw) : null,
       is_active: isActive,
     };
 
@@ -241,6 +254,17 @@
       e.stopPropagation();
       deleteGateway(minusBtn.dataset.id);
     }
+  });
+
+  // Numbers-only filter (digits + a single decimal point) for the
+  // PG Charges Percentage field - it's type="text" (not type="number")
+  // because native number inputs silently reset to "" on an intermediate-
+  // invalid value like "2." while typing.
+  formChargesPercentage.addEventListener("input", (e) => {
+    let v = e.target.value.replace(/[^0-9.]/g, "");
+    const firstDot = v.indexOf(".");
+    if (firstDot !== -1) v = v.slice(0, firstDot + 1) + v.slice(firstDot + 1).replace(/\./g, "");
+    e.target.value = v;
   });
 
   // Status toggle label

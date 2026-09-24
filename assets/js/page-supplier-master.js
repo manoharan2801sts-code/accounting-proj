@@ -1,10 +1,11 @@
-(async function () {
+﻿(async function () {
+  const API_BASE = window.API_BASE || "/api";
   const OPT = window.VoyagerHardcode.TICKET_FORM_OPTIONS;
   let activeCompanyId, allSuppliers = [];
 
   // Office ID: loaded from Sundry Creditors (suppliers) for the active
   // company; picking/typing a matching Office ID auto-fills Supplier Name.
-  const SUPPLIERS_API = `${window.API_BASE || '/api'}/suppliers/`;
+  const SUPPLIERS_API = `${API_BASE}/suppliers/`;
   async function populateSuppliers(companyId) {
     try {
       const res = await fetch(`${SUPPLIERS_API}?company_id=${companyId}`);
@@ -112,7 +113,7 @@
   // up by Office ID. `savedRules` is a local cache of the last GET, kept
   // in sync after every create/delete.
   // ============================================================
-  const RULES_API = `${window.API_BASE || '/api'}/supplier-commission-rules/`;
+  const RULES_API = `${API_BASE}/supplier-commission-rules/`;
   const listTbody = document.getElementById("sm-list-tbody");
   const emptyRow = document.getElementById("sm-list-empty-row");
   let savedRules = [];

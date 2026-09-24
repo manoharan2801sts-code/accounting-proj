@@ -8,14 +8,14 @@ and gets these rows straight from SQL Server instead.
 import json
 import math
 import re
-from datetime import datetime
+from datetime import datetime, date
 from django.http import JsonResponse, HttpResponseNotAllowed
 from django.views.decorators.csrf import csrf_exempt
 from django.forms.models import model_to_dict
 from django.db import transaction, IntegrityError
 from django.db.models import ProtectedError, Q
 
-from .models import LedgerGroup, Ledger, Ticket, TicketLine, Voucher, JournalVoucher, SupplierCommissionRule, MasterMapping, FOPMaster, PGMaster, CompanyMaster, clear_gst_pct_cache
+from .models import LedgerGroup, Ledger, Ticket, TicketLine, Voucher, JournalVoucher, VoucherType, SupplierCommissionRule, MasterMapping, FOPMaster, PGMaster, CompanyMaster, clear_gst_pct_cache
 from .jv_hardcode import JV_LINE_MAP
 
 
@@ -810,6 +810,152 @@ TICKET_LINE_NUMERIC_FIELDS = {
     "supp_comm_value", "supp_tds_per",
     "supp_markup", "supp_addl_markup", "supp_service_fee", "supp_addl_service_fee", "supp_gst_pct",
 }
+
+
+def _trial_balance_dr_cr(amount):
+    """Positive net (Debit-heavy, per Ledger.signed_balance's convention)
+    shows in the Debit column, negative (Credit-heavy) in the Credit
+    column as a positive number - never both on the same row."""
+    amount = round(amount, 2)
+    return (amount, 0.0) if amount >= 0 else (0.0, -amount)
+
+
+def trial_balance_report(request):
+    """
+    GET /api/trial-balance/?company_id=1&to_date=2026-09-05[&from_date=...][&group_id=7]
+    Tally-style Trial Balance, drillable to any depth via group_id:
+
+    - No group_id (top level): one row per "primary" Ledger Group - a
+      direct child of a root group like Assets/Liabilities/Income/
+      Expenses (e.g. Capital Account, Current Liabilities, Current
+      Assets, Indirect Income, Indirect Expenses).
+    - group_id given: same shape, but rows are THAT group's own
+      immediate children instead (a mix of sub-groups and/or Ledgers
+      straight under it) - what report-trial-balance.html shows when
+      you click into a group. "context" describes that group itself
+      (its own name + rolled-up total, shown as the page's highlighted
+      header row) and "back" says where the Back link at the bottom
+      should go: another group_id one level up, or null for the plain
+      top-level Trial Balance if this group's own parent is just an
+      internal root wrapper (Assets/Liabilities/Income/Expenses) that
+      the UI never shows as its own page.
+
+    Every row's own total is rolled up from every Ledger under it
+    however deeply nested (see group_rollup) even though only ONE level
+    of children is ever returned per call - drilling further is a
+    separate request with that row's own id as group_id.
+
+    Closing Balance is always "as of to_date" (opening_balance plus every
+    posted transaction up to that date, from ledger inception - not just
+    movement within from_date/to_date, which is only decorative in the
+    header here, matching real Tally behaviour) - same convention as
+    cash_bank_book_report.
+
+    Rows with no Ledger anywhere under them (e.g. an unused "Fixed
+    Assets") are left out entirely, same as Tally only listing groups
+    that actually have something posted to them.
+    """
+    if request.method != "GET":
+        return HttpResponseNotAllowed(["GET"])
+
+    company_id = request.GET.get("company_id")
+    if not company_id:
+        return JsonResponse({"error": "company_id is required"}, status=400)
+
+    from_date = request.GET.get("from_date")
+    to_date = request.GET.get("to_date")
+    group_id = request.GET.get("group_id")
+    deltas = _ledger_balance_deltas(company_id, as_of_date=to_date)
+
+    all_groups = list(LedgerGroup.objects.filter(company_id=company_id))
+    groups_by_id = {g.id: g for g in all_groups}
+    children_by_parent = {}
+    for g in all_groups:
+        children_by_parent.setdefault(g.parent_id, []).append(g)
+    all_ledgers = list(Ledger.objects.filter(company_id=company_id))
+    ledgers_by_group = {}
+    for l in all_ledgers:
+        ledgers_by_group.setdefault(l.group_id, []).append(l)
+
+    def ledger_balance(l):
+        return float(l.signed_balance) + deltas.get(l.id, 0.0)
+
+    def group_rollup(gid):
+        """(total balance, ledger count) for everything under this group, however deep."""
+        total = sum(ledger_balance(l) for l in ledgers_by_group.get(gid, []))
+        count = len(ledgers_by_group.get(gid, []))
+        for child in children_by_parent.get(gid, []):
+            child_total, child_count = group_rollup(child.id)
+            total += child_total
+            count += child_count
+        return total, count
+
+    def build_rows(parent_group_id):
+        rows = []
+        total_debit = 0.0
+        total_credit = 0.0
+        for g in sorted(children_by_parent.get(parent_group_id, []), key=lambda g: g.name):
+            g_total, g_count = group_rollup(g.id)
+            if g_count == 0:
+                continue
+            debit, credit = _trial_balance_dr_cr(g_total)
+            rows.append({"type": "group", "id": g.id, "name": g.name, "debit": debit, "credit": credit})
+            total_debit += debit
+            total_credit += credit
+        for l in sorted(ledgers_by_group.get(parent_group_id, []), key=lambda l: l.name):
+            l_debit, l_credit = _trial_balance_dr_cr(ledger_balance(l))
+            rows.append({"type": "ledger", "id": l.id, "name": l.alias_name or l.name, "debit": l_debit, "credit": l_credit})
+            total_debit += l_debit
+            total_credit += l_credit
+        return rows, round(total_debit, 2), round(total_credit, 2)
+
+    root_group_ids = {g.id for g in all_groups if g.parent_id is None}
+
+    context = None
+    back = None
+    if group_id:
+        group = groups_by_id.get(int(group_id))
+        if not group:
+            return JsonResponse({"error": "Group not found."}, status=404)
+        g_total, _count = group_rollup(group.id)
+        debit, credit = _trial_balance_dr_cr(g_total)
+        context = {"id": group.id, "name": group.name, "debit": debit, "credit": credit}
+        if group.parent_id in root_group_ids or group.parent_id is None:
+            back = {"group_id": None, "label": "Trial Balance"}
+        else:
+            parent = groups_by_id.get(group.parent_id)
+            back = {"group_id": parent.id if parent else None, "label": parent.name if parent else "Trial Balance"}
+        rows, total_debit, total_credit = build_rows(group.id)
+    else:
+        # Top level - every "primary" group (parented directly by a root
+        # wrapper) stands in for that wrapper, which is never shown itself.
+        rows = []
+        total_debit = 0.0
+        total_credit = 0.0
+        for rid in root_group_ids:
+            r_rows, r_debit, r_credit = build_rows(rid)
+            rows.extend(r_rows)
+            total_debit += r_debit
+            total_credit += r_credit
+        rows.sort(key=lambda r: r["name"])
+        total_debit = round(total_debit, 2)
+        total_credit = round(total_credit, 2)
+
+        # "Detailed View" checkbox (frontend) - when on, each primary
+        # group row here also carries its own one-level-deeper "children"
+        # array inline (the pre-drill-down behaviour), instead of the
+        # user having to click in to see anything beneath a primary group.
+        if request.GET.get("detailed") == "1":
+            for row in rows:
+                if row["type"] == "group":
+                    row["children"], _cd, _cc = build_rows(row["id"])
+
+    return JsonResponse({
+        "from_date": from_date, "to_date": to_date,
+        "context": context, "back": back,
+        "rows": rows,
+        "total_debit": total_debit, "total_credit": total_credit,
+    })
 
 
 def _safe_decimal(value, default=0):
@@ -1623,6 +1769,221 @@ def vouchers_list(request):
 
     vouchers = Voucher.objects.filter(company_id=company_id).order_by("-voucher_date", "-id")
     return JsonResponse([_voucher_dict(v) for v in vouchers], safe=False)
+
+
+def _voucher_type_dict(vt):
+    return {
+        "id": vt.id, "name": vt.name, "alias_name": vt.alias_name,
+        "voucher_category": vt.voucher_category, "is_active": vt.is_active,
+        "number_method": vt.number_method,
+        "allow_additional_numbering": vt.allow_additional_numbering,
+        "allow_effective_dates": vt.allow_effective_dates,
+        "allow_zero_value_transaction": vt.allow_zero_value_transaction,
+        "allow_narration": vt.allow_narration,
+        "allow_narration_in_each_ledger": vt.allow_narration_in_each_ledger,
+        "an_width_of_invoice_number": vt.an_width_of_invoice_number,
+        "an_prefill_with_zero": vt.an_prefill_with_zero,
+        "an_restart_applicable_from": vt.an_restart_applicable_from.isoformat() if vt.an_restart_applicable_from else None,
+        "an_restart_starting_number": vt.an_restart_starting_number,
+        "an_restart_period": vt.an_restart_period,
+        "an_prefix_details": vt.an_prefix_details,
+        "an_suffix_details": vt.an_suffix_details,
+    }
+
+
+def voucher_type_list(request):
+    """GET /api/voucher-type/?company_id=1[&id=1] - every voucher type for a company, or one by id."""
+    if request.method != "GET":
+        return HttpResponseNotAllowed(["GET"])
+
+    company_id = request.GET.get("company_id")
+    if not company_id:
+        return JsonResponse({"error": "company_id is required"}, status=400)
+
+    voucher_type_id = request.GET.get("id")
+    if voucher_type_id:
+        try:
+            vt = VoucherType.objects.get(id=voucher_type_id, company_id=company_id)
+        except VoucherType.DoesNotExist:
+            return JsonResponse({"error": "Voucher Type not found."}, status=404)
+        return JsonResponse(_voucher_type_dict(vt))
+
+    rows = VoucherType.objects.filter(company_id=company_id).order_by("name")
+    return JsonResponse([_voucher_type_dict(vt) for vt in rows], safe=False)
+
+
+@csrf_exempt
+def voucher_type_save(request):
+    """
+    POST /api/voucher-type/save/
+    Body: { "id": 1 (optional - update if present), "company_id": 1,
+            "name": "...", "alias_name": "...", "voucher_category": "General",
+            "is_active": true, "number_method": "Automatic",
+            "allow_additional_numbering": false, "allow_effective_dates": false,
+            "allow_zero_value_transaction": false, "allow_narration": true,
+            "allow_narration_in_each_ledger": false,
+            "an_width_of_invoice_number": 6, "an_prefill_with_zero": false,
+            "an_restart_applicable_from": "2026-04-01", "an_restart_starting_number": 1,
+            "an_restart_period": "None", "an_prefix_details": "...", "an_suffix_details": "..." }
+    Upserts by (company_id, name) - the table's unique key - unless "id" is given.
+    """
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+
+    try:
+        body = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON body"}, status=400)
+
+    company_id = body.get("company_id")
+    if not company_id:
+        return JsonResponse({"error": "company_id is required"}, status=400)
+
+    name = (body.get("name") or "").strip()
+    if not name:
+        return JsonResponse({"error": "Voucher Name is required."}, status=400)
+
+    dup = VoucherType.objects.filter(company_id=company_id, name__iexact=name).exclude(id=body.get("id")).exists()
+    if dup:
+        return JsonResponse({"error": f"\"{name}\" already exists - Voucher Name must be unique."}, status=409)
+
+    fields = {
+        "company_id": company_id,
+        "name": name,
+        "alias_name": (body.get("alias_name") or "").strip() or None,
+        "voucher_category": body.get("voucher_category") or "General",
+        "is_active": bool(body.get("is_active", True)),
+        "number_method": body.get("number_method") or "Automatic",
+        "allow_additional_numbering": bool(body.get("allow_additional_numbering", False)),
+        "allow_effective_dates": bool(body.get("allow_effective_dates", False)),
+        "allow_zero_value_transaction": bool(body.get("allow_zero_value_transaction", False)),
+        "allow_narration": bool(body.get("allow_narration", True)),
+        "allow_narration_in_each_ledger": bool(body.get("allow_narration_in_each_ledger", False)),
+        "an_width_of_invoice_number": body.get("an_width_of_invoice_number") or None,
+        "an_prefill_with_zero": bool(body.get("an_prefill_with_zero", False)),
+        "an_restart_applicable_from": _parse_date(body.get("an_restart_applicable_from")),
+        "an_restart_starting_number": body.get("an_restart_starting_number") or None,
+        "an_restart_period": body.get("an_restart_period") or "None",
+        "an_prefix_details": (body.get("an_prefix_details") or "").strip() or None,
+        "an_suffix_details": (body.get("an_suffix_details") or "").strip() or None,
+    }
+
+    voucher_type_id = body.get("id")
+    if voucher_type_id:
+        try:
+            vt = VoucherType.objects.get(id=voucher_type_id, company_id=company_id)
+        except VoucherType.DoesNotExist:
+            return JsonResponse({"error": f"Voucher Type {voucher_type_id} not found."}, status=404)
+        for key, value in fields.items():
+            setattr(vt, key, value)
+        vt.save()
+        return JsonResponse(_voucher_type_dict(vt), status=200)
+
+    vt = VoucherType.objects.create(**fields)
+    return JsonResponse(_voucher_type_dict(vt), status=201)
+
+
+@csrf_exempt
+def voucher_type_delete(request, voucher_type_id):
+    """DELETE /api/voucher-type/<id>/delete/?company_id=1"""
+    if request.method != "DELETE":
+        return HttpResponseNotAllowed(["DELETE"])
+
+    company_id = request.GET.get("company_id")
+    try:
+        vt = VoucherType.objects.get(id=voucher_type_id, company_id=company_id)
+    except VoucherType.DoesNotExist:
+        return JsonResponse({"error": "Voucher Type not found."}, status=404)
+
+    vt.delete()
+    return JsonResponse({"message": "Voucher Type deleted."})
+
+
+def _period_bucket_filter(field_prefix, voucher_date, period):
+    """
+    Turns a VoucherType's Restart Numbering "Period" into the Ticket
+    queryset filter kwargs that pick out only the other invoices in the
+    same bucket as voucher_date - e.g. period="Monthly" + 2026-09-23 only
+    matches other September 2026 invoices, so the sequence restarts every
+    month. period="None" (or no date) means no bucketing at all - every
+    invoice for this voucher type shares one running sequence.
+    """
+    if not voucher_date or period in (None, "None"):
+        return {}
+    if period == "Daily":
+        return {f"{field_prefix}": voucher_date}
+    if period == "Monthly":
+        return {f"{field_prefix}__year": voucher_date.year, f"{field_prefix}__month": voucher_date.month}
+    if period == "Yearly":
+        return {f"{field_prefix}__year": voucher_date.year}
+    if period == "Weekly":
+        iso_year, iso_week, _ = voucher_date.isocalendar()
+        week_start = date.fromisocalendar(iso_year, iso_week, 1)
+        week_end = date.fromisocalendar(iso_year, iso_week, 7)
+        return {f"{field_prefix}__gte": week_start, f"{field_prefix}__lte": week_end}
+    return {}
+
+
+def voucher_type_next_number(request):
+    """
+    GET /api/voucher-type/next-number/?company_id=1&name=Tax+Invoice[&voucher_date=2026-09-23]
+    Ticket Entry's Invoice Number, driven by the selected Invoice Type's
+    (=VoucherType) own Number Method:
+      - "Manual" -> {"number_method": "Manual", "next_number": null} - the
+        field stays a plain editable text box, nothing suggested.
+      - "Automatic" / "Automatic & Manual Override" -> a suggested number is
+        computed from that voucher type's Additional Numbering Details
+        (prefix/suffix, zero-padding width, and a Restart Numbering period
+        that resets the sequence every Day/Week/Month/Year). The caller
+        decides whether to lock the field (Automatic) or leave it editable
+        with this as a starting value (Automatic & Manual Override).
+    Numbers already used are read straight off existing Tickets.invoice_type
+    (matched by this exact voucher type name) rather than kept in a separate
+    counter column, so it self-heals if a ticket is edited/deleted.
+    """
+    if request.method != "GET":
+        return HttpResponseNotAllowed(["GET"])
+
+    company_id = request.GET.get("company_id")
+    name = (request.GET.get("name") or "").strip()
+    if not company_id or not name:
+        return JsonResponse({"error": "company_id and name are required"}, status=400)
+
+    try:
+        vt = VoucherType.objects.get(company_id=company_id, name=name)
+    except VoucherType.DoesNotExist:
+        return JsonResponse({"error": "Voucher Type not found."}, status=404)
+
+    if vt.number_method == "Manual":
+        return JsonResponse({"number_method": vt.number_method, "next_number": None})
+
+    voucher_date = _parse_date(request.GET.get("voucher_date")) or datetime.now().date()
+    prefix = vt.an_prefix_details or ""
+    suffix = vt.an_suffix_details or ""
+    width = vt.an_width_of_invoice_number
+    starting_number = vt.an_restart_starting_number or 1
+    period = vt.an_restart_period if vt.allow_additional_numbering else "None"
+
+    candidates = Ticket.objects.filter(company_id=company_id, invoice_type=name)
+    if vt.allow_additional_numbering and vt.an_restart_applicable_from:
+        candidates = candidates.filter(invoice_date__gte=vt.an_restart_applicable_from)
+    candidates = candidates.filter(**_period_bucket_filter("invoice_date", voucher_date, period))
+
+    max_seq = None
+    for inv_no in candidates.values_list("invoice_number", flat=True):
+        s = inv_no or ""
+        if prefix and s.startswith(prefix):
+            s = s[len(prefix):]
+        if suffix and s.endswith(suffix):
+            s = s[:len(s) - len(suffix)]
+        if s.isdigit():
+            max_seq = max(max_seq or 0, int(s))
+
+    next_seq = (max_seq + 1) if max_seq is not None else starting_number
+    seq_str = str(next_seq).zfill(width) if (vt.an_prefill_with_zero and width) else str(next_seq)
+    next_number = f"{prefix}{seq_str}{suffix}"
+
+    return JsonResponse({"number_method": vt.number_method, "next_number": next_number})
 
 
 SUPPLIER_RULE_FIELDS = [

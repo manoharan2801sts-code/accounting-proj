@@ -408,6 +408,17 @@
         } else {
           currentMain.removeAttribute("style");
         }
+        // Sync the class list too, not just style - several pages (e.g.
+        // voucher-type.html's "vt-main", company-master.html's "cmx-main",
+        // report-dsr-airline-booking.html's "dsr-main") hang their own
+        // locked-viewport scroll container's CSS off an extra class on
+        // .app-main, same idea as the style sync above. .app-main is a
+        // persistent shell element that survives across navigations, so
+        // without this the PREVIOUS page's extra class (or none at all)
+        // stayed stuck here and the new page's scroll area never got its
+        // real overflow/height rules until a full reload re-parsed the
+        // actual HTML from scratch.
+        currentMain.className = newMain.className;
         currentMain.classList.remove("spa-fade-in");
         void currentMain.offsetWidth; // trigger reflow for animation
         currentMain.classList.add("spa-fade-in");

@@ -1,4 +1,5 @@
 (async function () {
+  const API_BASE = window.API_BASE || "/api";
   let activeCompanyId;
   let currentCards = []; // cards loaded for the currently selected Card Type
   let ledgers = []; // "Current Liabilities" ledgers, loaded once per company
@@ -6,8 +7,8 @@
 
   const CARD_MASK_PREFIX = "XXXXXXXXXXXX"; // 12 X's — same for Own Card and Client Card
   const LEDGER_GROUP = "Current Liabilities";
-  const FOP_MASTER_API = `${window.API_BASE || '/api'}/fop-master/`;
-  const LEDGERS_BY_GROUP_API = `${window.API_BASE || '/api'}/ledgers-by-group/`;
+  const FOP_MASTER_API = `${API_BASE}/fop-master/`;
+  const LEDGERS_BY_GROUP_API = `${API_BASE}/ledgers-by-group/`;
 
   // DOM Elements - Top Toolbar
   const cardTypeSelect = document.getElementById("fm-card-type-select");
