@@ -14,13 +14,23 @@
 
 .vloader-box { display: flex; flex-direction: column; align-items: center; gap: 18px; }
 
-.vloader-logo {
-  height: 48px; width: auto;
-  animation: vloader-pulse 1.6s ease-in-out infinite;
+.vloader-logo-wrap { position: relative; display: inline-block; height: 48px; }
+.vloader-logo { height: 48px; width: auto; display: block; }
+
+/* Globe icon sits in the logo's left ~48x48px (image is 250x50, icon is
+   square) - the orbit's pivot is that square's center, radius just outside
+   the globe artwork so the plane visibly circles it rather than overlapping. */
+.vloader-plane-orbit {
+  position: absolute; top: 50%; left: 24px; width: 0; height: 0;
+  animation: vloader-orbit 2.4s linear infinite;
 }
-@keyframes vloader-pulse {
-  0%, 100% { opacity: 0.6; transform: scale(0.96); }
-  50% { opacity: 1; transform: scale(1); }
+.vloader-plane {
+  position: absolute; left: -7px; top: -33px;
+  color: var(--color-teal, #3B6DB5);
+}
+@keyframes vloader-orbit {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 .vloader-bars {
@@ -61,5 +71,5 @@
 
 @media (prefers-reduced-motion: reduce) {
   .vloader-bars span, .vloader-inline span { animation: none; transform: scaleY(1); opacity: 1; }
-  .vloader-logo { animation: none; opacity: 1; transform: none; }
+  .vloader-plane-orbit { animation: none; }
 }

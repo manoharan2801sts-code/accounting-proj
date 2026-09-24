@@ -22,7 +22,14 @@
     overlay.id = "vloaderOverlay";
     overlay.innerHTML = `
       <div class="vloader-box">
-        <img src="assets/img/travel-agency-logo.png" alt="TRAVEL AGENCY" class="vloader-logo" />
+        <div class="vloader-logo-wrap">
+          <img src="assets/img/travel-agency-logo.png" alt="TRAVEL AGENCY" class="vloader-logo" />
+          <span class="vloader-plane-orbit" aria-hidden="true">
+            <svg class="vloader-plane" width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M21 16v-2l-8-5V3.5a1.5 1.5 0 0 0-3 0V9l-8 5v2l8-2.5V19l-2.5 1.8V22l3.5-1 3.5 1v-1.2L13 19v-5.5l8 2.5z"/>
+            </svg>
+          </span>
+        </div>
         <div class="vloader-bars" aria-hidden="true">
           <span></span><span></span><span></span><span></span><span></span>
         </div>
