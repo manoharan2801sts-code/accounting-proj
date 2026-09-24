@@ -9,14 +9,14 @@
  *
  * Also exposed as window.VoyagerLoader for any page that wants to show it
  * again for a specific action:
- *   VoyagerLoader.show("Loading dashboard…");
+ *   VoyagerLoader.show();
  *   VoyagerLoader.hide();
  *   VoyagerLoader.showFor(800); // auto-hide after ms
  */
 (function (window) {
   let overlayEl = null;
 
-  function build(message) {
+  function build() {
     const overlay = document.createElement("div");
     overlay.className = "vloader-overlay";
     overlay.id = "vloaderOverlay";
@@ -30,25 +30,16 @@
             </svg>
           </span>
         </div>
-        <div class="vloader-bars" aria-hidden="true">
-          <span></span><span></span><span></span><span></span><span></span>
-        </div>
-        <div class="vloader-label" id="vloaderLabel">${message || "Loading…"}</div>
       </div>
     `;
     return overlay;
   }
 
   const VoyagerLoader = {
-    show(message) {
-      if (overlayEl) { this.setMessage(message); return; }
-      overlayEl = build(message);
+    show() {
+      if (overlayEl) return;
+      overlayEl = build();
       document.body.appendChild(overlayEl);
-    },
-    setMessage(message) {
-      if (!message) return;
-      const label = document.getElementById("vloaderLabel");
-      if (label) label.textContent = message;
     },
     hide() {
       if (!overlayEl) return;
@@ -57,8 +48,8 @@
       overlayEl = null;
       setTimeout(() => el.remove(), 240);
     },
-    showFor(ms, message) {
-      this.show(message);
+    showFor(ms) {
+      this.show();
       setTimeout(() => this.hide(), ms || 700);
     },
   };

@@ -1,6 +1,6 @@
 /* ==========================================================================
-   Voyager ERP — Bar Chart Loading Screen
-   Drop-in overlay: five bars rise to different heights, loop smoothly.
+   TRAVEL AGENCY — Branded Loading Screen
+   Full-page overlay: static logo, plane orbiting its globe icon.
    Use for page loads / heavy data fetches. Respects reduced-motion.
    ========================================================================== */
 
@@ -33,29 +33,9 @@
   to { transform: rotate(360deg); }
 }
 
-.vloader-bars {
-  display: flex; align-items: flex-end; gap: 6px; height: 64px;
-}
-.vloader-bars span {
-  width: 8px; border-radius: 3px 3px 0 0;
-  background: linear-gradient(180deg, var(--color-teal, #3B6DB5) 0%, var(--color-navy, #17324D) 100%);
-  animation: vloader-rise 1.1s ease-in-out infinite;
-}
-.vloader-bars span:nth-child(1) { height: 22%; animation-delay: 0ms; }
-.vloader-bars span:nth-child(2) { height: 45%; animation-delay: 90ms; }
-.vloader-bars span:nth-child(3) { height: 70%; animation-delay: 180ms; }
-.vloader-bars span:nth-child(4) { height: 100%; animation-delay: 270ms; }
-.vloader-bars span:nth-child(5) { height: 55%; animation-delay: 360ms; }
-
 @keyframes vloader-rise {
   0%, 100% { transform: scaleY(0.35); opacity: 0.55; }
   50% { transform: scaleY(1); opacity: 1; }
-}
-
-.vloader-label {
-  font-family: var(--font-body, 'Inter', sans-serif);
-  font-size: 13px; font-weight: 500; color: var(--color-text-muted, #64748B);
-  letter-spacing: 0.01em;
 }
 
 /* Inline / small variant for buttons and table cells */
@@ -70,6 +50,6 @@
 .vloader-inline span:nth-child(3) { height: 65%; animation-delay: 240ms; }
 
 @media (prefers-reduced-motion: reduce) {
-  .vloader-bars span, .vloader-inline span { animation: none; transform: scaleY(1); opacity: 1; }
+  .vloader-inline span { animation: none; transform: scaleY(1); opacity: 1; }
   .vloader-plane-orbit { animation: none; }
 }
