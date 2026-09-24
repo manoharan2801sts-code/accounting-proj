@@ -25,7 +25,7 @@
     setUser: (u) => localStorage.setItem(USER_KEY, JSON.stringify(u)),
     getCompanyId: () => localStorage.getItem(COMPANY_KEY),
     setCompanyId: (id) => localStorage.setItem(COMPANY_KEY, id),
-    isMockMode: () => localStorage.getItem(MOCK_KEY) === "1" || localStorage.getItem(TOKEN_KEY) === "demo-token" || !localStorage.getItem(TOKEN_KEY),
+    isMockMode: () => localStorage.getItem(MOCK_KEY) === "1",
     setMockMode: (on) => (on ? localStorage.setItem(MOCK_KEY, "1") : localStorage.removeItem(MOCK_KEY)),
     clear: () => {
       [TOKEN_KEY, REFRESH_KEY, USER_KEY, MOCK_KEY].forEach((k) => localStorage.removeItem(k));

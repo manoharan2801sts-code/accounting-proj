@@ -2203,3 +2203,15 @@ def company_master_delete(request, company_id):
 
     company.delete()
     return JsonResponse({"ok": True})
+
+
+@csrf_exempt
+def seed_database(request):
+    """
+    GET/POST /api/seed-database/
+    Initializes TiDB / MySQL database with all groups, ledgers, tickets, and mappings.
+    """
+    from load_initial_data import load_data
+    force = request.GET.get("force", "false").lower() in ("true", "1")
+    res = load_data(force=force)
+    return JsonResponse(res)

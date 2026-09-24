@@ -42,4 +42,5 @@ urlpatterns = [
     path("company-master/", views.company_master_list, name="company-master-list"),
     path("company-master/save/", views.company_master_save, name="company-master-save"),
     path("company-master/<int:company_id>/delete/", views.company_master_delete, name="company-master-delete"),
+    path("seed-database/", views.seed_database, name="seed-database"),
 ]

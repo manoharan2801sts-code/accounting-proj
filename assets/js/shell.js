@@ -552,14 +552,11 @@
   async function init({ activeKey, onCompanyChange }) {
     currentOnCompanyChange = onCompanyChange;
 
-    if (!Store.getToken()) {
-      // No login backend is wired up yet, so every visitor gets a session
-      // token automatically. This intentionally does NOT enable mock mode —
-      // pages hit the real API and only fall back to demo data per-request
-      // if a route genuinely doesn't exist on the backend yet.
+    if (!Store.getToken() || Store.getToken() === "demo-token") {
       Store.setToken("session-token");
       Store.setRefresh("session-refresh");
       Store.setUser(Store.getUser() || { full_name: "Ananya Krishnan" });
+      localStorage.removeItem("voyager_mock_mode");
     }
     const user = Store.getUser() || { full_name: "Ananya Krishnan" };
     const currentTheme = document.documentElement.getAttribute("data-theme") || "light";
