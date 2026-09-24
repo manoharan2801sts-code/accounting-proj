@@ -209,6 +209,7 @@ def customers_list(request):
             "gst_no": c.gst_no or c.vat_trn_no,
             "address": address,
             "agent_id": c.agent_id,
+            "state_name": c.state_name,
         })
     return JsonResponse(data, safe=False)
 
@@ -1108,8 +1109,37 @@ def _compute_jv_lines(ticket, lines, mapping_cache=None):
         ledger_id, ledger_name = mapped_ledger(masters_category, field_name)
         return {"role": field_name, "ledger_id": ledger_id, "ledger_name": ledger_name, "debit": debit, "credit": credit}
 
+    # Output GST (Credit side): same State (Company Master's State vs the
+    # customer Ledger's own State from Ledger Master) = intra-state sale,
+    # split Credit half/half into Output CGST A/c + Output SGST A/c;
+    # different State = inter-state, one combined Output IGST A/c line.
+    # JV_LINE_MAP has TWO Credit "Output IGST A/c" entries (customer-side
+    # "gst" and supplier-side "supp_gst" - previously kept as separate
+    # rows per an earlier instruction). Per the newer instruction, those
+    # no longer show as two/duplicate "Output IGST A/c" rows - both feed
+    # ONE combined Output GST amount here instead, which then follows the
+    # same-state/different-state rule above as a single set of lines.
+    # The separate DEBIT "Input IGST A/c" line (also fed by supp_gst) is
+    # a different line entirely (Input, not Output) and is untouched.
+    company_state = (CompanyMaster.objects.filter(id=ticket.company_id).values_list("state", flat=True).first() or "").strip().lower()
+    customer_state = (ticket.customer.state_name or "").strip().lower()
+    same_state = bool(company_state) and bool(customer_state) and company_state == customer_state
+    OUTPUT_GST_KEYS = {"gst", "supp_gst"}
+
     accounts = customer_rows("Debit", customer_total) + supplier_rows("Credit")
+    output_gst_emitted = False
     for dr_cr, masters_category, field_name, amount_key in JV_LINE_MAP:
+        if dr_cr == "Credit" and masters_category == "GST and TDS" and field_name == "Output IGST A/c" and amount_key in OUTPUT_GST_KEYS:
+            if not output_gst_emitted:
+                output_gst_emitted = True
+                combined_gst = round(role_amounts["gst"] + role_amounts["supp_gst"], 2)
+                if same_state:
+                    half = round(combined_gst / 2, 2)
+                    accounts.append(mapped_row("Credit", "GST and TDS", "Output CGST A/c", half))
+                    accounts.append(mapped_row("Credit", "GST and TDS", "Output SGST A/c", half))
+                else:
+                    accounts.append(mapped_row("Credit", "GST and TDS", "Output IGST A/c", combined_gst))
+            continue
         accounts.append(mapped_row(dr_cr, masters_category, field_name, role_amounts[amount_key]))
 
     narration = " / ".join([p for p in [ticket.booking_reference, ticket.airline_pnr, lines[0].ticket_no] if p])
@@ -2362,6 +2392,7 @@ def _pg_master_dict(p):
         "payment_master_ledger_id": p.payment_master_ledger_id, "payment_master_ledger_name": p.payment_master_ledger_name,
         "pg_charges_master_ledger_id": p.pg_charges_master_ledger_id, "pg_charges_master_ledger_name": p.pg_charges_master_ledger_name,
         "pg_charges_master_ledger_gst_percentage": float(p.pg_charges_master_ledger.gst_percentage) if p.pg_charges_master_ledger_id else 0,
+        "pg_charges_percentage": float(p.pg_charges_percentage) if p.pg_charges_percentage is not None else None,
         "is_active": p.is_active,
     }
 
@@ -2415,6 +2446,10 @@ def pg_master_save(request):
         except Ledger.DoesNotExist:
             return JsonResponse({"error": f"Ledger {charges_ledger_id} not found."}, status=404)
 
+    charges_percentage = _safe_decimal(body.get("pg_charges_percentage"), default=None)
+    if charges_percentage is not None and not (0 <= charges_percentage <= 100):
+        return JsonResponse({"error": "PG Charges Percentage must be between 0 and 100."}, status=400)
+
     dup = PGMaster.objects.filter(company_id=company_id, gateway_name=gateway_name).exclude(id=body.get("id")).exists()
     if dup:
         return JsonResponse({"error": f"Payment Gateway Name \"{gateway_name}\" is already used."}, status=409)
@@ -2428,6 +2463,7 @@ def pg_master_save(request):
             gateway.payment_master_ledger_name = ledger.alias_name or ledger.name
             gateway.pg_charges_master_ledger = charges_ledger
             gateway.pg_charges_master_ledger_name = (charges_ledger.alias_name or charges_ledger.name) if charges_ledger else None
+            gateway.pg_charges_percentage = charges_percentage
             gateway.is_active = bool(body.get("is_active", True))
             gateway.save()
             return JsonResponse(_pg_master_dict(gateway), status=200)
@@ -2440,6 +2476,7 @@ def pg_master_save(request):
             "payment_master_ledger": ledger, "payment_master_ledger_name": ledger.alias_name or ledger.name,
             "pg_charges_master_ledger": charges_ledger,
             "pg_charges_master_ledger_name": (charges_ledger.alias_name or charges_ledger.name) if charges_ledger else None,
+            "pg_charges_percentage": charges_percentage,
             "is_active": bool(body.get("is_active", True)),
         },
     )
