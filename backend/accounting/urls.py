@@ -21,6 +21,7 @@ urlpatterns = [
     path("day-book/", views.day_book_report, name="day-book-report"),
     path("cash-bank-book/", views.cash_bank_book_report, name="cash-bank-book-report"),
     path("trial-balance/", views.trial_balance_report, name="trial-balance-report"),
+    path("dashboard/", views.dashboard_summary, name="dashboard-summary"),
     path("tickets/", views.tickets_list, name="tickets-list"),
     path("tickets/create/", views.ticket_create, name="ticket-create"),
     path("tickets/<int:ticket_id>/update/", views.ticket_update, name="ticket-update"),

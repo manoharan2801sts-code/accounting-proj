@@ -962,6 +962,158 @@ def cash_bank_book_report(request):
     })
 
 
+def dashboard_summary(request):
+    """
+    GET /api/dashboard/?company_id=1
+    Feeds dashboard.html's hero cards/revenue+finance+compliance tiles/
+    trend chart/product-mix chart/branch table - shape driven entirely by
+    window.VoyagerHardcode.DASHBOARD_HERO_CARDS/DASHBOARD_REVENUE_TILES/
+    DASHBOARD_FINANCE_TILES's dataPath strings plus dashboard.js's own
+    direct data.* reads, not something this view gets to choose freely.
+
+    Only "Airline" tickets exist in this app today (Hotel/Visa/Tour/
+    Insurance never got their own modules built) - every revenue/mix
+    figure that would come from those stays 0 rather than being mocked,
+    same principle as everywhere else real data replaced mock data this
+    session: show what's real, don't fabricate the rest.
+
+    Sales = each ticket's real Total Billed (TicketLine.compute_total(),
+    same figure the customer is actually debited). "Revenue" here means
+    the agency's own earnings on top of the raw fare (markup/service
+    fee/commission), not the gross sale - matches how Ledgers already
+    separate "Sales Accounts" from "Direct/Indirect Income" in the Chart
+    of Accounts.
+    """
+    if request.method != "GET":
+        return HttpResponseNotAllowed(["GET"])
+
+    company_id = request.GET.get("company_id")
+    if not company_id:
+        return JsonResponse({"error": "company_id is required"}, status=400)
+
+    today = datetime.now().date()
+    fy_start = date(today.year if today.month >= 4 else today.year - 1, 4, 1)
+    month_start = today.replace(day=1)
+
+    tickets = list(
+        Ticket.objects.filter(company_id=company_id, invoice_date__gte=fy_start)
+        .prefetch_related("lines")
+    )
+
+    def line_sales(l):
+        return float(l.compute_total())
+
+    def line_earnings(l):
+        return (
+            float(l.markup) + float(l.addl_markup) + float(l.ssr_markup)
+            + float(l.service_fee) + float(l.addl_service_fee) + float(l.ssr_service_fee)
+        )
+
+    def line_service_charges(l):
+        return float(l.service_fee) + float(l.addl_service_fee) + float(l.ssr_service_fee)
+
+    def line_markup(l):
+        return float(l.markup) + float(l.addl_markup) + float(l.ssr_markup)
+
+    today_sales = month_sales = ytd_sales = 0.0
+    ticket_revenue = service_charges = markup_revenue = 0.0
+    monthly = {}  # "YYYY-MM" -> {"sales": x, "profit": y}
+    branch = {}   # branch_name -> {"sales": x, "profit": y}
+
+    for t in tickets:
+        lines = list(t.lines.all())
+        if not lines:
+            continue
+        t_sales = sum(line_sales(l) for l in lines)
+        t_earnings = sum(line_earnings(l) for l in lines)
+        ytd_sales += t_sales
+        if t.invoice_date >= month_start:
+            month_sales += t_sales
+        if t.invoice_date == today:
+            today_sales += t_sales
+        ticket_revenue += t_earnings
+        service_charges += sum(line_service_charges(l) for l in lines)
+        markup_revenue += sum(line_markup(l) for l in lines)
+
+        bucket = t.invoice_date.strftime("%Y-%m")
+        m = monthly.setdefault(bucket, {"sales": 0.0, "profit": 0.0})
+        m["sales"] += t_sales
+        m["profit"] += t_earnings
+
+        b = branch.setdefault(t.branch_name or "Unassigned", {"sales": 0.0, "profit": 0.0})
+        b["sales"] += t_sales
+        b["profit"] += t_earnings
+
+    def group_net_balance(group_names):
+        deltas = _ledger_balance_deltas(company_id)
+        keys = {_normalize_group_name(n) for n in group_names}
+        groups = [g for g in LedgerGroup.objects.filter(company_id=company_id) if _normalize_group_name(g.name) in keys]
+        total = 0.0
+        for g in groups:
+            for l in Ledger.objects.filter(company_id=company_id, group_id=g.id):
+                total += float(l.signed_balance) + deltas.get(l.id, 0.0)
+        return total
+
+    cash_position = group_net_balance(["Cash-in-Hand"])
+    bank_position = group_net_balance(["Bank Accounts"])
+    receivables = max(0.0, group_net_balance(["Sundry Debtors"]))
+    payables = max(0.0, -group_net_balance(["Sundry Creditors"]))
+
+    def duties_taxes_total(keyword):
+        deltas = _ledger_balance_deltas(company_id)
+        groups = [g for g in LedgerGroup.objects.filter(company_id=company_id) if _normalize_group_name(g.name) == _normalize_group_name("Duties & Taxes")]
+        total = 0.0
+        for g in groups:
+            for l in Ledger.objects.filter(company_id=company_id, group_id=g.id, name__icontains=keyword):
+                total += float(l.signed_balance) + deltas.get(l.id, 0.0)
+        return max(0.0, -total)
+
+    gst_payable = duties_taxes_total("GST")
+    tds_payable = duties_taxes_total("TDS")
+
+    months_sorted = sorted(monthly.keys())[-6:]
+    month_labels = [datetime.strptime(m, "%Y-%m").strftime("%b") for m in months_sorted]
+
+    return JsonResponse({
+        "sales": {
+            "today_sales": round(today_sales, 2),
+            "month_sales": round(month_sales, 2),
+            "ytd_sales": round(ytd_sales, 2),
+        },
+        "revenue": {
+            "ticket_revenue": round(ticket_revenue, 2),
+            "hotel_revenue": 0, "visa_revenue": 0, "insurance_revenue": 0,
+            "service_charges": round(service_charges, 2),
+            "markup_revenue": round(markup_revenue, 2),
+        },
+        "finance": {
+            "cash_position": round(cash_position, 2),
+            "bank_position": round(bank_position, 2),
+            "outstanding_receivables": round(receivables, 2),
+            "outstanding_payables": round(payables, 2),
+            "bsp_liability": 0,
+            "supplier_liability": round(payables, 2),
+        },
+        "compliance": {
+            "gst_payable": round(gst_payable, 2),
+            "tds_payable": round(tds_payable, 2),
+            "vat_payable": 0,
+        },
+        "monthly_revenue_trend": [{"label": month_labels[i], "value": round(monthly[m]["sales"], 2)} for i, m in enumerate(months_sorted)],
+        "profitability_trend": [{"label": month_labels[i], "value": round(monthly[m]["profit"], 2)} for i, m in enumerate(months_sorted)],
+        "product_mix": [
+            {"product": "Airline Tickets", "value": round(ticket_revenue, 2)},
+            {"product": "Hotels", "value": 0},
+            {"product": "Visa", "value": 0},
+            {"product": "Insurance", "value": 0},
+        ],
+        "branch_performance": [
+            {"branch_name": name, "sales": round(v["sales"], 2), "profit": round(v["profit"], 2)}
+            for name, v in sorted(branch.items(), key=lambda kv: -kv[1]["sales"])
+        ],
+    })
+
+
 TICKET_HEADER_FIELDS = [
     "invoice_number", "invoice_date", "invoice_type", "booking_mode", "booking_type", "booking_status",
     "travel_type", "user_name", "currency", "roe", "booking_given_by",

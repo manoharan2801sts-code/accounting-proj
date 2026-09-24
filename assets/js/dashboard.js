@@ -68,7 +68,7 @@
 
   async function loadDashboard(companyId, country) {
     document.getElementById("scope-label").textContent = "Loading dashboard for the selected entity…";
-    const data = await get(`/dashboard?company_id=${companyId}`);
+    const data = await get(`/dashboard/?company_id=${companyId}`);
     const ccy = currency(country);
     document.getElementById("scope-label").textContent =
       `Real-time CFO dashboard — ${country === "AE" ? "UAE entity, AED" : "India entity, INR"}`;
