@@ -1,6 +1,14 @@
 /**
- * Voyager ERP — Bar Chart Loader
- * Usage:
+ * TRAVEL AGENCY — Branded Loading Screen
+ * Auto-runs the moment this script executes: since its <script> tag sits
+ * as the very first thing right after <body> on every page, document.body
+ * already exists (the parser creates it as soon as it sees the opening tag)
+ * but has no children yet — so the overlay covers the page before anything
+ * else has a chance to paint, then removes itself once the page finishes
+ * loading (with a safety-net timeout in case "load" never fires).
+ *
+ * Also exposed as window.VoyagerLoader for any page that wants to show it
+ * again for a specific action:
  *   VoyagerLoader.show("Loading dashboard…");
  *   VoyagerLoader.hide();
  *   VoyagerLoader.showFor(800); // auto-hide after ms
@@ -14,10 +22,10 @@
     overlay.id = "vloaderOverlay";
     overlay.innerHTML = `
       <div class="vloader-box">
+        <img src="assets/img/travel-agency-logo.png" alt="TRAVEL AGENCY" class="vloader-logo" />
         <div class="vloader-bars" aria-hidden="true">
           <span></span><span></span><span></span><span></span><span></span>
         </div>
-        <div class="vloader-brand">TRAVEL AGENCY</div>
         <div class="vloader-label" id="vloaderLabel">${message || "Loading…"}</div>
       </div>
     `;
@@ -49,4 +57,12 @@
   };
 
   window.VoyagerLoader = VoyagerLoader;
+
+  if (document.body && !document.getElementById("vloaderOverlay")) {
+    overlayEl = build();
+    document.body.appendChild(overlayEl);
+    const hideNow = () => VoyagerLoader.hide();
+    window.addEventListener("load", hideNow);
+    setTimeout(hideNow, 6000);
+  }
 })(window);

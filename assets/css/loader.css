@@ -14,6 +14,15 @@
 
 .vloader-box { display: flex; flex-direction: column; align-items: center; gap: 18px; }
 
+.vloader-logo {
+  height: 48px; width: auto;
+  animation: vloader-pulse 1.6s ease-in-out infinite;
+}
+@keyframes vloader-pulse {
+  0%, 100% { opacity: 0.6; transform: scale(0.96); }
+  50% { opacity: 1; transform: scale(1); }
+}
+
 .vloader-bars {
   display: flex; align-items: flex-end; gap: 6px; height: 64px;
 }
@@ -39,11 +48,6 @@
   letter-spacing: 0.01em;
 }
 
-.vloader-brand {
-  font-family: var(--font-display, 'Inter', sans-serif);
-  font-size: 14px; font-weight: 600; color: var(--color-navy, #17324D);
-}
-
 /* Inline / small variant for buttons and table cells */
 .vloader-inline { display: inline-flex; align-items: flex-end; gap: 3px; height: 16px; vertical-align: middle; }
 .vloader-inline span {
@@ -57,4 +61,5 @@
 
 @media (prefers-reduced-motion: reduce) {
   .vloader-bars span, .vloader-inline span { animation: none; transform: scaleY(1); opacity: 1; }
+  .vloader-logo { animation: none; opacity: 1; transform: none; }
 }
