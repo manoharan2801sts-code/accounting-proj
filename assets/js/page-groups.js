@@ -51,7 +51,7 @@
   async function refreshGroupList() {
     allGroups = Store.isMockMode()
       ? window.VoyagerMock.getAccountGroups(activeCompanyId)
-      : await get(`/accounting/accounts/groups?company_id=${activeCompanyId}`);
+      : await get(`/ledger-groups/?company_id=${activeCompanyId}`);
     byParent = {};
     allGroups.forEach((g) => { (byParent[g.parent_id || "root"] = byParent[g.parent_id || "root"] || []).push(g); });
     document.getElementById("group-parent").innerHTML = renderParentOptions(editingId);
@@ -115,7 +115,7 @@
             const result = window.VoyagerMock.deleteGroup(activeCompanyId, group.id);
             if (result.error) throw new Error(result.error);
           } else {
-            await del(`/accounting/accounts/groups/${group.id}?company_id=${activeCompanyId}`);
+            await del(`/ledger-groups/${group.id}/delete/?company_id=${activeCompanyId}`);
           }
           await refreshGroupList();
         } catch (err) {
@@ -141,14 +141,14 @@
           const result = window.VoyagerMock.updateGroup(activeCompanyId, { id: editingId, name, parent_id });
           if (result.error) throw new Error(result.error);
         } else {
-          await put(`/accounting/accounts/groups/${editingId}?company_id=${activeCompanyId}`, { name, parent_id });
+          await put(`/ledger-groups/${editingId}/update/?company_id=${activeCompanyId}`, { name, parent_id });
         }
       } else {
         if (Store.isMockMode()) {
           const result = window.VoyagerMock.addGroup(activeCompanyId, { name, parent_id });
           if (result.error) throw new Error(result.error);
         } else {
-          await post(`/accounting/accounts/groups?company_id=${activeCompanyId}`, { name, parent_id });
+          await post(`/ledger-groups/create/?company_id=${activeCompanyId}`, { name, parent_id });
         }
       }
       closeForm();

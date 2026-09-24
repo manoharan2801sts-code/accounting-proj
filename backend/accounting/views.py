@@ -44,6 +44,7 @@ def ledger_groups_list(request):
             "parent_id": g.parent_id,
             "is_group": g.is_group,
             "is_system": g.is_system,
+            "is_master": g.is_system,
         }
         for g in groups
     ]
@@ -53,12 +54,11 @@ def ledger_groups_list(request):
 @csrf_exempt
 def ledger_group_create(request):
     """
-    POST /api/ledger-groups/create/
-    Body: { "company_id": 1, "name": "...", "code": "...", "account_type": "ASSET", "parent_id": 5 }
-    Kept separate from the list endpoint on purpose — the ledger-entry
-    form only needs to READ groups today; this is here so adding new
-    groups from the UI later is a one-line frontend change, not a new
-    backend endpoint.
+    POST /api/ledger-groups/create/?company_id=1
+    Body: { "name": "...", "parent_id": 5, "code": "..." (optional),
+            "account_type": "ASSET" (optional - derived from the parent
+            group when not given, since groups.html's "New Group" form
+            only asks for a name + parent, not an account type) }
     """
     if request.method != "POST":
         return HttpResponseNotAllowed(["POST"])
@@ -68,20 +68,114 @@ def ledger_group_create(request):
     except json.JSONDecodeError:
         return JsonResponse({"error": "Invalid JSON body"}, status=400)
 
-    required = ["company_id", "name", "account_type"]
-    missing = [f for f in required if not body.get(f)]
-    if missing:
-        return JsonResponse({"error": f"Missing required field(s): {', '.join(missing)}"}, status=400)
+    company_id = request.GET.get("company_id") or body.get("company_id")
+    name = (body.get("name") or "").strip()
+    parent_id = body.get("parent_id")
+    if not company_id or not name:
+        return JsonResponse({"error": "company_id and name are required"}, status=400)
+
+    account_type = body.get("account_type")
+    parent = None
+    if parent_id:
+        try:
+            parent = LedgerGroup.objects.get(id=parent_id, company_id=company_id)
+        except LedgerGroup.DoesNotExist:
+            return JsonResponse({"error": "Parent group not found."}, status=400)
+        account_type = account_type or parent.account_type
+    if not account_type:
+        return JsonResponse({"error": "account_type is required when no parent_id is given."}, status=400)
+
+    if LedgerGroup.objects.filter(company_id=company_id, name__iexact=name, parent_id=parent_id).exists():
+        return JsonResponse({"error": f"A group named \"{name}\" already exists under this parent."}, status=409)
 
     group = LedgerGroup.objects.create(
-        company_id=body["company_id"],
-        name=body["name"],
+        company_id=company_id,
+        name=name,
         code=body.get("code"),
-        account_type=body["account_type"],
-        parent_id=body.get("parent_id"),
+        account_type=account_type,
+        parent=parent,
         is_group=body.get("is_group", True),
     )
     return JsonResponse(model_to_dict(group), status=201)
+
+
+@csrf_exempt
+def ledger_group_update(request, group_id):
+    """
+    PUT /api/ledger-groups/<id>/update/?company_id=1
+    Body: { "name": "...", "parent_id": 5 }
+    System (master) groups can't be edited - matches groups.html's own
+    "System group - cannot be modified" guard, enforced server-side too.
+    """
+    if request.method != "PUT":
+        return HttpResponseNotAllowed(["PUT"])
+
+    company_id = request.GET.get("company_id")
+    if not company_id:
+        return JsonResponse({"error": "company_id is required"}, status=400)
+
+    try:
+        group = LedgerGroup.objects.get(id=group_id, company_id=company_id)
+    except LedgerGroup.DoesNotExist:
+        return JsonResponse({"error": "Group not found."}, status=404)
+    if group.is_system:
+        return JsonResponse({"error": "System groups can't be modified."}, status=403)
+
+    try:
+        body = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON body"}, status=400)
+
+    name = (body.get("name") or "").strip()
+    parent_id = body.get("parent_id")
+    if not name or not parent_id:
+        return JsonResponse({"error": "name and parent_id are required"}, status=400)
+
+    try:
+        parent = LedgerGroup.objects.get(id=parent_id, company_id=company_id)
+    except LedgerGroup.DoesNotExist:
+        return JsonResponse({"error": "Parent group not found."}, status=400)
+
+    if LedgerGroup.objects.filter(company_id=company_id, name__iexact=name, parent_id=parent_id).exclude(id=group.id).exists():
+        return JsonResponse({"error": f"A group named \"{name}\" already exists under this parent."}, status=409)
+
+    group.name = name
+    group.parent = parent
+    group.account_type = parent.account_type
+    group.save()
+    return JsonResponse(model_to_dict(group), status=200)
+
+
+@csrf_exempt
+def ledger_group_delete(request, group_id):
+    """
+    DELETE /api/ledger-groups/<id>/delete/?company_id=1
+    Refuses a system group outright, and any group that still has child
+    groups or ledgers under it (Ledger.group and LedgerGroup.parent are
+    both on_delete=PROTECT) - matches the confirm dialog's own "This only
+    works if no ledgers exist under it" text.
+    """
+    if request.method != "DELETE":
+        return HttpResponseNotAllowed(["DELETE"])
+
+    company_id = request.GET.get("company_id")
+    if not company_id:
+        return JsonResponse({"error": "company_id is required"}, status=400)
+
+    try:
+        group = LedgerGroup.objects.get(id=group_id, company_id=company_id)
+    except LedgerGroup.DoesNotExist:
+        return JsonResponse({"error": "Group not found."}, status=404)
+    if group.is_system:
+        return JsonResponse({"error": "System groups can't be deleted."}, status=403)
+
+    try:
+        group.delete()
+    except ProtectedError:
+        return JsonResponse(
+            {"error": f"\"{group.name}\" still has ledgers or sub-groups under it and can't be deleted."}, status=409
+        )
+    return JsonResponse({"message": "Group deleted."}, status=200)
 
 
 LEDGER_FIELDS = [

@@ -4,6 +4,8 @@ from . import views
 urlpatterns = [
     path("ledger-groups/", views.ledger_groups_list, name="ledger-groups-list"),
     path("ledger-groups/create/", views.ledger_group_create, name="ledger-group-create"),
+    path("ledger-groups/<int:group_id>/update/", views.ledger_group_update, name="ledger-group-update"),
+    path("ledger-groups/<int:group_id>/delete/", views.ledger_group_delete, name="ledger-group-delete"),
     path("ledgers/create/", views.ledger_create, name="ledger-create"),
     path("ledgers/name-available/", views.ledger_name_available, name="ledger-name-available"),
     path("ledgers/agent-id-available/", views.ledger_agent_id_available, name="ledger-agent-id-available"),
