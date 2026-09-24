@@ -509,7 +509,6 @@ def accounts_list(request):
             "parent_id": f"g{g.parent_id}" if g.parent_id else None,
             "balance": None,
         })
-    deltas = _ledger_balance_deltas(company_id)
     used_ids = set(Ticket.objects.filter(company_id=company_id).values_list("customer_id", flat=True)) | \
                set(Ticket.objects.filter(company_id=company_id).values_list("supplier_id", flat=True))
 
@@ -521,10 +520,11 @@ def accounts_list(request):
             "id": l.id, "code": group_code or "", "name": l.name,
             "account_type": l.account_type, "is_group": False,
             "parent_id": parent_id,
-            "balance": float(l.signed_balance) + deltas.get(l.id, 0.0),
+            "balance": float(l.signed_balance),
             "is_in_use": in_use,
         })
     return JsonResponse(rows, safe=False)
+
 
 
 
