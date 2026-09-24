@@ -25,6 +25,20 @@ Django's migration history matches without re-running the DDL:
 from decimal import Decimal
 from django.db import models
 
+# Process-wide cache for TicketLine.computed_gst's per-(company, field_name)
+# Master-Mapping-ledger GST% lookup — without it, a Chart-of-Accounts/Cash-
+# Bank-Book balance recompute across every ticket in a company re-queries
+# the same handful of mappings once per line (twice, since compute_total()
+# also calls computed_gst), which is negligible against local MySQL but
+# times out gunicorn's worker against TiDB Cloud's network round-trip once
+# there are more than a few dozen tickets. Cleared from views.py whenever
+# Master Mapping or a mapped Ledger's own gst_percentage is edited.
+_gst_pct_cache = {}
+
+
+def clear_gst_pct_cache():
+    _gst_pct_cache.clear()
+
 
 class LedgerGroup(models.Model):
     ACCOUNT_TYPE_CHOICES = [
@@ -449,20 +463,23 @@ class TicketLine(models.Model):
         company_id = self.ticket.company_id
 
         def field_ledger_gst_pct(field_name):
-            m = MasterMapping.objects.filter(
-                company_id=company_id, product_type="Airline", field_name=field_name
-            ).select_related("ledger").first()
-            # Cast to float - self.service_fee etc. are plain Python floats
-            # before this line has ever been saved (ticket_create/
-            # ticket_update build the instance from _safe_decimal() floats,
-            # not Decimals) but real Decimals once re-fetched from the DB
-            # (e.g. _compute_jv_lines/_ledger_balance_deltas iterating
-            # saved TicketLines) - mixing a Decimal ledger.gst_percentage
-            # with whichever this instance currently holds raises
-            # "unsupported operand type(s) for *: 'float'/'decimal.Decimal'
-            # and 'decimal.Decimal'/'float'" depending on which side it is,
-            # so every operand here is explicitly floated first.
-            return float(m.ledger.gst_percentage) if m and m.ledger_id else 0.0
+            cache_key = (company_id, field_name)
+            if cache_key not in _gst_pct_cache:
+                m = MasterMapping.objects.filter(
+                    company_id=company_id, product_type="Airline", field_name=field_name
+                ).select_related("ledger").first()
+                # Cast to float - self.service_fee etc. are plain Python floats
+                # before this line has ever been saved (ticket_create/
+                # ticket_update build the instance from _safe_decimal() floats,
+                # not Decimals) but real Decimals once re-fetched from the DB
+                # (e.g. _compute_jv_lines/_ledger_balance_deltas iterating
+                # saved TicketLines) - mixing a Decimal ledger.gst_percentage
+                # with whichever this instance currently holds raises
+                # "unsupported operand type(s) for *: 'float'/'decimal.Decimal'
+                # and 'decimal.Decimal'/'float'" depending on which side it is,
+                # so every operand here is explicitly floated first.
+                _gst_pct_cache[cache_key] = float(m.ledger.gst_percentage) if m and m.ledger_id else 0.0
+            return _gst_pct_cache[cache_key]
 
         return (
             float(self.service_fee) * field_ledger_gst_pct("Service Fee A/c") / 100

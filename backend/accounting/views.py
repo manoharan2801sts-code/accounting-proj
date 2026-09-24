@@ -15,7 +15,7 @@ from django.forms.models import model_to_dict
 from django.db import transaction, IntegrityError
 from django.db.models import ProtectedError, Q
 
-from .models import LedgerGroup, Ledger, Ticket, TicketLine, Voucher, JournalVoucher, SupplierCommissionRule, MasterMapping, FOPMaster, PGMaster, CompanyMaster
+from .models import LedgerGroup, Ledger, Ticket, TicketLine, Voucher, JournalVoucher, SupplierCommissionRule, MasterMapping, FOPMaster, PGMaster, CompanyMaster, clear_gst_pct_cache
 from .jv_hardcode import JV_LINE_MAP
 
 
@@ -287,6 +287,8 @@ def ledger_update(request, ledger_id):
         if f in body:
             setattr(ledger, f, body[f])
     ledger.save()
+    if "gst_percentage" in body:
+        clear_gst_pct_cache()
     return JsonResponse({"id": ledger.id, "message": "Ledger updated."})
 
 
@@ -1859,6 +1861,7 @@ def master_mapping_save(request):
             }, status=409)
         saved.append(_master_mapping_dict(mapping))
 
+    clear_gst_pct_cache()
     return JsonResponse(saved, safe=False, status=201)
 
 
@@ -1878,6 +1881,7 @@ def master_mapping_delete(request, mapping_id):
         return JsonResponse({"error": "Mapping not found."}, status=404)
 
     mapping.delete()
+    clear_gst_pct_cache()
     return JsonResponse({"ok": True})
 
 
