@@ -1,47 +1,228 @@
 /* ==========================================================================
-   TRAVEL AGENCY — Branded Loading Screen
-   Full-page overlay: static logo, plane orbiting its globe icon.
-   Use for page loads / heavy data fetches. Respects reduced-motion.
+   TRAVEL AGENCY — Realistic 3D Flight Orbit Loader
+   The official brand airplane takes off from the swoosh tip,
+   orbits realistically around the globe with a glowing jet stream contrail,
+   and docks back seamlessly with a crystalline sheen sweep.
    ========================================================================== */
 
 .vloader-overlay {
-  position: fixed; inset: 0; z-index: 2000;
-  background: var(--color-bg-canvas, #F6F8FA);
-  display: flex; align-items: center; justify-content: center;
-  opacity: 1; transition: opacity 220ms ease;
-}
-.vloader-overlay.vloader-hidden { opacity: 0; pointer-events: none; }
-
-.vloader-box { display: flex; flex-direction: column; align-items: center; gap: 18px; }
-
-.vloader-logo-wrap { position: relative; display: inline-block; height: 48px; }
-.vloader-logo { height: 48px; width: auto; display: block; }
-
-/* Globe icon sits in the logo's left ~48x48px (image is 250x50, icon is
-   square) - the orbit's pivot is that square's center, radius just outside
-   the globe artwork so the plane visibly circles it rather than overlapping. */
-.vloader-plane-orbit {
-  position: absolute; top: 50%; left: 24px; width: 0; height: 0;
-  animation: vloader-orbit 2.4s linear infinite;
-}
-.vloader-plane {
-  position: absolute; left: -7px; top: -33px;
-  color: var(--color-teal, #3B6DB5);
-}
-@keyframes vloader-orbit {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  background: rgba(246, 248, 252, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 1;
+  transition: opacity 260ms cubic-bezier(0.4, 0, 0.2, 1);
+  backdrop-filter: blur(16px) saturate(180%);
+  -webkit-backdrop-filter: blur(16px) saturate(180%);
 }
 
-@keyframes vloader-rise {
-  0%, 100% { transform: scaleY(0.35); opacity: 0.55; }
-  50% { transform: scaleY(1); opacity: 1; }
+.vloader-overlay.vloader-hidden {
+  opacity: 0;
+  pointer-events: none;
 }
 
-/* Inline / small variant for buttons and table cells */
-.vloader-inline { display: inline-flex; align-items: flex-end; gap: 3px; height: 16px; vertical-align: middle; }
+.vloader-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  user-select: none;
+}
+
+/* Ambient Backlight Aura */
+.vloader-ambient-aura {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 360px;
+  height: 180px;
+  border-radius: 50%;
+  background: radial-gradient(
+    ellipse at 50% 50%,
+    rgba(56, 189, 248, 0.26) 0%,
+    rgba(37, 99, 235, 0.12) 48%,
+    transparent 72%
+  );
+  filter: blur(28px);
+  pointer-events: none;
+  animation: vloader-aura-pulse 4.2s ease-in-out infinite;
+}
+
+@keyframes vloader-aura-pulse {
+  0%, 100% { transform: translate(-50%, -50%) scale(0.92); opacity: 0.7; }
+  50% { transform: translate(-50%, -50%) scale(1.08); opacity: 1; }
+}
+
+/* Main Flight Stage Container */
+.vloader-stage {
+  position: relative;
+  width: 320px;
+  height: 110px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* SVG Flight Trail Layer */
+.vloader-flight-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  overflow: visible;
+}
+
+/* Base Logo Wrapper (Globe, Swoosh & Brand Typography) */
+.vloader-base-wrap {
+  position: absolute;
+  left: 35px;
+  top: 30px;
+  width: 250px;
+  height: 50px;
+  overflow: hidden;
+  border-radius: 4px;
+}
+
+.vloader-base-img {
+  width: 250px;
+  height: 50px;
+  display: block;
+  image-rendering: -webkit-optimize-contrast;
+  filter: drop-shadow(0 6px 18px rgba(24, 90, 176, 0.16));
+}
+
+/* Crystalline Specular Sheen across 'TRAVEL AGENCY' text upon docking */
+.vloader-sheen-line {
+  position: absolute;
+  top: 0;
+  left: -140%;
+  width: 85%;
+  height: 100%;
+  background: linear-gradient(
+    105deg,
+    transparent 20%,
+    rgba(255, 255, 255, 0.88) 50%,
+    transparent 80%
+  );
+  transform: skewX(-20deg);
+  pointer-events: none;
+  opacity: 0;
+}
+
+.vloader-sheen-line.vloader-sheen-active {
+  opacity: 1;
+  left: 160%;
+  transition: left 620ms cubic-bezier(0.2, 0.8, 0.2, 1), opacity 280ms ease;
+}
+
+/* Flying Airplane Sprite with 3D Aerospace Banking */
+.vloader-plane-carrier {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 28px;
+  height: 20px;
+  pointer-events: none;
+  will-change: transform;
+  transform-origin: 14px 10px;
+  perspective: 600px;
+}
+
+.vloader-plane-sprite {
+  width: 28px;
+  height: 20px;
+  display: block;
+  image-rendering: -webkit-optimize-contrast;
+}
+
+/* Touchdown & Takeoff Diamond Lens Spark */
+.vloader-touchdown-spark {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 14px;
+  height: 14px;
+  margin-left: -7px;
+  margin-top: -7px;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow:
+    0 0 16px 6px rgba(56, 189, 248, 0.95),
+    0 0 32px 12px rgba(37, 99, 235, 0.55);
+  pointer-events: none;
+  opacity: 0;
+  transform: scale(0);
+  transition: opacity 160ms ease;
+}
+
+/* Sleek Minimalist Hairline Progress Indicator */
+.vloader-progress-track {
+  width: 140px;
+  height: 2px;
+  background: rgba(22, 85, 174, 0.12);
+  border-radius: 2px;
+  overflow: hidden;
+  position: relative;
+  margin-top: 6px;
+}
+
+.vloader-progress-bar {
+  width: 45%;
+  height: 100%;
+  background: linear-gradient(90deg, #38bdf8, #2563eb, #38bdf8);
+  border-radius: 2px;
+  position: absolute;
+  animation: vloader-bar-slide 1.6s ease-in-out infinite;
+}
+
+@keyframes vloader-bar-slide {
+  0% { left: -45%; }
+  100% { left: 100%; }
+}
+
+/* Dark Theme Adjustments */
+[data-theme="dark"] .vloader-overlay {
+  background: rgba(8, 12, 22, 0.88);
+}
+
+[data-theme="dark"] .vloader-ambient-aura {
+  background: radial-gradient(
+    ellipse at 50% 50%,
+    rgba(56, 189, 248, 0.35) 0%,
+    rgba(37, 99, 235, 0.22) 50%,
+    transparent 74%
+  );
+}
+
+[data-theme="dark"] .vloader-base-img {
+  filter: drop-shadow(0 4px 20px rgba(59, 130, 246, 0.4)) brightness(1.22);
+}
+
+[data-theme="dark"] .vloader-plane-sprite {
+  filter: brightness(1.22);
+}
+
+[data-theme="dark"] .vloader-progress-track {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+/* Inline / small variant for button states */
+.vloader-inline {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 16px;
+  vertical-align: middle;
+}
 .vloader-inline span {
-  width: 3px; border-radius: 1px;
+  width: 3px;
+  border-radius: 1px;
   background: currentColor;
   animation: vloader-rise 0.9s ease-in-out infinite;
 }
@@ -49,7 +230,16 @@
 .vloader-inline span:nth-child(2) { height: 100%; animation-delay: 120ms; }
 .vloader-inline span:nth-child(3) { height: 65%; animation-delay: 240ms; }
 
+@keyframes vloader-rise {
+  0%, 100% { transform: scaleY(0.35); opacity: 0.55; }
+  50% { transform: scaleY(1); opacity: 1; }
+}
+
+/* Accessibility: respect reduced motion preferences */
 @media (prefers-reduced-motion: reduce) {
-  .vloader-inline span { animation: none; transform: scaleY(1); opacity: 1; }
-  .vloader-plane-orbit { animation: none; }
+  .vloader-ambient-aura { animation: none; }
+  .vloader-sheen-line { display: none; }
+  .vloader-touchdown-spark { display: none; }
+  .vloader-flight-svg { display: none; }
+  .vloader-progress-bar { animation: none; width: 100%; }
 }
