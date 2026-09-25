@@ -1,6 +1,6 @@
 /**
  * TRAVEL AGENCY — Ultra-Realistic Cinematic 3D Flight Orbit Loader
- * The official brand airplane takes off from the swoosh tip,
+ * The clean brand airplane takes off from the swoosh tip,
  * flies a majestic 3D banked orbital trajectory around the globe with a luminous jet contrail,
  * decelerates smoothly back to its docking position, and triggers a crystalline sheen sweep.
  */
@@ -39,12 +39,12 @@
 
             <!-- Mathematical Closed Orbit Path around Globe -->
             <path id="vloaderOrbitPath"
-              d="M 94 42 C 103 33, 97 20, 73 15 C 53 11, 31 24, 27 46 C 23 62, 31 74, 49 74 C 67 74, 81 64, 87 54 C 90 48, 92 44, 94 42 Z"
+              d="M 97 41.5 C 105 33, 98 19, 73 15 C 53 11, 31 24, 27 46 C 23 62, 31 74, 49 74 C 67 74, 82 64, 88 53 C 92 47, 94.5 44, 97 41.5 Z"
               fill="none" stroke="none" />
 
             <!-- Dynamic Jet Contrail -->
             <path id="vloaderJetContrail"
-              d="M 94 42 C 103 33, 97 20, 73 15 C 53 11, 31 24, 27 46 C 23 62, 31 74, 49 74 C 67 74, 81 64, 87 54 C 90 48, 92 44, 94 42 Z"
+              d="M 97 41.5 C 105 33, 98 19, 73 15 C 53 11, 31 24, 27 46 C 23 62, 31 74, 49 74 C 67 74, 82 64, 88 53 C 92 47, 94.5 44, 97 41.5 Z"
               fill="none"
               stroke="url(#vloaderContrailGrad)"
               stroke-width="2.6"
@@ -52,7 +52,7 @@
               filter="url(#vloaderGlow)" />
           </svg>
 
-          <!-- Official Base Brand Logo (Globe, Swoosh & Typography) -->
+          <!-- Official Base Brand Logo (Complete Globe with Swoosh & Typography) -->
           <div class="vloader-base-wrap">
             <img src="assets/img/travel-agency-base.png"
                  srcset="assets/img/travel-agency-base.png 1x, assets/img/travel-agency-base@2x.png 2x"
@@ -61,7 +61,7 @@
             <div class="vloader-sheen-line" id="vloaderSheen" aria-hidden="true"></div>
           </div>
 
-          <!-- Flying Airplane Sprite with 3D Banking & Perspective -->
+          <!-- Flying Airplane Sprite (Clean Flight Alone) with 3D Banking & Perspective -->
           <div id="vloaderPlaneCarrier" class="vloader-plane-carrier">
             <img src="assets/img/travel-agency-plane.png"
                  srcset="assets/img/travel-agency-plane.png 1x, assets/img/travel-agency-plane@2x.png 2x"
@@ -91,11 +91,11 @@
 
     if (!path || !carrier || !contrail) return;
 
-    let totalLength = 205.8;
+    let totalLength = 208;
     try {
-      totalLength = path.getTotalLength() || 205.8;
+      totalLength = path.getTotalLength() || 208;
     } catch (e) {
-      totalLength = 205.8;
+      totalLength = 208;
     }
 
     const cycleDuration = 4200; // 4.2s per full flight cycle
@@ -107,9 +107,9 @@
     contrail.style.strokeDashoffset = `${contrailMaxLen}`;
     contrail.style.opacity = "0";
 
-    // Set initial resting position
+    // Set initial resting position (center of 19x19 plane sprite is offset by 8.5px)
     const p0 = path.getPointAtLength(0);
-    carrier.style.transform = `translate(${p0.x - 14}px, ${p0.y - 10}px) rotate(0deg) scale(1)`;
+    carrier.style.transform = `translate(${p0.x - 8.5}px, ${p0.y - 8.5}px) rotate(0deg) scale(1)`;
 
     let startTime = null;
 
@@ -121,7 +121,7 @@
         // ==========================================
         // PHASE 1: DOCKED AT REST (0 to 1000ms)
         // ==========================================
-        carrier.style.transform = `translate(${p0.x - 14}px, ${p0.y - 10}px) rotate(0deg) scale(1)`;
+        carrier.style.transform = `translate(${p0.x - 8.5}px, ${p0.y - 8.5}px) rotate(0deg) scale(1)`;
         carrier.style.filter = "drop-shadow(0 2px 5px rgba(22, 85, 174, 0.28))";
         contrail.style.opacity = "0";
 
@@ -188,7 +188,7 @@
         // Aerodynamic wing banking roll
         const bankRoll = Math.sin(progress * Math.PI * 2) * 14;
 
-        carrier.style.transform = `translate(${pt.x - 14}px, ${pt.y - 10}px) rotate(${rotation}deg) rotateY(${bankRoll}deg) scale(${scale})`;
+        carrier.style.transform = `translate(${pt.x - 8.5}px, ${pt.y - 8.5}px) rotate(${rotation}deg) rotateY(${bankRoll}deg) scale(${scale})`;
         carrier.style.filter = shadowStyle;
 
         // Glowing jet contrail trailing behind the aircraft

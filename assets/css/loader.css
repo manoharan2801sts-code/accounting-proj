@@ -121,22 +121,22 @@
   transition: left 620ms cubic-bezier(0.2, 0.8, 0.2, 1), opacity 280ms ease;
 }
 
-/* Flying Airplane Sprite with 3D Aerospace Banking */
+/* Flying Airplane Sprite (Clean Flight Alone) with 3D Aerospace Banking */
 .vloader-plane-carrier {
   position: absolute;
   top: 0;
   left: 0;
-  width: 28px;
-  height: 20px;
+  width: 19px;
+  height: 19px;
   pointer-events: none;
   will-change: transform;
-  transform-origin: 14px 10px;
+  transform-origin: 8.5px 8.5px;
   perspective: 600px;
 }
 
 .vloader-plane-sprite {
-  width: 28px;
-  height: 20px;
+  width: 19px;
+  height: 19px;
   display: block;
   image-rendering: -webkit-optimize-contrast;
 }
