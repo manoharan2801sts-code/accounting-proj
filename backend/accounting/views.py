@@ -5,8 +5,10 @@ This replaces the hardcoded COA_DEFS array that used to live in the
 frontend's mock-data.js. The frontend now calls GET /api/ledger-groups/
 and gets these rows straight from SQL Server instead.
 """
+import hmac
 import json
 import math
+import os
 import re
 from datetime import datetime, date, timedelta
 from django.http import JsonResponse, HttpResponseNotAllowed
@@ -3316,9 +3318,21 @@ def company_master_delete(request, company_id):
 @csrf_exempt
 def seed_database(request):
     """
-    GET/POST /api/seed-database/
+    GET/POST /api/seed-database/?token=<SEED_TOKEN>[&force=true]
     Initializes TiDB / MySQL database with all groups, ledgers, tickets, and mappings.
+
+    A forced seed wipes the app's data tables (see converted_inserts.sql),
+    so this is disabled (404) unless the SEED_TOKEN environment variable is
+    set, and then only answers a request carrying that exact token. Set
+    SEED_TOKEN on Render just for a data update, call this once, then
+    delete the variable again.
     """
+    seed_token = os.environ.get("SEED_TOKEN", "")
+    if not seed_token:
+        return JsonResponse({"error": "Not found."}, status=404)
+    if not hmac.compare_digest(request.GET.get("token", ""), seed_token):
+        return JsonResponse({"error": "Invalid token."}, status=403)
+
     from load_initial_data import load_data
     force = request.GET.get("force", "false").lower() in ("true", "1")
     res = load_data(force=force)
