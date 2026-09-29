@@ -169,7 +169,6 @@ CREATE TABLE `Tickets` (
     CONSTRAINT `fk_tickets_supplier` FOREIGN KEY (`supplier_ledger_id`) REFERENCES `Ledgers`(`id`) ON DELETE NO ACTION,
     CONSTRAINT `uq_ticket_company_invoice_no` UNIQUE (`company_id`, `invoice_number`),
     CONSTRAINT `uq_ticket_company_booking_ref` UNIQUE (`company_id`, `booking_reference`),
-    CONSTRAINT `ck_tickets_invoice_type` CHECK (`invoice_type` IS NULL OR `invoice_type` IN ('Tax Invoice', 'Others')),
     CONSTRAINT `ck_tickets_booking_mode` CHECK (`booking_mode` IN ('Manual', 'Auto Push')),
     CONSTRAINT `ck_tickets_booking_status` CHECK (`booking_status` IS NULL OR `booking_status` IN ('Confirmed', 'Re-Scheduled')),
     CONSTRAINT `ck_tickets_travel_type` CHECK (`travel_type` IS NULL OR `travel_type` IN ('Domestic', 'International')),
