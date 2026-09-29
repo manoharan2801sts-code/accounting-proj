@@ -28,8 +28,8 @@
     document.getElementById("visa_type").value = v.visa_type;
     document.getElementById("application_date").value = v.application_date;
     document.getElementById("status").value = v.status;
-    document.getElementById("supplier_fee").value = v.supplier_fee;
-    document.getElementById("customer_fee").value = v.customer_fee;
+    document.getElementById("supplier_fee").value = Number(v.supplier_fee || 0).toFixed(2);
+    document.getElementById("customer_fee").value = Number(v.customer_fee || 0).toFixed(2);
     recalc();
   }
 
@@ -57,10 +57,15 @@
     });
   });
 
-  const active = await VoyagerShell.init({
-    activeKey: "visa",
-    onCompanyChange: (id, country) => { activeCompanyId = Number(id); activeCountry = country; populateRefs(activeCompanyId); },
-  });
+  let active = null;
+  try {
+    active = await VoyagerShell.init({
+      activeKey: "visa",
+      onCompanyChange: (id, country) => { activeCompanyId = Number(id); activeCountry = country; populateRefs(activeCompanyId); },
+    });
+  } catch (err) {
+    console.error("Shell init failed", err);
+  }
   if (active) {
     activeCompanyId = Number(active.id); activeCountry = active.country;
     populateRefs(activeCompanyId);
@@ -70,5 +75,7 @@
     } else {
       recalc();
     }
+  } else {
+    voyagerAlert("Could not load the active company. Check your connection and reload the page.", { icon: "error" });
   }
 })();

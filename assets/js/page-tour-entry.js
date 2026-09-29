@@ -29,8 +29,8 @@
     document.getElementById("start_date").value = t.start_date;
     document.getElementById("end_date").value = t.end_date;
     document.getElementById("status").value = t.status;
-    document.getElementById("total_cost").value = t.total_cost;
-    document.getElementById("total_revenue").value = t.total_revenue;
+    document.getElementById("total_cost").value = Number(t.total_cost || 0).toFixed(2);
+    document.getElementById("total_revenue").value = Number(t.total_revenue || 0).toFixed(2);
     recalc();
   }
 
@@ -62,10 +62,15 @@
     });
   });
 
-  const active = await VoyagerShell.init({
-    activeKey: "tours",
-    onCompanyChange: (id, country) => { activeCompanyId = Number(id); activeCountry = country; populateRefs(activeCompanyId); },
-  });
+  let active = null;
+  try {
+    active = await VoyagerShell.init({
+      activeKey: "tours",
+      onCompanyChange: (id, country) => { activeCompanyId = Number(id); activeCountry = country; populateRefs(activeCompanyId); },
+    });
+  } catch (err) {
+    console.error("Shell init failed", err);
+  }
   if (active) {
     activeCompanyId = Number(active.id); activeCountry = active.country;
     populateRefs(activeCompanyId);
@@ -75,5 +80,7 @@
     } else {
       recalc();
     }
+  } else {
+    voyagerAlert("Could not load the active company. Check your connection and reload the page.", { icon: "error" });
   }
 })();

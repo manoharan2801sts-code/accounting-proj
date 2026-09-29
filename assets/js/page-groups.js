@@ -158,9 +158,18 @@
     }
   });
 
-  const active = await VoyagerShell.init({
-    activeKey: "groups",
-    onCompanyChange: (id) => { activeCompanyId = Number(id); closeForm(); refreshGroupList(); },
-  });
-  if (active) { activeCompanyId = Number(active.id); refreshGroupList(); }
+  let active = null;
+  try {
+    active = await VoyagerShell.init({
+      activeKey: "groups",
+      onCompanyChange: (id) => { activeCompanyId = Number(id); closeForm(); refreshGroupList(); },
+    });
+  } catch (err) {
+    console.error("Shell init failed", err);
+  }
+  if (active) {
+    activeCompanyId = Number(active.id); refreshGroupList();
+  } else {
+    voyagerAlert("Could not load the active company. Check your connection and reload the page.", { icon: "error" });
+  }
 })();

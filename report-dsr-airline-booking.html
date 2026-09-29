@@ -20,27 +20,43 @@
       height: calc(100vh - var(--topnav-height) - var(--menubar-height, 0px));
       padding: 1.5rem 2rem; box-sizing: border-box;
     }
-    .page-header-row { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 1.25rem; flex-wrap: wrap; flex-shrink: 0; }
-    .page-title-group h1 { font-size: 1.25rem; font-weight: 700; margin: 0; display: flex; align-items: center; gap: 0.5rem; }
-    .page-title-group .breadcrumb { font-size: 0.8rem; color: var(--color-text-muted); margin-bottom: 0.25rem; display: flex; gap: 0.4rem; align-items: center; }
-
-    .filter-card {
-      background: var(--color-white); border: 1px solid var(--color-border);
-      border-radius: var(--radius-md); padding: 1rem 1.25rem; margin-bottom: 1.25rem;
-      display: flex; flex-direction: column; gap: 1rem; flex-shrink: 0;
+    /* A single compact toolbar row - date/product/category/travel-type
+       fields sized/aligned to match the plain Print/Export CSV buttons (no
+       stacked label-above-input block, no 34px-tall oversized controls),
+       Print/Export pushed to the far right via the margin-left:auto spacer -
+       same pattern as report-trial-balance.html/report-cash-bank-book.html.
+       Customer/Supplier chip pickers can grow tall once a few chips are
+       picked, so they stay on their own row directly underneath instead of
+       wrapping into the same line as the short one-line fields above. */
+    .page-header-row { display: flex; flex-direction: column; gap: 0.6rem; margin-bottom: 1.25rem; flex-shrink: 0; position: relative; }
+    /* Floats over the table as a real dropdown instead of pushing it down
+       the page when opened/closed - anchored to the toolbar row itself so
+       it drops down right under the "Advanced Filter" button. */
+    #dsr-advanced-panel {
+      position: absolute; top: 100%; left: 0; margin-top: 6px; z-index: 30;
+      background: var(--color-white); border: 1px solid var(--color-border); border-radius: var(--radius-md);
+      box-shadow: var(--shadow-md); padding: 0.75rem 1rem;
     }
-    /* Customer/Supplier grow tall once a few chips are picked - keeping
-       them in their own top row (instead of flex-wrapping together with
-       the short one-line fields below) means their variable height never
-       drags the date/product/category controls out of alignment with
-       each other. */
-    .filter-row-pickers { display: flex; gap: 1.5rem; flex-wrap: wrap; }
-    .filter-row-pickers .filter-group { flex: 1; min-width: 260px; }
-    .filter-row-pickers .chip-chips { max-width: none; }
-    .filter-row-simple { display: flex; align-items: flex-end; gap: 1rem; flex-wrap: wrap; }
-
-    .filter-group { display: flex; flex-direction: column; gap: 0.35rem; }
-    .filter-group label { font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--color-text-muted); letter-spacing: 0.03em; }
+    .dsr-toolbar { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; width: 100%; }
+    /* Customer/Supplier chip pickers grow taller as chips are added (each
+       wraps onto its own line below the search box) - align everything
+       in this row to the top instead of centering, so Product/Category/
+       Type/the "+ ..." button don't visually drift out of line with a
+       picker that's grown taller than them. */
+    #dsr-advanced-panel .dsr-toolbar { align-items: flex-start; }
+    .dsr-toolbar-label { font-size: 11px; font-weight: 700; color: var(--color-text-muted); letter-spacing: 0.03em; }
+    .dsr-toolbar-date, .dsr-toolbar-select { height: 26px; padding: 0 6px; font-size: 12px; box-sizing: border-box; }
+    .dsr-toolbar-date { width: 116px; }
+    .dsr-toolbar-select { width: 150px; }
+    #dsr-advanced-chevron { transition: transform var(--t-fast); }
+    #dsr-advanced-toggle-btn.is-open #dsr-advanced-chevron { transform: rotate(180deg); }
+    #dsr-clear-filters-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    /* Customer/Supplier sit inline in the same toolbar row as Product/
+       Category/Type now (no separate toggle/row) - narrowed down from
+       the chip-picker's usual 320px so they fit alongside everything
+       else; chips still wrap onto their own line underneath once picked. */
+    .dsr-inline-picker .chip-picker-input-wrap { max-width: 150px; }
+    .dsr-inline-picker .chip-chips { max-width: 150px; }
 
     /* Chip picker (used for both Customer and Supplier) - starts as an
        empty search box; typing (or just focusing it) opens a dropdown of
@@ -77,24 +93,34 @@
       border-radius: var(--radius-md); overflow: hidden;
       flex: 1; min-height: 0; display: flex; flex-direction: column;
     }
+    .table-toolbar {
+      padding: 0.5rem 1rem; display: flex; align-items: center; justify-content: space-between;
+      border-bottom: 1px solid var(--color-border); gap: 1rem; flex-wrap: wrap; background: #FAFBFD;
+    }
+    .table-search { max-width: 220px; width: 100%; height: 26px; font-size: 11.5px; padding: 0 0.5rem; }
     .table-scroll { flex: 1; min-height: 0; overflow-y: auto; overflow-x: auto; }
     .table-custom { width: 100%; border-collapse: collapse; text-align: left; }
-    .table-custom th {
-      padding: 0.5rem 0.75rem; background: #F8FAFC; border-bottom: 1px solid var(--color-border);
-      font-size: 10.5px; font-weight: 700; text-transform: uppercase; color: var(--color-text-muted); letter-spacing: 0.03em;
-      position: sticky; top: 0; z-index: 1;
-    }
+    .table-custom th { padding: 0.35rem 0.75rem; background: #F8FAFC; border-bottom: 1px solid var(--color-border);
+      font-size: 10.5px; font-weight: 700; color: var(--color-text-muted); letter-spacing: 0.03em;
+      position: sticky; top: 0; z-index: 1; }
     .table-custom td {
-      padding: 0.4rem 0.75rem; border-bottom: 1px solid var(--color-border-subtle);
-      font-size: 12px; color: var(--color-text); vertical-align: middle; line-height: 1.4;
+      padding: 0.2rem 0.75rem; border-bottom: 1px solid var(--color-border-subtle);
+      font-size: 12px; color: var(--color-text); vertical-align: middle; line-height: 1.3;
     }
-    .table-custom tbody tr:hover { background: #F8FAFC; }
+    /* No column ever wraps - every row stays exactly one line tall.
+       Short columns (dates/PNR/amounts) just grow to fit; the few that
+       can carry long text (Sector/Airline/Pax Name/Supplier/Customer)
+       additionally get .truncate-cell (capped width + ellipsis), with
+       the untruncated value shown via the title tooltip on hover. */
+    .table-custom td { white-space: nowrap; }
+    .table-custom td.truncate-cell {
+      max-width: 160px; overflow: hidden; text-overflow: ellipsis;
+    }
+    .table-custom tbody tr.dsr-data-row.dsr-row-selected td { background: var(--color-primary); color: #FFFFFF; }
     .table-custom tbody tr:last-child td { border-bottom: none; }
     .table-custom tbody tr.dsr-data-row { cursor: pointer; }
-    .status-badge {
-      display: inline-flex; align-items: center; padding: 0.2rem 0.55rem;
-      border-radius: 4px; font-size: 11.5px; font-weight: 700; text-transform: uppercase;
-    }
+    .status-badge { display: inline-flex; align-items: center; padding: 0.2rem 0.55rem;
+      border-radius: 4px; font-size: 11.5px; font-weight: 700; }
     .badge-issued, .badge-success { background: #DCFCE7; color: #166534; }
     .badge-pending, .badge-warning { background: #FEF3C7; color: #92400E; }
     .badge-cancelled, .badge-danger { background: #FEE2E2; color: #991B1B; }
@@ -110,11 +136,17 @@
   <div class="app-body">
     <main class="app-main dsr-main" style="max-width: 1440px; margin: 0 auto;">
       <div class="page-header-row">
-        <div class="page-title-group">
-          <div class="breadcrumb">Reports &rsaquo; DSR</div>
-          <h1><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--color-primary)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg> DSR</h1>
-        </div>
-        <div style="display:flex; gap:0.5rem;">
+        <div class="dsr-toolbar">
+          <span class="dsr-toolbar-label">From</span>
+          <input type="date" class="form-control-custom dsr-toolbar-date" id="filter-from" />
+          <span class="dsr-toolbar-label">To</span>
+          <input type="date" class="form-control-custom dsr-toolbar-date" id="filter-to" />
+          <button type="button" class="dom-nav-btn" id="dsr-advanced-toggle-btn" onclick="toggleAdvancedFilter()">
+            Advanced Filter
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" id="dsr-advanced-chevron"><polyline points="6 9 12 15 18 9"/></svg>
+          </button>
+          <button type="button" class="dom-nav-btn btn-primary" onclick="applyFiltersAndRender()">Apply</button>
+          <span style="margin-left:auto;"></span>
           <button type="button" class="dom-nav-btn" onclick="window.print()">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9V2h12v7M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2m-12 0v4h12v-4"/></svg>
             Print
@@ -124,21 +156,10 @@
             Export CSV
           </button>
         </div>
-      </div>
 
-      <div class="filter-card">
-        <div class="filter-row-simple">
-          <div class="filter-group">
-            <label>From Date</label>
-            <input type="date" class="form-control-custom" id="filter-from" value="2026-09-01" style="height:34px; padding:0.25rem 0.6rem;" />
-          </div>
-          <div class="filter-group">
-            <label>To Date</label>
-            <input type="date" class="form-control-custom" id="filter-to" value="2026-09-21" style="height:34px; padding:0.25rem 0.6rem;" />
-          </div>
-          <div class="filter-group">
-            <label>Product</label>
-            <select class="form-control-custom" id="filter-product" style="height:34px; min-width:130px;">
+        <div id="dsr-advanced-panel" style="display:none;">
+          <div class="dsr-toolbar">
+            <select class="form-control-custom dsr-toolbar-select" id="filter-product" onchange="toggleAirlineOnlyFilters(); updateClearFiltersState();">
               <option value="">All Products</option>
               <option value="Airline" selected>Airline</option>
               <option value="Hotel">Hotel</option>
@@ -149,68 +170,62 @@
               <option value="Insurance">Insurance</option>
               <option value="Vouchers">Vouchers</option>
             </select>
-          </div>
-          <div class="filter-group">
-            <label>Airline Category</label>
-            <select class="form-control-custom" id="filter-airline-category" style="height:34px; min-width:130px;">
-              <option value="">All Categories</option>
-              <option value="LCC">LCC</option>
-              <option value="FSC">FSC</option>
-              <option value="OSC">OSC</option>
-            </select>
-          </div>
-          <div class="filter-group">
-            <label>Travel Type</label>
-            <select class="form-control-custom" id="filter-travel-type" style="height:34px; min-width:130px;">
-              <option value="">All Types</option>
-              <option value="Domestic">Domestic</option>
-              <option value="International">International</option>
-            </select>
-          </div>
-          <button type="button" class="dom-nav-btn btn-primary" style="height:34px;" onclick="applyFiltersAndRender()">Apply</button>
-        </div>
-
-        <div class="filter-row-pickers">
-          <div class="filter-group">
-            <label>Customer</label>
-            <div class="chip-picker" id="customer-picker">
+            <span id="dsr-airline-only-filters" style="display:inline-flex; gap:0.5rem;">
+              <select class="form-control-custom dsr-toolbar-select" id="filter-airline-category" onchange="updateClearFiltersState()">
+                <option value="">All Categories</option>
+                <option value="LCC">LCC</option>
+                <option value="FSC">FSC</option>
+                <option value="OSC">OSC</option>
+              </select>
+              <select class="form-control-custom dsr-toolbar-select" id="filter-travel-type" onchange="updateClearFiltersState()">
+                <option value="">All Types</option>
+                <option value="Domestic">Domestic</option>
+                <option value="International">International</option>
+              </select>
+            </span>
+            <div class="chip-picker dsr-inline-picker" id="customer-picker">
               <div class="chip-picker-input-wrap">
-                <input type="text" class="form-control-custom" id="customer-search" placeholder="Search customer..." autocomplete="off" style="height:34px;" />
+                <input type="text" class="form-control-custom" id="customer-search" placeholder="Search customer..." autocomplete="off" style="height:26px;" />
                 <div class="chip-dropdown" id="customer-dropdown"></div>
               </div>
               <div class="chip-chips" id="customer-chips"></div>
             </div>
-          </div>
-          <div class="filter-group">
-            <label>Supplier</label>
-            <div class="chip-picker" id="supplier-picker">
+            <div class="chip-picker dsr-inline-picker" id="supplier-picker">
               <div class="chip-picker-input-wrap">
-                <input type="text" class="form-control-custom" id="supplier-search" placeholder="Search supplier..." autocomplete="off" style="height:34px;" />
+                <input type="text" class="form-control-custom" id="supplier-search" placeholder="Search supplier..." autocomplete="off" style="height:26px;" />
                 <div class="chip-dropdown" id="supplier-dropdown"></div>
               </div>
               <div class="chip-chips" id="supplier-chips"></div>
             </div>
+            <button type="button" class="dom-nav-btn" id="dsr-clear-filters-btn" onclick="clearAdvancedFilters()" disabled title="Clear all Advanced Filter values">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+              Clear
+            </button>
           </div>
         </div>
       </div>
 
       <div class="table-container">
+        <div class="table-toolbar">
+          <div style="font-weight:700; font-size:0.78rem; color:var(--color-text-dark);">DSR</div>
+          <input type="text" class="form-control-custom table-search" placeholder="Search records..." oninput="filterTable(this.value)" />
+        </div>
         <div class="table-scroll">
           <table class="table-custom" id="main-data-table">
             <thead>
               <tr>
-                  <th class="">Inv Date</th>
-  <th class="">Invoice No</th>
-  <th class="">PNR</th>
-  <th class="">Sector</th>
-  <th class="">Airline</th>
-  <th class="">Pax Name</th>
-  <th class="amt-header">Base Fare</th>
-  <th class="amt-header">Taxes</th>
-  <th class="amt-header">Gross Amount</th>
-  <th class="">Supplier</th>
-  <th class="">Customer</th>
-
+                <th>Inv Date</th>
+                <th>Invoice No</th>
+                <th>Customer</th>
+                <th>S PNR</th>
+                <th>Air PNR</th>
+                <th>Pax Name</th>
+                <th>Sector</th>
+                <th>Airline</th>
+                <th>Supplier</th>
+                <th class="amt-header">Base Fare</th>
+                <th class="amt-header">Other Tax</th>
+                <th class="amt-header">Net Amount</th>
               </tr>
             </thead>
             <tbody id="main-data-tbody">
@@ -252,9 +267,21 @@
       try {
         const active = await VoyagerShell.init({ activeKey: "rep-dsr" });
         if (active) activeCompanyId = Number(active.id);
+        await VoyagerUtil.loadDecimalPlaces(activeCompanyId);
       } catch (err) {
         console.error("Shell init failed", err);
       }
+      // Defaults to today, not a wide static range - this project posts a
+      // lot of tickets per day, so a multi-week default window would be
+      // slow/overwhelming to load on first open. But if we got here via
+      // "Back" from a ticket opened off this report (ticket-entry.js's
+      // Back link is just document.referrer, which syncUrlWithFilters()
+      // below keeps up to date), restore whatever From/To was actually
+      // showing instead of silently resetting to today.
+      const urlParams = new URLSearchParams(window.location.search);
+      const todayStr = new Date().toISOString().slice(0, 10);
+      document.getElementById("filter-from").value = urlParams.get("from") || todayStr;
+      document.getElementById("filter-to").value = urlParams.get("to") || todayStr;
       loadReport();
     })();
 
@@ -268,6 +295,53 @@
     });
 
     // ============================================================
+    // Keyboard row navigation - Up/Down moves a highlighted "current
+    // row" (same look as mouse hover), Enter opens it, same as a
+    // double-click. Ignored while typing in any filter/search field so
+    // arrow keys there still move the text cursor as normal.
+    // ============================================================
+    let selectedRowIndex = -1;
+    function visibleDataRows() {
+      return Array.from(document.querySelectorAll("#main-data-tbody tr.dsr-data-row")).filter((r) => r.style.display !== "none");
+    }
+    function selectRow(index) {
+      const rows = visibleDataRows();
+      rows.forEach((r) => r.classList.remove("dsr-row-selected"));
+      if (!rows.length) { selectedRowIndex = -1; return; }
+      selectedRowIndex = Math.max(0, Math.min(index, rows.length - 1));
+      const row = rows[selectedRowIndex];
+      row.classList.add("dsr-row-selected");
+      row.scrollIntoView({ block: "nearest" });
+    }
+    // Keeps the keyboard-selected row in sync with whatever the mouse is
+    // actually over - without this, moving the mouse to hover a different
+    // row while an old keyboard selection is still stuck elsewhere made it
+    // look like hover had stopped working (two rows lit up at once).
+    document.getElementById("main-data-tbody").addEventListener("mouseover", (e) => {
+      const row = e.target.closest("tr.dsr-data-row");
+      if (!row) return;
+      const idx = visibleDataRows().indexOf(row);
+      if (idx !== -1) selectRow(idx);
+    });
+    document.addEventListener("keydown", (e) => {
+      if (!["ArrowDown", "ArrowUp", "Enter"].includes(e.key)) return;
+      const tag = document.activeElement && document.activeElement.tagName;
+      if (["INPUT", "SELECT", "TEXTAREA"].includes(tag)) return;
+      const rows = visibleDataRows();
+      if (!rows.length) return;
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        selectRow(selectedRowIndex < rows.length - 1 ? selectedRowIndex + 1 : 0);
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        selectRow(selectedRowIndex > 0 ? selectedRowIndex - 1 : rows.length - 1);
+      } else if (e.key === "Enter" && selectedRowIndex >= 0) {
+        e.preventDefault();
+        window.location.href = `ticket-entry.html?id=${rows[selectedRowIndex].dataset.id}`;
+      }
+    });
+
+    // ============================================================
     // Real report data - one row per Airline TicketLine, pulled straight
     // from the Django backend (same /api/tickets/ endpoint ticket-entry.js
     // and tickets.html already use).
@@ -276,11 +350,8 @@
     let allRows = [];
 
     function fmtAmt(n) {
-      return "₹" + (Number(n) || 0).toLocaleString("en-IN", { maximumFractionDigits: 2 });
-    }
-
-    function rowTaxes(r) {
-      return (Number(r.yq) || 0) + (Number(r.yr) || 0) + (Number(r.k3_tax) || 0) + (Number(r.tax_others) || 0);
+      const d = VoyagerUtil.getDecimalPlaces();
+      return "₹" + (Number(n) || 0).toLocaleString("en-IN", { minimumFractionDigits: d, maximumFractionDigits: d });
     }
 
     function populateReferenceFilters() {
@@ -288,42 +359,103 @@
       SUPPLIER_OPTIONS = [...new Set(allRows.map((r) => r.supplier_name).filter(Boolean))].sort();
     }
 
-    // Multi-sector tickets store a comma-joined value per sector (e.g.
-    // "AirIndia,Lufthansa,Lufthansa,..."). Wrap that onto multiple lines,
-    // 3 values per line, instead of one long unbroken comma string.
-    function formatMultiValue(str) {
-      if (!str) return "-";
-      const items = String(str).split(",").map((s) => s.trim()).filter(Boolean);
-      if (!items.length) return "-";
-      const lines = [];
-      for (let i = 0; i < items.length; i += 3) lines.push(items.slice(i, i + 3).join(", "));
-      return lines.join("<br>");
+    function escAttr(str) {
+      return String(str).replace(/&/g, "&amp;").replace(/"/g, "&quot;");
+    }
+
+    // One row per Invoice/Ticket, not per passenger - allRows is still
+    // one row per TicketLine (straight from /api/tickets/), so multi-
+    // passenger tickets get folded here: Pax Name shows the lead (first)
+    // passenger, Airline/Supplier show every distinct value across that
+    // ticket's passengers, and the amount columns are summed across all
+    // of them.
+    function groupRowsByTicket(rows) {
+      const byTicket = new Map();
+      rows.forEach((r) => {
+        let g = byTicket.get(r.ticket_id);
+        if (!g) {
+          g = {
+            ticket_id: r.ticket_id, invoice_date: r.invoice_date, invoice_number: r.invoice_number,
+            customer_name: r.customer_name, booking_reference: r.booking_reference, airline_pnr: r.airline_pnr,
+            lead_passenger_name: r.passenger_name, airline_names: [], supplier_names: [], sectors: [],
+            basic_fare: 0, other_tax: 0, net_amount: 0,
+          };
+          byTicket.set(r.ticket_id, g);
+        }
+        const airline = r.airline_name || r.airline_code;
+        if (airline && !g.airline_names.includes(airline)) g.airline_names.push(airline);
+        if (r.supplier_name && !g.supplier_names.includes(r.supplier_name)) g.supplier_names.push(r.supplier_name);
+        // A multi-city passenger's own sector is already comma-joined
+        // (e.g. "BOM-DXB,DXB-COK") - split those out too so each leg only
+        // ever appears once across the whole ticket, same de-dup as Airline/Supplier.
+        (r.sector || "").split(",").map((s) => s.trim()).filter(Boolean).forEach((s) => {
+          if (!g.sectors.includes(s)) g.sectors.push(s);
+        });
+        g.basic_fare += Number(r.basic_fare) || 0;
+        // Other Tax = the exact same fields ticket-entry.html's own
+        // Summary strip "Sales Cost" row adds together (see recalcSummary()
+        // in page-ticket-entry.js): Taxes (YQ+YR+K3+Tax & Others) + SSR
+        // (Seat+Meal+Baggage+Other SSR) - Discount + TDS + Markup
+        // (+Addl+SSR) + Service Fee (+Addl+SSR) + GST Amount. Discount/TDS/
+        // GST come straight from the backend's own computed_discount/
+        // computed_tds/computed_gst (Master Mapping-driven), not re-derived here.
+        const taxes = (Number(r.yq) || 0) + (Number(r.yr) || 0) + (Number(r.k3_tax) || 0) + (Number(r.tax_others) || 0);
+        const ssr = (Number(r.seat) || 0) + (Number(r.meal) || 0) + (Number(r.baggage) || 0) + (Number(r.other_ssr) || 0);
+        const markup = (Number(r.markup) || 0) + (Number(r.addl_markup) || 0) + (Number(r.ssr_markup) || 0);
+        const serviceFee = (Number(r.service_fee) || 0) + (Number(r.addl_service_fee) || 0) + (Number(r.ssr_service_fee) || 0);
+        const lineOtherTax = taxes + ssr - (Number(r.computed_discount) || 0)
+          + (Number(r.computed_tds) || 0) + markup + serviceFee + (Number(r.computed_gst) || 0);
+        g.other_tax += lineOtherTax;
+      });
+      byTicket.forEach((g) => {
+        g.other_tax = Math.round(g.other_tax * 100) / 100;
+        g.net_amount = Math.round((g.basic_fare + g.other_tax) * 100) / 100;
+      });
+      return Array.from(byTicket.values());
     }
 
     function renderTable(rows) {
       const tbody = document.getElementById("main-data-tbody");
-      if (!rows.length) {
-        tbody.innerHTML = `<tr><td colspan="11" style="text-align:center; padding:2rem; color:var(--color-text-muted);">No records found for the selected filters.</td></tr>`;
+      selectedRowIndex = -1; // stale after a full re-render - rows are new DOM nodes
+      const tickets = groupRowsByTicket(rows);
+      if (!tickets.length) {
+        tbody.innerHTML = `<tr><td colspan="12" style="text-align:center; padding:2rem; color:var(--color-text-muted);">No records found for the selected filters.</td></tr>`;
         return;
       }
-      tbody.innerHTML = rows.map((r) => `
-        <tr class="dsr-data-row" data-id="${r.ticket_id}" title="Double-click to view this ticket">
-          <td>${r.invoice_date || "-"}</td>
-          <td>${r.invoice_number || "-"}</td>
-          <td>${r.pnr || "-"}</td>
-          <td>${formatMultiValue(r.sector)}</td>
-          <td>${formatMultiValue(r.airline_name || r.airline_code)}</td>
-          <td>${r.passenger_name || "-"}</td>
-          <td class="amt">${fmtAmt(r.basic_fare)}</td>
-          <td class="amt">${fmtAmt(rowTaxes(r))}</td>
-          <td class="amt">${fmtAmt(r.total_billed)}</td>
-          <td>${r.supplier_name || "-"}</td>
-          <td>${r.customer_name || "-"}</td>
+      tbody.innerHTML = tickets.map((t) => `
+        <tr class="dsr-data-row" data-id="${t.ticket_id}" title="Double-click to view this ticket">
+          <td>${t.invoice_date || "-"}</td>
+          <td>${t.invoice_number || "-"}</td>
+          <td class="truncate-cell" title="${escAttr(t.customer_name || "-")}">${t.customer_name || "-"}</td>
+          <td>${t.booking_reference || "-"}</td>
+          <td>${t.airline_pnr || "-"}</td>
+          <td class="truncate-cell" title="${escAttr(t.lead_passenger_name || "-")}">${t.lead_passenger_name || "-"}</td>
+          <td class="truncate-cell" title="${escAttr(t.sectors.join(", ") || "-")}">${t.sectors.join(", ") || "-"}</td>
+          <td class="truncate-cell" title="${escAttr(t.airline_names.join(", ") || "-")}">${t.airline_names.join(", ") || "-"}</td>
+          <td class="truncate-cell" title="${escAttr(t.supplier_names.join(", ") || "-")}">${t.supplier_names.join(", ") || "-"}</td>
+          <td class="amt">${fmtAmt(t.basic_fare)}</td>
+          <td class="amt">${fmtAmt(t.other_tax)}</td>
+          <td class="amt">${fmtAmt(t.net_amount)}</td>
         </tr>
       `).join("");
     }
 
+    // Keeps the address bar's From/To in sync with the toolbar, so
+    // document.referrer (what ticket-entry.js's "Back" link uses when you
+    // open a ticket from here) always points back to this exact filtered
+    // view instead of a bare URL that resets to today on return.
+    function syncUrlWithFilters() {
+      const params = new URLSearchParams();
+      const fromDate = document.getElementById("filter-from").value;
+      const toDate = document.getElementById("filter-to").value;
+      if (fromDate) params.set("from", fromDate);
+      if (toDate) params.set("to", toDate);
+      const qs = params.toString();
+      history.replaceState(null, "", qs ? `${window.location.pathname}?${qs}` : window.location.pathname);
+    }
+
     function applyFiltersAndRender() {
+      syncUrlWithFilters();
       const fromDate = document.getElementById("filter-from").value;
       const toDate = document.getElementById("filter-to").value;
       const product = document.getElementById("filter-product").value;
@@ -404,6 +536,15 @@
         renderDropdown();
       });
       searchEl.addEventListener("input", renderDropdown);
+      // Enter is the deliberate "I'm done picking" action - stays open
+      // through any number of picks otherwise, closing only on Enter or
+      // an actual click outside (see the composedPath() listener below).
+      searchEl.addEventListener("keydown", (e) => {
+        if (e.key !== "Enter") return;
+        e.preventDefault();
+        pickerEl.classList.remove("open");
+        searchEl.blur();
+      });
 
       dropdownEl.addEventListener("click", (e) => {
         const opt = e.target.closest(".chip-option");
@@ -415,6 +556,7 @@
         // picking one, instead of showing the other matches still available.
         renderDropdown();
         searchEl.focus();
+        updateClearFiltersState();
       });
 
       chipsEl.addEventListener("click", (e) => {
@@ -424,13 +566,27 @@
         selected = selected.filter((n) => n !== name);
         renderChips();
         renderDropdown();
+        updateClearFiltersState();
       });
 
       document.addEventListener("click", (e) => {
-        if (!pickerEl.contains(e.target)) pickerEl.classList.remove("open");
+        // composedPath(), not pickerEl.contains(e.target) - picking an
+        // option calls renderDropdown() first (replacing dropdownEl's
+        // innerHTML, including the very .chip-option node just clicked)
+        // and THEN this bubbles up here. By then e.target is already a
+        // detached node, so .contains() always says "outside" and
+        // immediately closed the dropdown right after each pick -
+        // meaning only one customer/supplier could ever be picked before
+        // having to click back into the search box. composedPath()
+        // captures the real ancestor chain at dispatch time, unaffected
+        // by that DOM replacement.
+        if (!e.composedPath().includes(pickerEl)) pickerEl.classList.remove("open");
       });
 
-      return { getSelected: () => selected };
+      return {
+        getSelected: () => selected,
+        clear: () => { selected = []; renderChips(); renderDropdown(); },
+      };
     }
 
     const customerPicker = createChipPicker({
@@ -448,6 +604,30 @@
       getOptions: () => SUPPLIER_OPTIONS,
     });
 
+    // Advanced Filter's "Clear" button - disabled until something is
+    // actually different from the default (Product = Airline, everything
+    // else empty); resets all of it back to that default and re-renders.
+    function updateClearFiltersState() {
+      const btn = document.getElementById("dsr-clear-filters-btn");
+      if (!btn) return;
+      const anyActive = document.getElementById("filter-product").value !== "Airline"
+        || document.getElementById("filter-airline-category").value
+        || document.getElementById("filter-travel-type").value
+        || customerPicker.getSelected().length
+        || supplierPicker.getSelected().length;
+      btn.disabled = !anyActive;
+    }
+    function clearAdvancedFilters() {
+      document.getElementById("filter-product").value = "Airline";
+      document.getElementById("filter-airline-category").value = "";
+      document.getElementById("filter-travel-type").value = "";
+      customerPicker.clear();
+      supplierPicker.clear();
+      toggleAirlineOnlyFilters();
+      updateClearFiltersState();
+      applyFiltersAndRender();
+    }
+
     function exportCSV() {
       let csv = [];
       const rows = document.querySelectorAll("#main-data-table tr");
@@ -462,10 +642,62 @@
       link.click();
     }
 
+    // Advanced Filter - two-step reveal. Step 1 (Advanced Filter button)
+    // shows Product/Category/Travel Type; step 2 (+ Customer/Supplier,
+    // only reachable once step 1 is open) shows the chip pickers. Both
+    // stay collapsed by default so the toolbar starts as just From/To.
+    // Airline Category/Travel Type only make sense for Product = Airline
+    // (every other product has neither) - hidden for any other pick,
+    // including "All Products".
+    function toggleAirlineOnlyFilters() {
+      const isAirline = document.getElementById("filter-product").value === "Airline";
+      document.getElementById("dsr-airline-only-filters").style.display = isAirline ? "" : "none";
+    }
+
+    function toggleAdvancedFilter() {
+      const panel = document.getElementById("dsr-advanced-panel");
+      const btn = document.getElementById("dsr-advanced-toggle-btn");
+      const isOpen = panel.style.display !== "none";
+      panel.style.display = isOpen ? "none" : "";
+      btn.classList.toggle("is-open", !isOpen);
+    }
+    // Click anywhere outside the (now floating, dropdown-style) panel
+    // closes it - same convention as the Customer/Supplier chip pickers.
+    document.addEventListener("click", (e) => {
+      const panel = document.getElementById("dsr-advanced-panel");
+      const btn = document.getElementById("dsr-advanced-toggle-btn");
+      if (!panel || panel.style.display === "none") return;
+      // composedPath(), not .contains(e.target) - picking a customer/
+      // supplier chip re-renders that dropdown's innerHTML (destroying
+      // the very option node just clicked) before this bubbles up here,
+      // so .contains() always saw it as "outside" and closed the WHOLE
+      // Advanced Filter panel on every single pick.
+      const path = e.composedPath();
+      if (path.includes(panel) || path.includes(btn)) return;
+      panel.style.display = "none";
+      btn.classList.remove("is-open");
+    });
+    // Table-toolbar search box - plain client-side text match over
+    // whatever applyFiltersAndRender() already rendered (same convention
+    // as report-trial-balance.html/report-cash-bank-book.html).
+    function filterTable(query) {
+      const q = query.toLowerCase();
+      const rows = document.querySelectorAll("#main-data-tbody tr");
+      rows.forEach((r) => {
+        r.style.display = r.textContent.toLowerCase().includes(q) ? "" : "none";
+      });
+    }
+
     // Called from onclick="..." attributes above, which always run in the
     // real global scope regardless of this IIFE.
     window.exportCSV = exportCSV;
     window.applyFiltersAndRender = applyFiltersAndRender;
+    window.filterTable = filterTable;
+    window.toggleAdvancedFilter = toggleAdvancedFilter;
+    window.toggleAirlineOnlyFilters = toggleAirlineOnlyFilters;
+    window.updateClearFiltersState = updateClearFiltersState;
+    window.clearAdvancedFilters = clearAdvancedFilters;
+    toggleAirlineOnlyFilters();
     })();
   </script>
 </body>

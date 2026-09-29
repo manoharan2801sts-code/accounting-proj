@@ -31,14 +31,11 @@
     padding: 0.6rem 1rem; margin-top: 0.6rem;
   }
   .mm-toolbar-field { display: flex; flex-direction: column; gap: 0.3rem; min-width: 220px; }
-  .mm-toolbar-field label { font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--color-text-muted); }
+  .mm-toolbar-field label { font-size: 11px; font-weight: 700; letter-spacing: 0.04em; color: var(--color-text-muted); }
 
   .mm-table { width: 100%; border-collapse: collapse; background: var(--color-white); border: 1px solid var(--color-border); border-radius: 0; }
-  .mm-table thead th {
-    text-align: left; padding: 0.45rem 1rem; font-size: 11px; font-weight: 700; letter-spacing: 0.04em;
-    text-transform: uppercase; color: var(--color-text-muted); background: var(--color-bg-subtle);
-    border-bottom: 1px solid var(--color-border);
-  }
+  .mm-table thead th { text-align: left; padding: 0.45rem 1rem; font-size: 11px; font-weight: 700; letter-spacing: 0.04em; color: var(--color-text-muted); background: var(--color-bg-subtle);
+    border-bottom: 1px solid var(--color-border); }
   .mm-table tbody td { padding: 0.32rem 1rem; border-bottom: 1px solid var(--color-border-subtle); vertical-align: middle; }
   .mm-table tbody tr:last-child td { border-bottom: none; }
   .mm-field-name { display: flex; align-items: center; gap: 0.5rem; font-size: 12.5px; font-weight: 600; color: var(--color-text-dark); }
@@ -56,8 +53,17 @@
   .mm-table th:last-child, .mm-table td:last-child { width: 130px; }
   .mm-table td:last-child .dom-action-btn-group { justify-content: flex-start; }
 
+  /* A sub-heading row splitting one Masters category's fields into two
+     visually separate blocks within the same tab (e.g. "Consolidator
+     Earnings" at the bottom of the Customer tab) - purely a display
+     grouping, the fields underneath still save with the same real
+     masters_category as the block above. */
+  .mm-subhead-row td { padding: 0.4rem 1rem; font-size: 11px; font-weight: 700;
+    letter-spacing: 0.04em; color: var(--color-primary); background: var(--color-bg-subtle);
+    border-bottom: 1px solid var(--color-border); border-top: 1px solid var(--color-border); }
+
   .mm-tabs-field { display: flex; flex-direction: column; gap: 0.35rem; flex: 1; min-width: 320px; }
-  .mm-tabs-field label { font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--color-text-muted); }
+  .mm-tabs-field label { font-size: 11px; font-weight: 700; letter-spacing: 0.04em; color: var(--color-text-muted); }
   .mm-tabs {
     display: flex; gap: 0.5rem; flex-wrap: wrap;
   }
@@ -74,10 +80,8 @@
   }
   .mm-tab-panel { display: none; }
   .mm-tab-panel.active { display: block; }
-  .mm-category-heading {
-    font-size: 12.5px; font-weight: 700; letter-spacing: 0.03em; text-transform: uppercase;
-    color: var(--color-primary); margin: 1.1rem 0 0.4rem;
-  }
+  .mm-category-heading { font-size: 12.5px; font-weight: 700; letter-spacing: 0.03em;
+    color: var(--color-primary); margin: 1.1rem 0 0.4rem; }
   .mm-category-heading:first-child { margin-top: 0.9rem; }
 </style>
 </head><body>

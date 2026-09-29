@@ -22,7 +22,7 @@
       display: flex; align-items: flex-end; gap: 1rem; flex-wrap: wrap;
     }
     .filter-group { display: flex; flex-direction: column; gap: 0.35rem; }
-    .filter-group label { font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--color-text-muted); letter-spacing: 0.03em; }
+    .filter-group label { font-size: 11px; font-weight: 700; color: var(--color-text-muted); letter-spacing: 0.03em; }
     
     .kpi-grid {
       display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -32,7 +32,7 @@
       background: var(--color-white); border: 1px solid var(--color-border);
       border-radius: var(--radius-md); padding: 1rem 1.25rem;
     }
-    .kpi-card .kpi-label { font-size: 12px; font-weight: 600; color: var(--color-text-muted); text-transform: uppercase; margin-bottom: 0.35rem; }
+    .kpi-card .kpi-label { font-size: 12px; font-weight: 600; color: var(--color-text-muted); margin-bottom: 0.35rem; }
     .kpi-card .kpi-val { font-size: 1.4rem; font-weight: 800; font-family: var(--font-display); color: var(--color-text-dark); }
     .kpi-card.highlight { border-left: 4px solid var(--color-primary); }
     .kpi-card.accent-success { border-left: 4px solid var(--color-success); }
@@ -48,20 +48,17 @@
     }
     .table-search { max-width: 300px; width: 100%; }
     .table-custom { width: 100%; border-collapse: collapse; text-align: left; }
-    .table-custom th {
-      padding: 0.75rem 1rem; background: #F8FAFC; border-bottom: 1px solid var(--color-border);
-      font-size: 11.5px; font-weight: 700; text-transform: uppercase; color: var(--color-text-muted); letter-spacing: 0.03em;
-    }
+    .table-custom th { padding: 0.75rem 1rem; background: #F8FAFC; border-bottom: 1px solid var(--color-border);
+      font-size: 11.5px; font-weight: 700; color: var(--color-text-muted); letter-spacing: 0.03em; }
     .table-custom td {
       padding: 0.75rem 1rem; border-bottom: 1px solid var(--color-border-subtle);
       font-size: 13px; color: var(--color-text); vertical-align: middle;
     }
-    .table-custom tbody tr:hover { background: #F8FAFC; }
+    .table-custom tbody tr.tds-data-row.tds-row-selected td { background: var(--color-primary); color: #FFFFFF; }
+    .table-custom tbody tr.tds-data-row { cursor: pointer; }
     .table-custom tbody tr:last-child td { border-bottom: none; }
-    .status-badge {
-      display: inline-flex; align-items: center; padding: 0.2rem 0.55rem;
-      border-radius: 4px; font-size: 11.5px; font-weight: 700; text-transform: uppercase;
-    }
+    .status-badge { display: inline-flex; align-items: center; padding: 0.2rem 0.55rem;
+      border-radius: 4px; font-size: 11.5px; font-weight: 700; }
     .badge-issued, .badge-success { background: #DCFCE7; color: #166534; }
     .badge-pending, .badge-warning { background: #FEF3C7; color: #92400E; }
     .badge-cancelled, .badge-danger { background: #FEE2E2; color: #991B1B; }
@@ -96,11 +93,11 @@
       <div class="filter-card">
         <div class="filter-group">
           <label>From Date</label>
-          <input type="date" class="form-control-custom" id="filter-from" value="2026-09-01" style="height:34px; padding:0.25rem 0.6rem;" />
+          <input type="date" class="form-control-custom" id="filter-from" style="height:34px; padding:0.25rem 0.6rem;" />
         </div>
         <div class="filter-group">
           <label>To Date</label>
-          <input type="date" class="form-control-custom" id="filter-to" value="2026-09-21" style="height:34px; padding:0.25rem 0.6rem;" />
+          <input type="date" class="form-control-custom" id="filter-to" style="height:34px; padding:0.25rem 0.6rem;" />
         </div>
         <div class="filter-group">
           <label>Branch / Office</label>
@@ -163,8 +160,8 @@
 
               </tr>
             </thead>
-            <tbody>
-              <tr>
+            <tbody id="main-data-tbody">
+              <tr class="tds-data-row">
   <td class="">Gokul Kumar (Agent)</td>
   <td class="">ABCDE1234F</td>
   <td class="">194H</td>
@@ -175,7 +172,7 @@
   <td class="">BSR00214-CH8901</td>
   <td class=""><span class='status-badge badge-issued'>Deposited</span></td>
 </tr>
-<tr>
+<tr class="tds-data-row">
   <td class="">IndiGo Airlines</td>
   <td class="">AABCI1234F</td>
   <td class="">194H</td>
@@ -186,7 +183,7 @@
   <td class="">BSR00214-CH8842</td>
   <td class=""><span class='status-badge badge-issued'>Deposited</span></td>
 </tr>
-<tr>
+<tr class="tds-data-row">
   <td class="">Rapid Cabs Private Ltd</td>
   <td class="">AAACR5512L</td>
   <td class="">194C</td>
@@ -215,6 +212,53 @@
     // that already finished loading, so DOMContentLoaded never fires again
     // and this would silently never run except on a hard refresh.
     VoyagerShell.init({ activeKey: "rep-tds-reports" });
+
+    // Defaults to today, not a wide static range - this project posts a
+    // lot of data per day, so a multi-week default window would be
+    // slow/overwhelming to load on first open.
+    document.getElementById("filter-from").value = document.getElementById("filter-to").value = new Date().toISOString().slice(0, 10);
+
+    // Keyboard row navigation - Up/Down moves a highlighted "current row"
+    // (same look as mouse hover), matching the DSR/Trial Balance reports.
+    // This table has no drill-down target, so Enter just keeps the row
+    // selected/highlighted - it does not navigate anywhere.
+    var selectedRowIndex = -1;
+    function visibleDataRows() {
+      return Array.from(document.querySelectorAll("#main-data-tbody tr.tds-data-row")).filter((r) => r.style.display !== "none");
+    }
+    function selectRow(index) {
+      const rows = visibleDataRows();
+      rows.forEach((r) => r.classList.remove("tds-row-selected"));
+      if (!rows.length) { selectedRowIndex = -1; return; }
+      selectedRowIndex = Math.max(0, Math.min(index, rows.length - 1));
+      const row = rows[selectedRowIndex];
+      row.classList.add("tds-row-selected");
+      row.scrollIntoView({ block: "nearest" });
+    }
+    // Keeps the keyboard-selected row in sync with whatever the mouse is
+    // actually over - without this, moving the mouse to hover a different
+    // row while an old keyboard selection is still stuck elsewhere made it
+    // look like hover had stopped working (two rows lit up at once).
+    document.getElementById("main-data-tbody").addEventListener("mouseover", function (e) {
+      var row = e.target.closest("tr.tds-data-row");
+      if (!row) return;
+      var idx = visibleDataRows().indexOf(row);
+      if (idx !== -1) selectRow(idx);
+    });
+    document.addEventListener("keydown", (e) => {
+      if (!["ArrowDown", "ArrowUp", "Enter"].includes(e.key)) return;
+      const tag = document.activeElement && document.activeElement.tagName;
+      if (["INPUT", "SELECT", "TEXTAREA"].includes(tag)) return;
+      const rows = visibleDataRows();
+      if (!rows.length) return;
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        selectRow(selectedRowIndex < rows.length - 1 ? selectedRowIndex + 1 : 0);
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        selectRow(selectedRowIndex > 0 ? selectedRowIndex - 1 : rows.length - 1);
+      }
+    });
 
     function filterTable(query) {
       const q = query.toLowerCase();

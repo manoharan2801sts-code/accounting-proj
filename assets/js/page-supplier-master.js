@@ -49,8 +49,8 @@
     <td>${ruleSelectHtml("sm-rule-comm-on", OPT.custDiscountOn, "Select...")}</td>
     <td>${ruleSelectHtml("sm-rule-calc-type", OPT.custDiscountTypes, "Select...")}</td>
     <td>
-      <input class="form-control-custom sm-rule-calc-pct" type="number" min="0" max="100" step="0.01" value="0.00" style="display:none;" />
-      <input class="form-control-custom sm-rule-flat-amt" type="number" min="0" step="0.01" value="0.00" style="display:none;" />
+      <input class="form-control-custom sm-rule-calc-pct dom-amount" type="text" inputmode="decimal" value="0.00" style="display:none;" />
+      <input class="form-control-custom sm-rule-flat-amt dom-amount" type="text" inputmode="decimal" value="0.00" style="display:none;" />
     </td>
     <td><input class="form-control-custom sm-rule-valid-upto" type="date" /></td>
     <td>
@@ -92,8 +92,8 @@
     entryRow.querySelector(".sm-rule-fare-type").value = data.fare_type;
     entryRow.querySelector(".sm-rule-comm-on").value = data.comm_on;
     entryRow.querySelector(".sm-rule-calc-type").value = data.calc_type;
-    entryRow.querySelector(".sm-rule-calc-pct").value = data.calc_pct;
-    entryRow.querySelector(".sm-rule-flat-amt").value = data.flat_amt;
+    entryRow.querySelector(".sm-rule-calc-pct").value = Number(data.calc_pct || 0).toFixed(2);
+    entryRow.querySelector(".sm-rule-flat-amt").value = Number(data.flat_amt || 0).toFixed(2);
     entryRow.querySelector(".sm-rule-valid-upto").value = data.valid_upto;
     const isPct = data.calc_type === "Percentage";
     entryRow.querySelector(".sm-rule-calc-pct").style.display = isPct ? "" : "none";
@@ -141,7 +141,7 @@
         <td>${r.travel_type || ""}</td><td>${r.airline_category || ""}</td><td>${r.cabin || ""}</td><td>${r.fare_type || ""}</td>
         <td>${r.comm_on || ""}</td>
         <td>${r.calc_type || ""}</td>
-        <td class="num">${r.calc_type === "Flat" ? r.flat_amt : r.calc_pct}${r.calc_type === "Percentage" ? "%" : ""}</td>
+        <td class="num">${Number(r.calc_type === "Flat" ? r.flat_amt : r.calc_pct).toFixed(2)}${r.calc_type === "Percentage" ? "%" : ""}</td>
         <td>${r.valid_upto || ""}</td>
         <td>
           <div class="dom-action-btn-group">
@@ -224,17 +224,24 @@
     }
   });
 
-  const active = await VoyagerShell.init({
-    activeKey: "supplier-master",
-    onCompanyChange: (id) => {
-      activeCompanyId = Number(id);
-      populateSuppliers(activeCompanyId);
-      loadRules();
-    },
-  });
+  let active = null;
+  try {
+    active = await VoyagerShell.init({
+      activeKey: "supplier-master",
+      onCompanyChange: (id) => {
+        activeCompanyId = Number(id);
+        populateSuppliers(activeCompanyId);
+        loadRules();
+      },
+    });
+  } catch (err) {
+    console.error("Shell init failed", err);
+  }
   if (active) {
     activeCompanyId = Number(active.id);
     await populateSuppliers(activeCompanyId);
     await loadRules();
+  } else {
+    voyagerAlert("Could not load the active company. Check your connection and reload the page.", { icon: "error" });
   }
 })();

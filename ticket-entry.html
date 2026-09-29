@@ -169,13 +169,17 @@
               <label class="dom-label">Booking Given By</label>
               <input class="dom-input" id="booking_given_by" maxlength="25" />
             </div>
+            <div class="dom-field" id="parent-pnr-field" style="display:none;">
+              <label class="dom-label">Parent PNR</label>
+              <div class="dom-input-readonly" id="parent_pnr">—</div>
+            </div>
             <div class="dom-field">
-              <label class="dom-label">Booking Reference<span class="dom-req">*</span></label>
+              <label class="dom-label" id="booking_reference_label">Booking Reference<span class="dom-req">*</span></label>
               <input class="dom-input" id="booking_reference" required />
               <div class="field-hint" id="booking_reference_hint" style="display:none;"></div>
             </div>
             <div class="dom-field">
-              <label class="dom-label">Booking Ref Date<span class="dom-req">*</span></label>
+              <label class="dom-label" id="booking_ref_date_label">Booking Ref Date<span class="dom-req">*</span></label>
               <div class="date-group" id="booking_ref_date">
                 <input type="date" class="dg-native" style="height:24px; font-size:11.5px;" />
               </div>
@@ -219,9 +223,9 @@
                     <th class="num">YQ</th>
                     <th class="num">K3</th>
                     <th class="num">SSR</th>
-                    <th class="num">All Taxes</th>
+                    <th class="num">Other Taxes</th>
                     <th class="num">Total</th>
-                    <th style="width:105px; text-align:center;">Action</th>
+                    <th id="pax-action-th" style="width:105px; text-align:center;">Action</th>
                   </tr>
                 </thead>
                 <tbody id="ticket-lines">
@@ -256,12 +260,12 @@
             <tr>
               <th>Summary</th>
               <th>Basic</th>
-              <th>Taxes</th>
+              <th>Other Taxes</th>
               <th>SSR</th>
               <th>Disc</th>
               <th>TDS</th>
               <th>Markup</th>
-              <th>S.Fee</th>
+              <th>Service Fee
               <th>GST Amount</th>
               <th>Total</th>
             </tr>
@@ -326,6 +330,16 @@
     <div class="dom-modal-titlebar">
       <div><span id="modal-pax-display" style="display:none;">Passenger #1</span></div>
       <button type="button" class="dom-titlebar-btn btn-close" id="modal-close-x-btn" title="Close">&times;</button>
+    </div>
+
+    <!-- Reschedule only - replaces the plain titlebar above (hidden while
+         this is shown). Parent shows the original ticket line, frozen/
+         non-editable, purely for reference; Reschedule shows this brand
+         new ticket's own data, blank and fully editable. -->
+    <div class="reschedule-tab-bar" id="reschedule-tab-bar" style="display:none;">
+      <button type="button" class="reschedule-tab-btn active" data-tab="parent">Parent PNR Details</button>
+      <button type="button" class="reschedule-tab-btn" data-tab="reschedule">Reschedule PNR Details</button>
+      <button type="button" class="reschedule-tab-close-btn" id="reschedule-tab-close-btn" title="Close">&times;</button>
     </div>
 
     <div class="dom-modal-body">
@@ -421,8 +435,8 @@
 
         <!-- 2. Two Accounting Boxes (Single Shared Header) -->
         <div class="dom-modal-accounting-row">
-          <div class="dom-modal-section-title">Client Accounting (<span class="modal-currency-label">INR</span>)</div>
-          <div class="dom-modal-section-title">Supplier Commission</div>
+          <div class="dom-modal-section-title">Customer</div>
+          <div class="dom-modal-section-title">Supplier</div>
           <!-- Client Accounting (Discount, Markup, Service Fee, TDS & GST) -->
           <div class="dom-acct-box">
             <div class="dom-acct-body">
@@ -458,21 +472,15 @@
                 <label>SSR Service Fee</label>
                 <input class="dom-input modal-calc dom-acct-input-sm dom-max10 dom-amount" type="text" inputmode="decimal" id="modal-ssr-service-fee" min="0" max="9999999999" step="0.01" value="0.00" />
               </div>
-              <div class="dom-acct-field dom-acct-field-dual">
-                <label>TDS %</label>
-                <input class="dom-input modal-calc dom-acct-input-sm dom-amount" type="text" inputmode="decimal" id="modal-tds-per" min="0" step="0.01" value="0.00" />
-                <label>TDS Amount</label>
-                <div class="dom-input-readonly dom-acct-input-sm" id="modal-tds-computed">0.00</div>
-              </div>
               <!-- Taxable Amount is display-only - Service Fee + Addl
                    Service Fee + SSR Service Fee, not used in any
                    calculation (view purposes only). GST Amount = each of
                    those times its own mapped ledger's GST% (see
                    computeFareLine). -->
-              <div class="dom-acct-field dom-acct-field-dual">
-                <label>Taxable Amount</label>
-                <div class="dom-input-readonly" id="modal-taxable-amount" style="flex:none; width:70px; text-align:right; justify-content:flex-end;">0.00</div>
-                <label>GST Amount</label>
+              <div class="dom-acct-field dom-acct-field-dual" style="grid-template-columns: 84px 1fr 68px 1fr;">
+                <label style="white-space:normal; line-height:1.1; font-size:10px;">Taxable Amount</label>
+                <div class="dom-input-readonly" id="modal-taxable-amount" style="text-align:right; justify-content:flex-end;">0.00</div>
+                <label style="white-space:normal; line-height:1.1; font-size:10px;">GST Amount</label>
                 <div style="display:flex; align-items:center; gap:4px;">
                   <div class="dom-input-readonly" id="modal-gst-computed" style="flex:1; min-width:0; text-align:right; justify-content:flex-end;">0.00</div>
                   <button type="button" class="dom-eye-btn" id="modal-gst-detail-btn" title="View GST Amount calculation">
@@ -480,17 +488,30 @@
                   </button>
                 </div>
               </div>
+              <div class="dom-acct-field dom-acct-field-dual" style="grid-template-columns: 84px 1fr 68px 1fr;">
+                <label style="white-space:normal; line-height:1.1; font-size:10px;">TDS %</label>
+                <input class="dom-input modal-calc dom-acct-input-sm dom-amount" type="text" inputmode="decimal" id="modal-tds-per" min="0" step="0.01" value="0.00" />
+                <label style="white-space:normal; line-height:1.1; font-size:10px;">TDS Amount</label>
+                <div class="dom-input-readonly dom-acct-input-sm" id="modal-tds-computed">0.00</div>
+              </div>
               <!-- Only shown when the ticket's Payment Mode is "Payment
                    Gateway" - posts against that gateway's PG Master ->
                    PG Charges Master ledger. PG GST is display-only - the
                    selected gateway's PG Charges Master ledger's own GST%
                    (view purposes only, not used in any calculation). -->
-              <div class="dom-acct-field dom-acct-field-dual" id="modal-pg-charges-field" style="display:none;">
+              <div class="dom-acct-field dom-acct-field-dual" id="modal-pg-charges-field" style="display:none; grid-template-columns: 84px 1fr 68px 1fr;">
                 <label>PG Charges</label>
                 <!-- Non-editable - auto-computed as this passenger's Total
                      Billed x the selected gateway's PG Master -> PG Charges
-                     Percentage (pg-master.html). See updatePgCharges(). -->
-                <input class="dom-input-readonly dom-acct-input-sm" type="text" id="modal-pg-charges" readonly value="0.00" />
+                     Percentage, resolved as of this ticket's own Booking
+                     Ref Date (pg-master.html's history). See
+                     updatePgCharges(). The % box shows the rate actually
+                     applied (also saved on the ticket line), the second
+                     box the resulting amount. -->
+                <div style="display:flex; align-items:center; gap:4px;">
+                  <input class="dom-input-readonly dom-acct-input-sm" type="text" id="modal-pg-charges-pct" readonly value="0.00%" style="width:48px; flex:none; text-align:right;" title="PG Charges Percentage applied (as of Booking Ref Date)" />
+                  <input class="dom-input-readonly dom-acct-input-sm" type="text" id="modal-pg-charges" readonly value="0.00" style="flex:1; min-width:0; text-align:right;" />
+                </div>
                 <label>PG GST</label>
                 <div class="dom-input-readonly dom-acct-input-sm" id="modal-pg-gst-pct">0.00</div>
               </div>
@@ -513,7 +534,7 @@
                 </span>
               </div>
               <div class="dom-acct-field" id="modal-supp-comm-on-field" style="display:none;">
-                <label>Supplier Commission On</label>
+                <label>Commission On</label>
                 <select class="dom-select modal-calc" id="modal-supp-comm-on"></select>
               </div>
               <div class="dom-acct-field">
@@ -521,27 +542,27 @@
                 <input class="dom-input dom-amount" type="text" inputmode="decimal" id="modal-supp-comm-computed" min="0" step="0.01" value="0.00" />
               </div>
               <div class="dom-acct-field dom-acct-field-dual">
-                <label>Sup Markup</label>
+                <label>Markup</label>
                 <input class="dom-input modal-calc dom-acct-input-sm dom-max10 dom-amount" type="text" inputmode="decimal" id="modal-supp-markup" min="0" max="9999999999" step="0.01" value="0.00" />
-                <label>Sup Addl Markup</label>
+                <label>Addl Markup</label>
                 <input class="dom-input modal-calc dom-acct-input-sm dom-max10 dom-amount" type="text" inputmode="decimal" id="modal-supp-addl-markup" min="0" max="9999999999" step="0.01" value="0.00" />
               </div>
               <div class="dom-acct-field dom-acct-field-dual">
-                <label>Sup Service Fee</label>
+                <label>Service Fee</label>
                 <input class="dom-input modal-calc dom-acct-input-sm dom-max10 dom-amount" type="text" inputmode="decimal" id="modal-supp-service-fee" min="0" max="9999999999" step="0.01" value="0.00" />
-                <label>Sup Addl Service Fee</label>
+                <label>Addl Service Fee</label>
                 <input class="dom-input modal-calc dom-acct-input-sm dom-max10 dom-amount" type="text" inputmode="decimal" id="modal-supp-addl-service-fee" min="0" max="9999999999" step="0.01" value="0.00" />
               </div>
               <div class="dom-acct-field dom-acct-field-dual">
-                <label>Sup TDS %</label>
+                <label>TDS %</label>
                 <input class="dom-input modal-calc dom-acct-input-sm dom-amount" type="text" inputmode="decimal" id="modal-supp-tds-per" min="0" step="0.01" value="0.00" />
-                <label>Sup TDS Amount</label>
+                <label>TDS Amount</label>
                 <div class="dom-input-readonly dom-acct-input-sm" id="modal-supp-tds-computed">0.00</div>
               </div>
               <div class="dom-acct-field dom-acct-field-dual">
-                <label>Sup GST %</label>
+                <label>GST %</label>
                 <input class="dom-input modal-calc dom-acct-input-sm dom-amount" type="text" inputmode="decimal" id="modal-supp-gst-pct" min="0" step="0.01" value="0.00" />
-                <label>Sup GST Amount</label>
+                <label>GST Amount</label>
                 <div class="dom-input-readonly dom-acct-input-sm" id="modal-supp-gst-computed">0.00</div>
               </div>
             </div>
@@ -558,7 +579,7 @@
     <!-- Modal Footer Toolbar -->
     <div class="dom-modal-footer">
       <div class="dom-modal-total-bar">
-        <span>Total Billed:</span>
+        <span>Total:</span>
         <span class="modal-currency-label">INR</span>
         <span id="modal-total-computed" style="font-size:16px; font-weight:800; font-family:var(--font-mono);">0.00</span>
       </div>
@@ -570,7 +591,7 @@
 <div class="dom-modal-backdrop spa-extra-content" id="sector-modal">
   <div class="dom-modal-window" style="max-width: 460px; width: 95%;">
     <div class="dom-modal-titlebar">
-      <div>Add Sector</div>
+      <div id="sector-modal-title">Add Sector</div>
       <button type="button" class="dom-titlebar-btn btn-close" id="sector-close-x-btn" title="Close">&times;</button>
     </div>
     <div class="dom-modal-body dom-modal-body-scroll" style="display:block; padding:12px; max-height:76vh;">

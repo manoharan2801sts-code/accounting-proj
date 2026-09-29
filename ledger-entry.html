@@ -23,7 +23,7 @@
       <div class="entry-grid">
         <div><label class="field-label">Ledger Name</label><input class="form-control-custom" id="name" required /><div class="field-hint" id="name_hint"></div></div>
         <div><label class="field-label">Group</label><select class="form-control-custom" id="parent_id" required></select></div>
-        <div><label class="field-label">Opening Balance</label><input class="form-control-custom" type="number" id="opening_balance" value="0" min="0" step="0.01" /></div>
+        <div><label class="field-label">Opening Balance</label><input class="form-control-custom dom-amount" type="text" inputmode="decimal" id="opening_balance" value="0.00" /></div>
         <div><label class="field-label">Opening Balance Type</label>
           <select class="form-control-custom" id="opening_balance_type"><option value="Debit">Debit</option><option value="Credit">Credit</option></select>
         </div>
@@ -122,16 +122,16 @@
           <div><label class="field-label">GST Type</label>
             <select class="form-control-custom" id="gst_tax_type"><option value="">—</option><option value="IGST">IGST</option><option value="CGST">CGST</option><option value="SGST">SGST</option></select>
           </div>
-          <div><label class="field-label">GST Percentage</label><input class="form-control-custom" type="number" id="gst_percentage" value="0" min="0" step="0.01" /></div>
+          <div><label class="field-label">GST Percentage</label><input class="form-control-custom dom-amount" type="text" inputmode="decimal" id="gst_percentage" value="0.00" /></div>
           <div><label class="field-label">TDS Applicable</label>
             <select class="form-control-custom" id="tds_applicable"><option value="false">No</option><option value="true">Yes</option></select>
           </div>
-          <div><label class="field-label">TDS Percentage</label><input class="form-control-custom" type="number" id="tds_percentage" value="0" min="0" step="0.01" /></div>
+          <div><label class="field-label">TDS Percentage</label><input class="form-control-custom dom-amount" type="text" inputmode="decimal" id="tds_percentage" value="0.00" /></div>
           <div><label class="field-label">HSN Code</label><input class="form-control-custom" id="hsn_code" placeholder="e.g. 9985" /></div>
           <div><label class="field-label">TCS Applicable</label>
             <select class="form-control-custom" id="tcs_applicable"><option value="false">No</option><option value="true">Yes</option></select>
           </div>
-          <div><label class="field-label">TCS Percentage</label><input class="form-control-custom" type="number" id="tcs_percentage" value="0" min="0" step="0.01" /></div>
+          <div><label class="field-label">TCS Percentage</label><input class="form-control-custom dom-amount" type="text" inputmode="decimal" id="tcs_percentage" value="0.00" /></div>
         </div>
       </div>
 

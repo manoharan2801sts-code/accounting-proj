@@ -39,8 +39,8 @@
     document.getElementById("check_in").value = h.check_in;
     document.getElementById("check_out").value = h.check_out;
     document.getElementById("rooms").value = h.rooms;
-    document.getElementById("supplier_cost").value = h.supplier_cost;
-    document.getElementById("customer_billing").value = h.customer_billing;
+    document.getElementById("supplier_cost").value = Number(h.supplier_cost || 0).toFixed(2);
+    document.getElementById("customer_billing").value = Number(h.customer_billing || 0).toFixed(2);
     recalc();
   }
 
@@ -75,10 +75,15 @@
     });
   });
 
-  const active = await VoyagerShell.init({
-    activeKey: "hotels",
-    onCompanyChange: (id, country) => { activeCompanyId = Number(id); activeCountry = country; populateRefs(activeCompanyId); },
-  });
+  let active = null;
+  try {
+    active = await VoyagerShell.init({
+      activeKey: "hotels",
+      onCompanyChange: (id, country) => { activeCompanyId = Number(id); activeCountry = country; populateRefs(activeCompanyId); },
+    });
+  } catch (err) {
+    console.error("Shell init failed", err);
+  }
   if (active) {
     activeCompanyId = Number(active.id); activeCountry = active.country;
     populateRefs(activeCompanyId);
@@ -88,5 +93,7 @@
     } else {
       recalc();
     }
+  } else {
+    voyagerAlert("Could not load the active company. Check your connection and reload the page.", { icon: "error" });
   }
 })();

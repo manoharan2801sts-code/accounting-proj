@@ -25,6 +25,15 @@
     });
   }
 
-  const active = await VoyagerShell.init({ activeKey: "customers", onCompanyChange: load });
-  if (active) load(active.id, active.country);
+  let active = null;
+  try {
+    active = await VoyagerShell.init({ activeKey: "customers", onCompanyChange: load });
+  } catch (err) {
+    console.error("Shell init failed", err);
+  }
+  if (active) {
+    load(active.id, active.country);
+  } else {
+    voyagerAlert("Could not load the active company. Check your connection and reload the page.", { icon: "error" });
+  }
 })();

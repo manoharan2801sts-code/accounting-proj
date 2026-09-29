@@ -38,8 +38,8 @@
     document.getElementById("lines-body").innerHTML = jv.accounts.map((a) => `
       <tr>
         <td><input class="form-control-custom" value="${a.ledger_name || "—"}" disabled /></td>
-        <td><input class="form-control-custom" type="number" value="${a.debit || ""}" disabled /></td>
-        <td><input class="form-control-custom" type="number" value="${a.credit || ""}" disabled /></td>
+        <td><input class="form-control-custom" type="text" value="${a.debit ? Number(a.debit).toFixed(2) : ""}" disabled /></td>
+        <td><input class="form-control-custom" type="text" value="${a.credit ? Number(a.credit).toFixed(2) : ""}" disabled /></td>
         <td></td>
       </tr>`).join("");
 
@@ -86,8 +86,8 @@
     tr.id = id;
     tr.innerHTML = `
       <td><select class="form-control-custom line-account">${accountOptionsHtml()}</select></td>
-      <td><input class="form-control-custom line-debit" type="number" min="0" step="0.01" value="${prefill && prefill.debit ? prefill.debit : ""}" /></td>
-      <td><input class="form-control-custom line-credit" type="number" min="0" step="0.01" value="${prefill && prefill.credit ? prefill.credit : ""}" /></td>
+      <td><input class="form-control-custom line-debit dom-amount" type="text" inputmode="decimal" value="${prefill && prefill.debit ? Number(prefill.debit).toFixed(2) : ""}" /></td>
+      <td><input class="form-control-custom line-credit dom-amount" type="text" inputmode="decimal" value="${prefill && prefill.credit ? Number(prefill.credit).toFixed(2) : ""}" /></td>
       <td><button type="button" class="btn-outline-brand remove-line" style="padding:0.4rem 0.7rem; font-size:0.78rem;">✕</button></td>`;
     document.getElementById("lines-body").appendChild(tr);
     const debitInput = tr.querySelector(".line-debit");
@@ -255,10 +255,15 @@
     }
   });
 
-  const active = await VoyagerShell.init({
-    activeKey: ticketId ? "tickets" : "vouchers",
-    onCompanyChange: async (id, country) => { activeCompanyId = Number(id); activeCountry = country; await populateRefs(activeCompanyId); },
-  });
+  let active = null;
+  try {
+    active = await VoyagerShell.init({
+      activeKey: ticketId ? "tickets" : "vouchers",
+      onCompanyChange: async (id, country) => { activeCompanyId = Number(id); activeCountry = country; await populateRefs(activeCompanyId); },
+    });
+  } catch (err) {
+    console.error("Shell init failed", err);
+  }
   if (active) {
     activeCompanyId = Number(active.id); activeCountry = active.country;
     if (ticketId) {
@@ -281,5 +286,7 @@
         recalcTotals();
       }
     }
+  } else {
+    voyagerAlert("Could not load the active company. Check your connection and reload the page.", { icon: "error" });
   }
 })();

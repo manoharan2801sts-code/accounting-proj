@@ -8,14 +8,14 @@ and gets these rows straight from SQL Server instead.
 import json
 import math
 import re
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from django.http import JsonResponse, HttpResponseNotAllowed
 from django.views.decorators.csrf import csrf_exempt
 from django.forms.models import model_to_dict
 from django.db import transaction, IntegrityError
-from django.db.models import ProtectedError, Q
+from django.db.models import ProtectedError, Q, Prefetch
 
-from .models import LedgerGroup, Ledger, Ticket, TicketLine, Voucher, JournalVoucher, VoucherType, SupplierCommissionRule, MasterMapping, FOPMaster, PGMaster, CompanyMaster, clear_gst_pct_cache
+from .models import LedgerGroup, Ledger, Ticket, TicketLine, Voucher, JournalVoucher, VoucherType, SupplierCommissionRule, MasterMapping, FOPMaster, PGMaster, PGMasterHistory, CompanyMaster, clear_gst_pct_cache
 from .jv_hardcode import JV_LINE_MAP
 
 
@@ -553,6 +553,66 @@ def _fop_payment_lines(ticket, lines, fop_cache=None):
     return result
 
 
+def _pg_master_effective_snapshot(company_id, gateway_name, as_of_date, cache=None):
+    """
+    Resolves the PG Master ledger mapping + PG Charges Percentage that was
+    actually in force for `gateway_name` on `as_of_date` (a ticket's own
+    Booking Ref Date) - the latest PGMasterHistory row whose effective_from
+    is on or before that date, falling back to the gateway's live PGMaster
+    row when no history snapshot qualifies (tickets booked before any
+    Effective From date was ever recorded for this gateway).
+
+    This is the single source of truth every PG Charges calculation and
+    JV/report posting must go through, so editing a gateway's rate/ledger
+    later never rewrites the ledger or amount already-booked tickets
+    calculate against.
+
+    cache (optional dict): callers that resolve many tickets in one
+    request (_ledger_balance_deltas) pass a shared dict so each gateway's
+    row + full history is fetched once, not once per ticket - a per-ticket
+    query here times out gunicorn against TiDB Cloud's round-trip latency.
+    """
+    if not gateway_name:
+        return None
+    if cache is None:
+        cache = {}
+    key = (str(company_id), gateway_name)
+    if key not in cache:
+        gateway = PGMaster.objects.filter(company_id=company_id, gateway_name=gateway_name).select_related("pg_charges_master_ledger").first()
+        history = list(PGMasterHistory.objects.filter(pg_master=gateway).order_by("-effective_from")) if gateway else []
+        charges_ledger_ids = {h.pg_charges_master_ledger_id for h in history if h.pg_charges_master_ledger_id}
+        gst_by_ledger = dict(Ledger.objects.filter(id__in=charges_ledger_ids).values_list("id", "gst_percentage")) if charges_ledger_ids else {}
+        cache[key] = (gateway, history, gst_by_ledger)
+    gateway, history, gst_by_ledger = cache[key]
+    if not gateway:
+        return None
+
+    as_of_date = _parse_date(as_of_date)
+    hist = next((h for h in history if h.effective_from <= as_of_date), None) if as_of_date else None
+
+    if hist:
+        charges_ledger_id = hist.pg_charges_master_ledger_id
+        return {
+            "payment_master_ledger_id": hist.payment_master_ledger_id,
+            "payment_master_ledger_name": hist.payment_master_ledger_name,
+            "pg_charges_master_ledger_id": charges_ledger_id,
+            "pg_charges_master_ledger_name": hist.pg_charges_master_ledger_name,
+            "pg_charges_master_ledger_gst_percentage": float(gst_by_ledger.get(charges_ledger_id) or 0) if charges_ledger_id else 0.0,
+            "pg_charges_percentage": float(hist.pg_charges_percentage) if hist.pg_charges_percentage is not None else 0.0,
+            "effective_from": hist.effective_from.isoformat(),
+        }
+
+    return {
+        "payment_master_ledger_id": gateway.payment_master_ledger_id,
+        "payment_master_ledger_name": gateway.payment_master_ledger_name,
+        "pg_charges_master_ledger_id": gateway.pg_charges_master_ledger_id,
+        "pg_charges_master_ledger_name": gateway.pg_charges_master_ledger_name,
+        "pg_charges_master_ledger_gst_percentage": float(gateway.pg_charges_master_ledger.gst_percentage) if gateway.pg_charges_master_ledger_id and gateway.pg_charges_master_ledger else 0.0,
+        "pg_charges_percentage": float(gateway.pg_charges_percentage) if gateway.pg_charges_percentage is not None else 0.0,
+        "effective_from": None,
+    }
+
+
 def _pg_receipt_lines(ticket, lines, pg_cache=None):
     """
     Mirrors the PG Receipts tab (renderPgReceiptsTab) — only posts when
@@ -583,13 +643,12 @@ def _pg_receipt_lines(ticket, lines, pg_cache=None):
     if customer_total == 0:
         return []
     result = [(ticket.customer_id, 0, customer_total)]
-    if pg_cache is not None:
-        gateway = pg_cache.get(ticket.payment_gateway_ref or "")
-    else:
-        gateway = PGMaster.objects.filter(company_id=ticket.company_id, gateway_name=ticket.payment_gateway_ref or "").select_related("pg_charges_master_ledger").first()
-    if gateway:
+    # Resolved as of this ticket's own Booking Ref Date (see
+    # _pg_master_effective_snapshot), not the gateway's current row.
+    snapshot = _pg_master_effective_snapshot(ticket.company_id, ticket.payment_gateway_ref or "", ticket.booking_ref_date or ticket.invoice_date, cache=pg_cache)
+    if snapshot:
         pg_charges_total = round(sum(float(l.pg_charges or 0) for l in lines), 2)
-        pg_gst_pct = float(gateway.pg_charges_master_ledger.gst_percentage) if gateway.pg_charges_master_ledger_id and gateway.pg_charges_master_ledger else 0.0
+        pg_gst_pct = snapshot["pg_charges_master_ledger_gst_percentage"]
         pg_gst_total = round(pg_charges_total * pg_gst_pct / 100, 2)
 
         # NOT + pg_charges_total here - that amount already gets its own
@@ -600,12 +659,12 @@ def _pg_receipt_lines(ticket, lines, pg_cache=None):
         # implicitly via the pair) against only one matching credit,
         # unbalancing the whole JV by exactly pg_charges_total.
         gateway_debit_total = round(customer_total + pg_gst_total, 2)
-        result.append((gateway.payment_master_ledger_id, gateway_debit_total, 0))
-        if pg_charges_total and gateway.pg_charges_master_ledger_id:
-            result.append((gateway.pg_charges_master_ledger_id, pg_charges_total, 0))
-            result.append((gateway.payment_master_ledger_id, 0, pg_charges_total))
+        result.append((snapshot["payment_master_ledger_id"], gateway_debit_total, 0))
+        if pg_charges_total and snapshot["pg_charges_master_ledger_id"]:
+            result.append((snapshot["pg_charges_master_ledger_id"], pg_charges_total, 0))
+            result.append((snapshot["payment_master_ledger_id"], 0, pg_charges_total))
         if pg_gst_total:
-            result.append((gateway.payment_master_ledger_id, 0, pg_gst_total))
+            result.append((snapshot["payment_master_ledger_id"], 0, pg_gst_total))
     return result
 
 
@@ -638,10 +697,8 @@ def _ledger_balance_deltas(company_id, as_of_date=None):
         card.card_number: card
         for card in FOPMaster.objects.filter(company_id=company_id)
     }
-    pg_cache = {
-        pg.gateway_name: pg
-        for pg in PGMaster.objects.filter(company_id=company_id).select_related("pg_charges_master_ledger")
-    }
+    pg_cache = {}  # filled lazily by _pg_master_effective_snapshot, one entry per gateway
+    company_state = (CompanyMaster.objects.filter(id=company_id).values_list("state", flat=True).first() or "").strip().lower()
 
     tickets = Ticket.objects.filter(company_id=company_id).select_related("customer", "supplier").prefetch_related("lines__supplier")
     if as_of_date:
@@ -650,7 +707,7 @@ def _ledger_balance_deltas(company_id, as_of_date=None):
         lines = list(t.lines.all())
         if not lines:
             continue
-        accounts, _narration, _total_debit, _total_credit = _compute_jv_lines(t, lines, mapping_cache=mapping_cache)
+        accounts, _narration, _total_debit, _total_credit = _compute_jv_lines(t, lines, mapping_cache=mapping_cache, company_state=company_state)
         for a in accounts:
             add(a.get("ledger_id"), a.get("debit"), a.get("credit"))
         for ledger_id, debit, credit in _fop_payment_lines(t, lines, fop_cache=fop_cache):
@@ -700,35 +757,16 @@ def accounts_list(request):
 
 
 
-def ledger_book_report(request):
+def _ledger_transactions(company_id, ledger, from_date=None, to_date=None):
     """
-    GET /api/ledger-book/?company_id=1&ledger_id=42[&from_date&to_date]
-    Tally-style ledger statement for ONE real leaf Ledger: opening balance,
-    then one row per posted transaction that actually touches it (date,
-    voucher type, voucher no, opposite account(s), debit, credit, running
-    balance) — pulled from the exact same sources _ledger_balance_deltas
-    uses (manual Vouchers' lines_json, plus every Ticket's Journal Voucher
-    + FOP Payment + PG Receipts tabs, recomputed live), not a separately
-    stored ledger-transaction table. Each row that came from a Ticket
-    carries ticket_id, so the frontend can jump straight to that ticket
-    (view mode) when the row is clicked.
+    Shared by ledger_book_report and ledger_monthly_summary - builds the
+    exact same posted-transaction list for ONE real leaf Ledger (manual
+    Vouchers' lines_json, plus every Ticket's Journal Voucher + FOP
+    Payment + PG Receipts tabs, recomputed live) with a running balance,
+    optionally windowed to [from_date, to_date] (ISO strings). Returns
+    (company, txns, opening, closing, total_debit, total_credit).
     """
-    if request.method != "GET":
-        return HttpResponseNotAllowed(["GET"])
-
-    company_id = request.GET.get("company_id")
-    ledger_id = request.GET.get("ledger_id")
-    if not company_id or not ledger_id:
-        return JsonResponse({"error": "company_id and ledger_id are required"}, status=400)
-    try:
-        ledger_id = int(ledger_id)
-        ledger = Ledger.objects.get(id=ledger_id, company_id=company_id)
-    except (ValueError, Ledger.DoesNotExist):
-        return JsonResponse({"error": "Ledger not found."}, status=404)
-
-    from_date = request.GET.get("from_date")
-    to_date = request.GET.get("to_date")
-
+    ledger_id = ledger.id
     ledger_names = {l.id: (l.alias_name or l.name) for l in Ledger.objects.filter(company_id=company_id)}
     company = CompanyMaster.objects.filter(id=company_id).first()
     txns = []
@@ -803,14 +841,154 @@ def ledger_book_report(request):
         total_debit += tx["debit"]
         total_credit += tx["credit"]
 
+    return company, txns, round(opening, 2), round(running, 2), round(total_debit, 2), round(total_credit, 2)
+
+
+def ledger_book_report(request):
+    """
+    GET /api/ledger-book/?company_id=1&ledger_id=42[&from_date&to_date]
+    Tally-style ledger statement for ONE real leaf Ledger: opening balance,
+    then one row per posted transaction that actually touches it (date,
+    voucher type, voucher no, opposite account(s), debit, credit, running
+    balance) — pulled from the exact same sources _ledger_balance_deltas
+    uses (manual Vouchers' lines_json, plus every Ticket's Journal Voucher
+    + FOP Payment + PG Receipts tabs, recomputed live), not a separately
+    stored ledger-transaction table. Each row that came from a Ticket
+    carries ticket_id, so the frontend can jump straight to that ticket
+    (view mode) when the row is clicked.
+    """
+    if request.method != "GET":
+        return HttpResponseNotAllowed(["GET"])
+
+    company_id = request.GET.get("company_id")
+    ledger_id = request.GET.get("ledger_id")
+    if not company_id or not ledger_id:
+        return JsonResponse({"error": "company_id and ledger_id are required"}, status=400)
+    try:
+        ledger_id = int(ledger_id)
+        ledger = Ledger.objects.get(id=ledger_id, company_id=company_id)
+    except (ValueError, Ledger.DoesNotExist):
+        return JsonResponse({"error": "Ledger not found."}, status=404)
+
+    from_date = request.GET.get("from_date")
+    to_date = request.GET.get("to_date")
+
+    company, txns, opening, closing, total_debit, total_credit = _ledger_transactions(company_id, ledger, from_date, to_date)
+
     return JsonResponse({
         "ledger_id": ledger.id, "ledger_name": ledger.alias_name or ledger.name,
         "company_name": company.company_name if company else "",
         "from_date": from_date, "to_date": to_date,
-        "opening_balance": round(opening, 2),
-        "closing_balance": round(running, 2),
-        "total_debit": round(total_debit, 2), "total_credit": round(total_credit, 2),
+        "opening_balance": opening,
+        "closing_balance": closing,
+        "total_debit": total_debit, "total_credit": total_credit,
         "transactions": txns,
+    })
+
+
+def ledger_monthly_summary(request):
+    """
+    GET /api/ledger-book/monthly/?company_id=1&ledger_id=42[&from_date&to_date]
+    Tally-style "Monthly Summary" sitting between Trial Balance and the
+    full Ledger Book - one row per calendar month in the requested window
+    (Debit total, Credit total, running Closing Balance; months with no
+    activity just carry the balance forward unchanged), each with its own
+    from_date/to_date so the frontend can drill into Ledger Book pre-
+    filtered to that one month.
+
+    Defaults to the company's full financial year when from_date/to_date
+    aren't given. When they are (the page's own From/To filter), the
+    window's Opening Balance is the real running balance as of the day
+    before from_date - not the ledger's own (FY-start) opening_balance -
+    computed by replaying every transaction before that date first.
+    """
+    if request.method != "GET":
+        return HttpResponseNotAllowed(["GET"])
+
+    company_id = request.GET.get("company_id")
+    ledger_id = request.GET.get("ledger_id")
+    if not company_id or not ledger_id:
+        return JsonResponse({"error": "company_id and ledger_id are required"}, status=400)
+    try:
+        ledger_id = int(ledger_id)
+        ledger = Ledger.objects.get(id=ledger_id, company_id=company_id)
+    except (ValueError, Ledger.DoesNotExist):
+        return JsonResponse({"error": "Ledger not found."}, status=404)
+
+    company = CompanyMaster.objects.filter(id=company_id).first()
+    fy_start = company.financial_year_from if company and company.financial_year_from else None
+    if not fy_start:
+        today = date.today()
+        fy_year = today.year if today.month >= 4 else today.year - 1
+        fy_start = date(fy_year, 4, 1)
+    fy_end = date(fy_start.year + 1, fy_start.month, fy_start.day) - timedelta(days=1)
+
+    req_from = request.GET.get("from_date")
+    req_to = request.GET.get("to_date")
+    try:
+        window_from = date.fromisoformat(req_from) if req_from else fy_start
+        window_to = date.fromisoformat(req_to) if req_to else fy_end
+    except ValueError:
+        return JsonResponse({"error": "from_date/to_date must be YYYY-MM-DD."}, status=400)
+    if window_from > window_to:
+        return JsonResponse({"error": "From date must be on or before To date."}, status=400)
+
+    ledger_opening = float(ledger.opening_balance) if ledger.opening_balance_type == "Debit" else -float(ledger.opening_balance)
+    if window_from > fy_start:
+        # Balance as it actually stood the day before this window starts -
+        # not the ledger's own (FY-start) opening_balance, which is only
+        # correct when the window starts at the FY's own beginning.
+        _c, _t, _o, opening, _td, _tc = _ledger_transactions(
+            company_id, ledger, fy_start.isoformat(), (window_from - timedelta(days=1)).isoformat()
+        )
+    else:
+        opening = ledger_opening
+
+    company, txns, _o2, _closing, _td2, _tc2 = _ledger_transactions(
+        company_id, ledger, window_from.isoformat(), window_to.isoformat()
+    )
+
+    # One row per calendar month spanned by the window, each with its own
+    # [from_date, to_date] for drill-down into Ledger Book.
+    months = []
+    cursor = date(window_from.year, window_from.month, 1)
+    while cursor <= window_to:
+        month_start = max(cursor, window_from)
+        month_end = min(
+            date(cursor.year + (1 if cursor.month == 12 else 0), (cursor.month % 12) + 1, 1) - timedelta(days=1),
+            window_to,
+        )
+        months.append({
+            "month_name": cursor.strftime("%B"), "year": cursor.year,
+            "from_date": month_start.isoformat(), "to_date": month_end.isoformat(),
+            "debit": 0.0, "credit": 0.0, "closing_balance": None,
+        })
+        cursor = date(cursor.year + (1 if cursor.month == 12 else 0), (cursor.month % 12) + 1, 1)
+
+    running = opening
+    for m in months:
+        month_txns = [tx for tx in txns if m["from_date"] <= (tx["date"] or "") <= m["to_date"]]
+        m["debit"] = round(sum(tx["debit"] for tx in month_txns), 2)
+        m["credit"] = round(sum(tx["credit"] for tx in month_txns), 2)
+        running = round(running + m["debit"] - m["credit"], 2)
+        # Carried forward even for a month with zero activity - matches
+        # the reference "Monthly Summary" screen, where an empty month
+        # still shows the balance as it stood, not a blank cell.
+        m["closing_balance"] = running
+        m["has_activity"] = bool(month_txns)
+
+    total_debit = round(sum(m["debit"] for m in months), 2)
+    total_credit = round(sum(m["credit"] for m in months), 2)
+
+    return JsonResponse({
+        "ledger_id": ledger.id, "ledger_name": ledger.alias_name or ledger.name,
+        "company_name": company.company_name if company else "",
+        "financial_year_from": fy_start.isoformat(), "financial_year_to": fy_end.isoformat(),
+        "from_date": window_from.isoformat(), "to_date": window_to.isoformat(),
+        "opening_balance": round(opening, 2),
+        "closing_balance": running,
+        "total_debit": total_debit, "total_credit": total_credit,
+        "months": months,
     })
 
 
@@ -1123,14 +1301,14 @@ TICKET_HEADER_FIELDS = [
 TICKET_LINE_FIELDS = [
     "airline_code", "airline_name", "airline_category", "flight_no", "ticket_no", "passenger_name", "pax_type",
     "sector", "travel_date", "cabin", "travel_class", "fare_type", "basic_fare", "yq", "yr", "k3_tax", "tax_others", "seat", "meal",
-    "baggage", "other_ssr", "disc_on", "disc_type", "disc_value", "tds_per", "pg_charges",
+    "baggage", "other_ssr", "disc_on", "disc_type", "disc_value", "tds_per", "pg_charges", "pg_charges_percentage",
     "markup", "addl_markup", "ssr_markup", "service_fee", "addl_service_fee", "ssr_service_fee", "gst_pct", "status",
     "office_id", "fop", "card_number", "supp_comm_on", "supp_comm_type", "supp_comm_value", "supp_tds_per",
     "supp_markup", "supp_addl_markup", "supp_service_fee", "supp_addl_service_fee", "supp_gst_pct",
 ]
 TICKET_LINE_NUMERIC_FIELDS = {
     "basic_fare", "yq", "yr", "k3_tax", "tax_others", "seat", "meal", "baggage", "other_ssr",
-    "disc_value", "tds_per", "pg_charges", "markup", "addl_markup", "ssr_markup", "service_fee", "addl_service_fee", "ssr_service_fee", "gst_pct",
+    "disc_value", "tds_per", "pg_charges", "pg_charges_percentage", "markup", "addl_markup", "ssr_markup", "service_fee", "addl_service_fee", "ssr_service_fee", "gst_pct",
     "supp_comm_value", "supp_tds_per",
     "supp_markup", "supp_addl_markup", "supp_service_fee", "supp_addl_service_fee", "supp_gst_pct",
 }
@@ -1326,7 +1504,7 @@ def _next_voucher_no(model, company_id, category):
     return f"{prefix}-{count + 1}"
 
 
-def _compute_jv_lines(ticket, lines, mapping_cache=None):
+def _compute_jv_lines(ticket, lines, mapping_cache=None, company_state=None):
     """
     Shared by both the auto-post-on-save (ticket_create) and the JV tab's
     read-only display (ticket_jv_preview) — one formula, used in exactly
@@ -1444,7 +1622,8 @@ def _compute_jv_lines(ticket, lines, mapping_cache=None):
     # same-state/different-state rule above as a single set of lines.
     # The separate DEBIT "Input IGST A/c" line (also fed by supp_gst) is
     # a different line entirely (Input, not Output) and is untouched.
-    company_state = (CompanyMaster.objects.filter(id=ticket.company_id).values_list("state", flat=True).first() or "").strip().lower()
+    if company_state is None:
+        company_state = (CompanyMaster.objects.filter(id=ticket.company_id).values_list("state", flat=True).first() or "").strip().lower()
     customer_state = (ticket.customer.state_name or "").strip().lower()
     same_state = bool(company_state) and bool(customer_state) and company_state == customer_state
     OUTPUT_GST_KEYS = {"gst", "supp_gst"}
@@ -1758,6 +1937,7 @@ def ticket_detail(request, ticket_id):
         return JsonResponse({"error": "Ticket not found."}, status=404)
 
     lines = [{
+        "id": l.id,
         "airline_code": l.airline_code, "airline_name": l.airline_name, "airline_category": l.airline_category,
         "flight_no": l.flight_no,
         "ticket_no": l.ticket_no, "passenger_name": l.passenger_name, "pax_type": l.pax_type,
@@ -1767,7 +1947,7 @@ def ticket_detail(request, ticket_id):
         "tax_others": float(l.tax_others), "seat": float(l.seat), "meal": float(l.meal),
         "baggage": float(l.baggage), "other_ssr": float(l.other_ssr), "disc_on": l.disc_on,
         "disc_type": l.disc_type, "disc_value": float(l.disc_value), "tds_per": float(l.tds_per),
-        "pg_charges": float(l.pg_charges or 0),
+        "pg_charges": float(l.pg_charges or 0), "pg_charges_percentage": float(l.pg_charges_percentage) if l.pg_charges_percentage is not None else None,
         "markup": float(l.markup), "addl_markup": float(l.addl_markup), "ssr_markup": float(l.ssr_markup),
         "service_fee": float(l.service_fee),
         "addl_service_fee": float(l.addl_service_fee), "ssr_service_fee": float(l.ssr_service_fee), "gst_pct": float(l.gst_pct),
@@ -1841,8 +2021,84 @@ def tickets_list(request):
             "addl_service_fee": float(l.addl_service_fee), "ssr_service_fee": float(l.ssr_service_fee), "gst_pct": float(l.gst_pct),
             "supp_comm_on": l.supp_comm_on, "supp_comm_type": l.supp_comm_type,
             "supp_comm_value": float(l.supp_comm_value), "supp_tds_per": float(l.supp_tds_per),
+            # Server-computed (Discount/TDS follow disc_type/disc_value/
+            # tds_per; GST follows each fee field's own Master Mapping
+            # ledger GST%) - report-dsr-airline-booking.html's Other Tax
+            # column needs these exact figures, not a client-side re-guess.
+            "computed_discount": float(l.computed_discount), "computed_tds": float(l.computed_tds), "computed_gst": float(l.computed_gst),
         })
     return JsonResponse(rows, safe=False)
+
+
+def ticket_lookup_for_reschedule(request):
+    """
+    GET /api/tickets/lookup-for-reschedule/?company_id=1&s_pnr=..&airline_pnr=..&ticket_no=..
+    Finds a single Ticket by whichever identifier was actually given -
+    Ticket No first (unique to one TicketLine, so most specific), then
+    S PNR (Booking Reference), then Airline PNR - and returns every
+    passenger on that ticket with their own sectors already split out.
+
+    TicketLine stores a multi-city ticket's sector/flight_no/travel_class/
+    travel_date as one comma-joined value per field (same convention
+    page-ticket-entry.js's own parseSectorsFromPassenger() splits client-
+    side) - mirrored here so the Reschedule page can show each sector as
+    its own row without re-implementing that parsing twice.
+    """
+    if request.method != "GET":
+        return HttpResponseNotAllowed(["GET"])
+
+    company_id = request.GET.get("company_id")
+    if not company_id:
+        return JsonResponse({"error": "company_id is required"}, status=400)
+
+    s_pnr = (request.GET.get("s_pnr") or "").strip()
+    airline_pnr = (request.GET.get("airline_pnr") or "").strip()
+    ticket_no = (request.GET.get("ticket_no") or "").strip()
+    if not (s_pnr or airline_pnr or ticket_no):
+        return JsonResponse({"error": "Enter S PNR, Airline PNR or Ticket No to search."}, status=400)
+
+    ticket = None
+    matched_line_id = None
+    if ticket_no:
+        line = TicketLine.objects.filter(ticket__company_id=company_id, ticket_no=ticket_no).select_related("ticket").first()
+        ticket = line.ticket if line else None
+        matched_line_id = line.id if line else None
+    if not ticket and s_pnr:
+        ticket = Ticket.objects.filter(company_id=company_id, booking_reference=s_pnr).first()
+    if not ticket and airline_pnr:
+        ticket = Ticket.objects.filter(company_id=company_id, airline_pnr=airline_pnr).first()
+
+    if not ticket:
+        return JsonResponse({"error": "No ticket found matching that S PNR / Airline PNR / Ticket No."}, status=404)
+
+    def split_sectors(l):
+        pairs = [p.strip() for p in (l.sector or "").split(",") if p.strip()]
+        flight_nos = (l.flight_no or "").split(",")
+        classes = (l.travel_class or "").split(",")
+        dates = [d.strip() for d in (l.travel_date or "").split(",")]
+        return [{
+            "sector": pairs[i],
+            "flight_no": (flight_nos[i].strip() if i < len(flight_nos) else ""),
+            "travel_class": (classes[i].strip() if i < len(classes) else ""),
+            "travel_date": dates[i] if i < len(dates) else (dates[0] if len(dates) == 1 else ""),
+        } for i in range(len(pairs))]
+
+    passengers = [{
+        "line_id": l.id, "ticket_no": l.ticket_no, "pax_type": l.pax_type, "passenger_name": l.passenger_name,
+        "sectors": split_sectors(l),
+    } for l in ticket.lines.all()]
+
+    return JsonResponse({
+        "ticket_id": ticket.id, "invoice_number": ticket.invoice_number,
+        "booking_reference": ticket.booking_reference, "airline_pnr": ticket.airline_pnr,
+        # Only set when the search matched by Ticket No specifically -
+        # that identifies ONE particular passenger's line, not just the
+        # ticket as a whole (a ticket can have several passengers who
+        # each have their own ticket_no). The frontend uses this to
+        # pre-select that exact passenger instead of just the first row.
+        "matched_line_id": matched_line_id,
+        "passengers": passengers,
+    })
 
 
 def ticket_jv_preview(request, ticket_id):
@@ -2722,6 +2978,7 @@ def _pg_master_dict(p):
         "pg_charges_master_ledger_id": p.pg_charges_master_ledger_id, "pg_charges_master_ledger_name": p.pg_charges_master_ledger_name,
         "pg_charges_master_ledger_gst_percentage": float(p.pg_charges_master_ledger.gst_percentage) if p.pg_charges_master_ledger_id else 0,
         "pg_charges_percentage": float(p.pg_charges_percentage) if p.pg_charges_percentage is not None else None,
+        "pg_charges_percentage_effective_from": p.pg_charges_percentage_effective_from.isoformat() if p.pg_charges_percentage_effective_from else None,
         "is_active": p.is_active,
     }
 
@@ -2737,6 +2994,70 @@ def pg_master_list(request):
 
     rows = PGMaster.objects.filter(company_id=company_id).select_related("pg_charges_master_ledger").order_by("gateway_name")
     return JsonResponse([_pg_master_dict(p) for p in rows], safe=False)
+
+
+def _snapshot_pg_master_history(gateway, effective_from):
+    """
+    Writes/updates the PGMasterHistory row for this gateway's Effective
+    From date, capturing the ledger mapping + percentage exactly as they
+    stand right after this save — see _pg_master_effective_snapshot()'s
+    docstring for why this is needed. No-ops when no Effective From date
+    was given, since there's nothing to date-key the snapshot by.
+    """
+    if not effective_from:
+        return
+    PGMasterHistory.objects.update_or_create(
+        pg_master=gateway, effective_from=effective_from,
+        defaults={
+            "company_id": gateway.company_id,
+            "gateway_name": gateway.gateway_name,
+            "payment_master_ledger_id": gateway.payment_master_ledger_id,
+            "payment_master_ledger_name": gateway.payment_master_ledger_name,
+            "pg_charges_master_ledger_id": gateway.pg_charges_master_ledger_id,
+            "pg_charges_master_ledger_name": gateway.pg_charges_master_ledger_name,
+            "pg_charges_percentage": gateway.pg_charges_percentage,
+        },
+    )
+
+
+def pg_master_history_list(request, gateway_id):
+    """GET /api/pg-master/<id>/history/?company_id=1 — snapshots newest-first, for a "View History" popup."""
+    if request.method != "GET":
+        return HttpResponseNotAllowed(["GET"])
+
+    company_id = request.GET.get("company_id")
+    if not company_id:
+        return JsonResponse({"error": "company_id is required"}, status=400)
+
+    rows = PGMasterHistory.objects.filter(pg_master_id=gateway_id, company_id=company_id).order_by("-effective_from")
+    return JsonResponse([{
+        "id": h.id, "effective_from": h.effective_from.isoformat(),
+        "payment_master_ledger_name": h.payment_master_ledger_name,
+        "pg_charges_master_ledger_name": h.pg_charges_master_ledger_name,
+        "pg_charges_percentage": float(h.pg_charges_percentage) if h.pg_charges_percentage is not None else None,
+    } for h in rows], safe=False)
+
+
+def pg_master_effective(request):
+    """
+    GET /api/pg-master/effective/?company_id=1&gateway_name=Razorpay&as_of_date=2026-09-24
+    The frontend's single source of truth for PG Charges calculation and
+    display — resolves via _pg_master_effective_snapshot() so a ticket
+    always uses whatever was in force on its own Booking Ref Date.
+    """
+    if request.method != "GET":
+        return HttpResponseNotAllowed(["GET"])
+
+    company_id = request.GET.get("company_id")
+    gateway_name = request.GET.get("gateway_name")
+    if not company_id or not gateway_name:
+        return JsonResponse({"error": "company_id and gateway_name are required"}, status=400)
+
+    as_of_date = _parse_date(request.GET.get("as_of_date"))
+    snapshot = _pg_master_effective_snapshot(company_id, gateway_name, as_of_date)
+    if not snapshot:
+        return JsonResponse({"error": "Payment Gateway not found."}, status=404)
+    return JsonResponse(snapshot)
 
 
 @csrf_exempt
@@ -2778,6 +3099,7 @@ def pg_master_save(request):
     charges_percentage = _safe_decimal(body.get("pg_charges_percentage"), default=None)
     if charges_percentage is not None and not (0 <= charges_percentage <= 100):
         return JsonResponse({"error": "PG Charges Percentage must be between 0 and 100."}, status=400)
+    charges_percentage_effective_from = _parse_date(body.get("pg_charges_percentage_effective_from"))
 
     dup = PGMaster.objects.filter(company_id=company_id, gateway_name=gateway_name).exclude(id=body.get("id")).exists()
     if dup:
@@ -2793,8 +3115,10 @@ def pg_master_save(request):
             gateway.pg_charges_master_ledger = charges_ledger
             gateway.pg_charges_master_ledger_name = (charges_ledger.alias_name or charges_ledger.name) if charges_ledger else None
             gateway.pg_charges_percentage = charges_percentage
+            gateway.pg_charges_percentage_effective_from = charges_percentage_effective_from
             gateway.is_active = bool(body.get("is_active", True))
             gateway.save()
+            _snapshot_pg_master_history(gateway, charges_percentage_effective_from)
             return JsonResponse(_pg_master_dict(gateway), status=200)
         except PGMaster.DoesNotExist:
             return JsonResponse({"error": f"Payment Gateway {gw_id} not found."}, status=404)
@@ -2806,9 +3130,11 @@ def pg_master_save(request):
             "pg_charges_master_ledger": charges_ledger,
             "pg_charges_master_ledger_name": (charges_ledger.alias_name or charges_ledger.name) if charges_ledger else None,
             "pg_charges_percentage": charges_percentage,
+            "pg_charges_percentage_effective_from": charges_percentage_effective_from,
             "is_active": bool(body.get("is_active", True)),
         },
     )
+    _snapshot_pg_master_history(gateway, charges_percentage_effective_from)
     return JsonResponse(_pg_master_dict(gateway), status=201)
 
 
@@ -2838,8 +3164,10 @@ def _company_master_dict(c):
         "telephone": c.telephone, "mobile": c.mobile, "email": c.email,
         "financial_year_from": c.financial_year_from.isoformat() if c.financial_year_from else None,
         "books_beginning_from": c.books_beginning_from.isoformat() if c.books_beginning_from else None,
-        "gst_reg_type": c.gst_reg_type, "gst_no": c.gst_no, "cin_number": c.cin_number,
-        "tan_number": c.tan_number, "hsn_sac": c.hsn_sac, "description": c.description,
+        "gst_reg_type": c.gst_reg_type, "gst_no": c.gst_no, "pan_number": c.pan_number, "cin_number": c.cin_number,
+        "tan_number": c.tan_number, "hsn_sac": c.hsn_sac,
+        "currency_symbol": c.currency_symbol, "currency_name": c.currency_name, "decimal_places": c.decimal_places,
+        "logo_base64": c.logo_base64, "seal_base64": c.seal_base64,
     }
 
 
@@ -2869,9 +3197,16 @@ def company_master_save(request):
             "state": "...", "pincode": "...", "telephone": "...", "mobile": "...",
             "email": "...", "financial_year_from": "2026-04-01",
             "books_beginning_from": "2026-04-01", "gst_reg_type": "Regular",
-            "gst_no": "...", "cin_number": "...", "tan_number": "...",
-            "hsn_sac": "...", "description": "..." }
-    Upserts by company_name (the table's unique key) unless "id" is given.
+            "gst_no": "...", "pan_number": "...", "cin_number": "...", "tan_number": "...",
+            "currency_symbol": "...", "currency_name": "...", "decimal_places": 2,
+            "hsn_sac": "..." }
+    Upserts by company_name (the table's unique key) unless "id" is given —
+    when "id" IS given, it's always used as this row's own primary key
+    (creating a fresh row with exactly that id if none exists yet, not
+    just updating an existing one), since CompanyMaster.id is the same
+    company_id every other table in this app scopes its data by (see the
+    model's own docstring) — the page always passes the active company's
+    id from the top-nav switcher, never lets the DB auto-assign one.
     """
     if request.method != "POST":
         return HttpResponseNotAllowed(["POST"])
@@ -2895,14 +3230,19 @@ def company_master_save(request):
         "telephone": (body.get("telephone") or "").strip() or None,
         "mobile": (body.get("mobile") or "").strip() or None,
         "email": (body.get("email") or "").strip() or None,
-        "financial_year_from": body.get("financial_year_from") or None,
-        "books_beginning_from": body.get("books_beginning_from") or None,
+        "financial_year_from": _parse_date(body.get("financial_year_from")),
+        "books_beginning_from": _parse_date(body.get("books_beginning_from")),
         "gst_reg_type": body.get("gst_reg_type") or "Regular",
         "gst_no": (body.get("gst_no") or "").strip().upper() or None,
+        "pan_number": (body.get("pan_number") or "").strip().upper() or None,
         "cin_number": (body.get("cin_number") or "").strip().upper() or None,
         "tan_number": (body.get("tan_number") or "").strip().upper() or None,
         "hsn_sac": (body.get("hsn_sac") or "").strip() or None,
-        "description": (body.get("description") or "").strip() or None,
+        "currency_symbol": (body.get("currency_symbol") or "").strip() or None,
+        "currency_name": (body.get("currency_name") or "").strip() or None,
+        "decimal_places": int(body["decimal_places"]) if body.get("decimal_places") not in (None, "") else 2,
+        "logo_base64": body.get("logo_base64") or None,
+        "seal_base64": body.get("seal_base64") or None,
     }
 
     dup = CompanyMaster.objects.filter(company_name=company_name).exclude(id=body.get("id")).exists()
@@ -2911,14 +3251,8 @@ def company_master_save(request):
 
     company_id = body.get("id")
     if company_id:
-        try:
-            company = CompanyMaster.objects.get(id=company_id)
-        except CompanyMaster.DoesNotExist:
-            return JsonResponse({"error": f"Company {company_id} not found."}, status=404)
-        for key, value in fields.items():
-            setattr(company, key, value)
-        company.save()
-        return JsonResponse(_company_master_dict(company), status=200)
+        company, created = CompanyMaster.objects.update_or_create(id=company_id, defaults=fields)
+        return JsonResponse(_company_master_dict(company), status=201 if created else 200)
 
     company = CompanyMaster.objects.create(**fields)
     return JsonResponse(_company_master_dict(company), status=201)

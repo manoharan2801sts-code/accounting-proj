@@ -194,7 +194,7 @@
     document.getElementById("submit-btn").textContent = "Update Ledger";
     document.getElementById("name").value = ledger.name;
     document.getElementById("parent_id").value = ledger.parent_id;
-    document.getElementById("opening_balance").value = ledger.opening_balance || 0;
+    document.getElementById("opening_balance").value = Number(ledger.opening_balance || 0).toFixed(2);
     document.getElementById("opening_balance_type").value = ledger.opening_balance_type
       || ((ledger.balance ?? ledger.opening_balance ?? 0) >= 0 ? "Debit" : "Credit");
     updateVisibility();
@@ -219,9 +219,9 @@
     set("tax_category", ledger.tax_category); set("tax_type", ledger.tax_type);
     if (ledger.tax_category === "GST") document.getElementById("tax-type-wrap").style.display = "block";
     set("gst_applicable", String(!!ledger.gst_applicable)); set("gst_tax_type", ledger.gst_tax_type);
-    set("gst_percentage", ledger.gst_percentage); set("tds_applicable", String(!!ledger.tds_applicable));
-    set("tds_percentage", ledger.tds_percentage); set("hsn_code", ledger.hsn_code);
-    set("tcs_applicable", String(!!ledger.tcs_applicable)); set("tcs_percentage", ledger.tcs_percentage);
+    set("gst_percentage", Number(ledger.gst_percentage || 0).toFixed(2)); set("tds_applicable", String(!!ledger.tds_applicable));
+    set("tds_percentage", Number(ledger.tds_percentage || 0).toFixed(2)); set("hsn_code", ledger.hsn_code);
+    set("tcs_applicable", String(!!ledger.tcs_applicable)); set("tcs_percentage", Number(ledger.tcs_percentage || 0).toFixed(2));
     updateGstRequiredMarker();
   }
 
@@ -374,9 +374,18 @@
     }
   });
 
-  const active = await VoyagerShell.init({
-    activeKey: "accounts",
-    onCompanyChange: (id, country) => { activeCompanyId = Number(id); activeCountry = country; populateRefs(activeCompanyId); },
-  });
-  if (active) { activeCompanyId = Number(active.id); activeCountry = active.country; await populateRefs(activeCompanyId); }
+  let active = null;
+  try {
+    active = await VoyagerShell.init({
+      activeKey: "accounts",
+      onCompanyChange: (id, country) => { activeCompanyId = Number(id); activeCountry = country; populateRefs(activeCompanyId); },
+    });
+  } catch (err) {
+    console.error("Shell init failed", err);
+  }
+  if (active) {
+    activeCompanyId = Number(active.id); activeCountry = active.country; await populateRefs(activeCompanyId);
+  } else {
+    voyagerAlert("Could not load the active company. Check your connection and reload the page.", { icon: "error" });
+  }
 })();

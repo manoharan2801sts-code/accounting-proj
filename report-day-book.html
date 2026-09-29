@@ -12,16 +12,28 @@
 <link href="assets/css/loader.css" rel="stylesheet" />
   <link rel="icon" type="image/png" href="assets/img/favicon.png" />
   <style>
-    .page-header-row { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 1.25rem; flex-wrap: wrap; }
-    .page-title-group .breadcrumb { font-size: 0.8rem; color: var(--color-text-muted); margin-bottom: 0.25rem; display: flex; gap: 0.4rem; align-items: center; }
-
-    .filter-card {
-      background: var(--color-white); border: 1px solid var(--color-border);
-      border-radius: var(--radius-md); padding: 1rem 1.25rem; margin-bottom: 1.25rem;
-      display: flex; align-items: flex-end; gap: 1rem; flex-wrap: wrap;
+    /* Locked to the viewport - only the table body scrolls, not the whole
+       page (same pattern as report-trial-balance.html/report-dsr-
+       airline-booking.html). */
+    html, body { height: 100%; overflow: hidden; margin: 0; }
+    .db-main {
+      display: flex; flex-direction: column;
+      height: calc(100vh - var(--topnav-height) - var(--menubar-height, 0px));
+      box-sizing: border-box;
     }
-    .filter-group { display: flex; flex-direction: column; gap: 0.35rem; }
-    .filter-group label { font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--color-text-muted); letter-spacing: 0.03em; }
+    .db-main .page-header-row { flex-shrink: 0; }
+    .db-main .table-container { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+    .table-scroll { flex: 1; min-height: 0; overflow: auto; }
+    .table-custom thead th { position: sticky; top: 0; z-index: 1; }
+
+    .page-header-row { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 1.25rem; flex-wrap: wrap; }
+
+    /* Compact single-row toolbar (From/To/Apply/Filter on the left,
+       Print/Export CSV pushed to the far right via the margin-left:auto
+       spacer) - same pattern as report-trial-balance.html. */
+    .rpt-toolbar { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; width: 100%; }
+    .rpt-toolbar-label { font-size: 11px; font-weight: 700; color: var(--color-text-muted); letter-spacing: 0.03em; }
+    .rpt-toolbar-date { height: 26px; width: 116px; padding: 0 6px; font-size: 12px; box-sizing: border-box; }
 
     .table-container {
       background: var(--color-white); border: 1px solid var(--color-border);
@@ -32,26 +44,24 @@
        left, company name + applied date range on the right, same
        banner pattern as the Ledger report. */
     .lb-head {
-      padding: 0.85rem 1.25rem; border-bottom: 1px solid var(--color-border);
-      display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; flex-wrap: wrap;
+      padding: 0.5rem 1rem; border-bottom: 1px solid var(--color-border);
+      display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap;
+      flex-shrink: 0;
     }
-    .lb-head .lb-ledger-name { font-size: 1rem; font-weight: 700; color: var(--color-text-dark); }
-    .lb-head .lb-meta { text-align: right; font-size: 12px; color: var(--color-text-muted); }
-    .lb-head .lb-meta .lb-company { display: block; font-weight: 700; color: var(--color-text-dark); font-size: 12.5px; }
+    .lb-head .lb-ledger-name { font-size: 0.78rem; font-weight: 700; color: var(--color-text-dark); }
 
     .table-custom { width: 100%; border-collapse: collapse; text-align: left; }
-    .table-custom th {
-      padding: 0.65rem 0.85rem; background: #F8FAFC; border-bottom: 1px solid var(--color-border);
-      font-size: 11.5px; font-weight: 700; text-transform: uppercase; color: var(--color-text-muted); letter-spacing: 0.03em;
-      white-space: nowrap;
-    }
+    .table-custom th { padding: 0.35rem 0.8rem; background: #F8FAFC; border-bottom: 1px solid var(--color-border);
+      font-size: 10px; font-weight: 700; color: var(--color-text-muted); letter-spacing: 0.03em;
+      white-space: nowrap; }
     .table-custom td {
       padding: 0.6rem 0.85rem; border-bottom: 1px solid var(--color-border-subtle);
       font-size: 12.5px; color: var(--color-text); vertical-align: middle; white-space: nowrap;
     }
     .table-custom tbody tr:last-child td { border-bottom: none; }
     .table-custom tbody tr.txn-row { cursor: pointer; }
-    .table-custom tbody tr.txn-row:hover { background: #F8FAFC; }
+    .table-custom tbody tr.txn-row.db-row-selected td { background: var(--color-primary); color: #FFFFFF; }
+    .table-custom tbody tr.txn-row.db-row-selected td.particulars { color: #FFFFFF; }
     .table-custom td.rownum { color: var(--color-text-muted); font-weight: 600; }
     .table-custom td.particulars { font-weight: 700; color: var(--color-text-dark); white-space: normal; }
 
@@ -121,12 +131,25 @@
 <script src="assets/js/loader.js?v=2"></script>
   <header class="app-topnav" id="shell-topnav"></header>
   <div class="app-body">
-    <main class="app-main" style="max-width: 1440px; margin: 0 auto; padding: 1.5rem 2rem;">
+    <main class="app-main db-main" style="max-width: 1440px; margin: 0 auto; padding: 1.5rem 2rem; width: 100%;">
       <div class="page-header-row">
-        <div class="page-title-group">
-          <div class="breadcrumb">Reports &rsaquo; Accounts Book &rsaquo; Day Book</div>
-        </div>
-        <div style="display:flex; gap:0.5rem;">
+        <div class="rpt-toolbar">
+          <span class="rpt-toolbar-label">From</span>
+          <input type="date" class="form-control-custom rpt-toolbar-date" id="filter-from" />
+          <span class="rpt-toolbar-label">To</span>
+          <input type="date" class="form-control-custom rpt-toolbar-date" id="filter-to" />
+          <button type="button" class="dom-nav-btn btn-primary" onclick="loadDayBook()">Apply</button>
+          <div class="filter-btn-wrap">
+            <button type="button" class="dom-nav-btn" id="open-filter-btn">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/></svg>
+              Filter
+            </button>
+            <span class="filter-active-chip" id="filter-active-chip">
+              <span id="filter-active-chip-label"></span>
+              <button type="button" id="filter-clear-btn" title="Clear filter">&times;</button>
+            </span>
+          </div>
+          <span style="margin-left:auto;"></span>
           <button type="button" class="dom-nav-btn" onclick="window.print()">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9V2h12v7M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2m-12 0v4h12v-4"/></svg>
             Print
@@ -138,37 +161,11 @@
         </div>
       </div>
 
-      <div class="filter-card">
-        <div class="filter-group">
-          <label>From Date</label>
-          <input type="date" class="form-control-custom" id="filter-from" style="height:34px; padding:0.25rem 0.6rem;" />
-        </div>
-        <div class="filter-group">
-          <label>To Date</label>
-          <input type="date" class="form-control-custom" id="filter-to" style="height:34px; padding:0.25rem 0.6rem;" />
-        </div>
-        <button type="button" class="dom-nav-btn btn-primary" style="height:34px;" onclick="loadDayBook()">Apply</button>
-        <div class="filter-btn-wrap">
-          <button type="button" class="dom-nav-btn" style="height:34px;" id="open-filter-btn">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/></svg>
-            Filter
-          </button>
-          <span class="filter-active-chip" id="filter-active-chip">
-            <span id="filter-active-chip-label"></span>
-            <button type="button" id="filter-clear-btn" title="Clear filter">&times;</button>
-          </span>
-        </div>
-      </div>
-
       <div class="table-container">
         <div class="lb-head">
           <div class="lb-ledger-name">Day Book</div>
-          <div class="lb-meta">
-            <span class="lb-company" id="db-company-name"></span>
-            <span id="db-date-range"></span>
-          </div>
         </div>
-        <div style="overflow-x:auto;">
+        <div class="table-scroll">
           <table class="table-custom" id="main-data-table">
             <thead>
               <tr>
@@ -227,6 +224,7 @@
   <script src="assets/js/mock-data.js"></script>
   <script src="assets/js/api.js"></script>
   <script src="assets/js/hardcode.js"></script>
+  <script src="assets/js/util.js"></script>
   <script src="assets/js/shell.js"></script>
   <script>
     // Not gated on DOMContentLoaded - this page's <script> can be injected
@@ -254,6 +252,7 @@
       try {
         const active = await VoyagerShell.init({ activeKey: "rep-day-book" });
         if (active) activeCompanyId = Number(active.id);
+        await VoyagerUtil.loadDecimalPlaces(activeCompanyId);
       } catch (err) {
         console.error("Shell init failed", err);
       }
@@ -265,7 +264,8 @@
 
     function fmtAmt(n) {
       const v = Number(n) || 0;
-      return "₹" + Math.abs(v).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      const d = VoyagerUtil.getDecimalPlaces();
+      return "₹" + Math.abs(v).toLocaleString("en-IN", { minimumFractionDigits: d, maximumFractionDigits: d });
     }
     function fmtDateDisplay(iso) {
       if (!iso) return "-";
@@ -289,11 +289,6 @@
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || `Server returned ${res.status}`);
 
-        document.getElementById("db-company-name").textContent = data.company_name || "";
-        const rangeFrom = data.from_date ? fmtDateDisplay(data.from_date) : "Beginning";
-        const rangeTo = data.to_date ? fmtDateDisplay(data.to_date) : "Date";
-        document.getElementById("db-date-range").textContent = data.from_date && data.from_date === data.to_date
-          ? `For ${rangeFrom}` : `For ${rangeFrom} to ${rangeTo}`;
 
         lastLoadedData = data;
         rawTxns = data.transactions;
@@ -478,8 +473,13 @@
       applyFilterAndRender();
     });
 
+    function navigateToTicket(row) {
+      window.location.href = `ticket-entry.html?id=${row.dataset.ticketId}`;
+    }
+
     function renderTable(txns) {
       const tbody = document.getElementById("main-data-tbody");
+      selectedRowIndex = -1; // stale after a full re-render - rows are new DOM nodes
       if (!txns.length) {
         tbody.innerHTML = `<tr><td colspan="10" style="text-align:center; padding:2rem; color:var(--color-text-muted);">No transactions match the current filter.</td></tr>`;
         return;
@@ -512,11 +512,57 @@
 
       tbody.innerHTML = rows;
       tbody.querySelectorAll("tr.txn-row").forEach((row) => {
-        row.addEventListener("click", () => {
-          window.location.href = `ticket-entry.html?id=${row.dataset.ticketId}`;
-        });
+        row.addEventListener("click", () => navigateToTicket(row));
       });
     }
+
+    // Keyboard row navigation - Up/Down moves a highlighted "current row"
+    // (same look as mouse hover), Enter opens the ticket, same as a click.
+    // Only txn-row transactions are keyboard-navigable, matching the
+    // existing hover/click behaviour above (rows with no linked ticket
+    // are informational and were never clickable either). Ignored while
+    // typing in any filter/search field so arrow keys there still move
+    // the text cursor as normal.
+    let selectedRowIndex = -1;
+    function visibleDataRows() {
+      return Array.from(document.querySelectorAll("#main-data-tbody tr.txn-row")).filter((r) => r.style.display !== "none");
+    }
+    function selectRow(index) {
+      const rows = visibleDataRows();
+      rows.forEach((r) => r.classList.remove("db-row-selected"));
+      if (!rows.length) { selectedRowIndex = -1; return; }
+      selectedRowIndex = Math.max(0, Math.min(index, rows.length - 1));
+      const row = rows[selectedRowIndex];
+      row.classList.add("db-row-selected");
+      row.scrollIntoView({ block: "nearest" });
+    }
+    // Keeps the keyboard-selected row in sync with whatever the mouse is
+    // actually over - without this, moving the mouse to hover a different
+    // row while an old keyboard selection is still stuck elsewhere made it
+    // look like hover had stopped working (two rows lit up at once).
+    document.getElementById("main-data-tbody").addEventListener("mouseover", (e) => {
+      const row = e.target.closest("tr.txn-row");
+      if (!row) return;
+      const idx = visibleDataRows().indexOf(row);
+      if (idx !== -1) selectRow(idx);
+    });
+    document.addEventListener("keydown", (e) => {
+      if (!["ArrowDown", "ArrowUp", "Enter"].includes(e.key)) return;
+      const tag = document.activeElement && document.activeElement.tagName;
+      if (["INPUT", "SELECT", "TEXTAREA"].includes(tag)) return;
+      const rows = visibleDataRows();
+      if (!rows.length) return;
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        selectRow(selectedRowIndex < rows.length - 1 ? selectedRowIndex + 1 : 0);
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        selectRow(selectedRowIndex > 0 ? selectedRowIndex - 1 : rows.length - 1);
+      } else if (e.key === "Enter" && selectedRowIndex >= 0) {
+        e.preventDefault();
+        navigateToTicket(rows[selectedRowIndex]);
+      }
+    });
 
     function exportCSV() {
       let csv = [];

@@ -5,52 +5,84 @@
   const ledgerCache = {}; // group_name -> [{id,name}, ...]
 
   const PRODUCT_TYPES = ["Airline", "Hotel", "Bus", "Visa", "Insurance", "Rail"];
-  const MASTERS_CATEGORIES = [
-    "Earnings From Customer", "Earnings From Supplier", "Expenditure To Customer",
-    "Expenditure To Supplier", "GST and TDS",
-  ];
-  // Masters category -> its fields, each loaded from a specific Ledger Group.
-  const FIELD_DEFS = {
-    "Earnings From Customer": [
-      { field: "Markup A/c", group: "Incomes" },
-      { field: "Addl Markup A/c", group: "Incomes" },
-      { field: "SSR Markup A/c", group: "Incomes" },
-      { field: "Service Fee A/c", group: "Incomes" },
-      { field: "Addl Service Fee A/c", group: "Incomes" },
-      { field: "SSR Service Fee A/c", group: "Incomes" },
-    ],
-    "Earnings From Supplier": [
-      { field: "Commission A/c", group: "Incomes" },
-    ],
-    "Expenditure To Customer": [
-      { field: "Discount A/c", group: "Expenses" },
-    ],
-    "Expenditure To Supplier": [
-      { field: "Supplier Markup A/c", group: "Expenses" },
-      { field: "Supplier Addl Markup A/c", group: "Expenses" },
-      { field: "Supplier Service Fee A/c", group: "Expenses" },
-      { field: "Supplier Addl Service Fee A/c", group: "Expenses" },
-    ],
-    "GST and TDS": [
-      { field: "Output IGST A/c", group: "Duties and Taxes" },
-      { field: "Output CGST A/c", group: "Duties and Taxes" },
-      { field: "Output SGST A/c", group: "Duties and Taxes" },
-      { field: "Discount TDS A/c", group: "Duties and Taxes" },
-      { field: "Commission TDS A/c", group: "Duties and Taxes" },
-      { field: "Input IGST A/c", group: "Duties and Taxes" },
-      { field: "Input CGST A/c", group: "Duties and Taxes" },
-      { field: "Input SGST A/c", group: "Duties and Taxes" },
-    ],
-  };
-  const categorySlug = (category) => category.toLowerCase().replace(/[^a-z]+/g, "-");
 
-  // The 5 real Masters categories (unchanged - still what gets saved as
-  // masters_category on the backend) are grouped into just 3 tabs for
-  // display: Customer, Supplier, GST and TDS.
+  // A "section" is a rendering concept, not always a 1:1 match with the 5
+  // real Masters categories saved on the backend (masters_category) -
+  // "consolidator-earnings" below saves as "Earnings From Customer" too,
+  // it's just shown as its own sub-heading + table body at the bottom of
+  // the Customer tab (after Discount A/c) instead of being folded into
+  // the same block as Markup A/c etc.
+  const SECTION_DEFS = {
+    "earnings-from-customer": {
+      category: "Earnings From Customer",
+      fields: [
+        { field: "Markup A/c", group: "Incomes" },
+        { field: "Addl Markup A/c", group: "Incomes" },
+        { field: "SSR Markup A/c", group: "Incomes" },
+        { field: "Service Fee A/c", group: "Incomes" },
+        { field: "Addl Service Fee A/c", group: "Incomes" },
+        { field: "SSR Service Fee A/c", group: "Incomes" },
+      ],
+    },
+    "earnings-from-supplier": {
+      category: "Earnings From Supplier",
+      fields: [
+        { field: "Commission A/c", group: "Incomes" },
+      ],
+    },
+    "expenditure-to-customer": {
+      category: "Expenditure To Customer",
+      fields: [
+        { field: "Discount A/c", group: "Expenses" },
+      ],
+    },
+    // Separate income ledgers for the JV's supplier-fed Markup/Service Fee
+    // Credit lines (see jv_hardcode.py) - previously those reused the same
+    // "Markup A/c" etc. ledger as the customer-side lines; these let that
+    // be a distinct Consolidator-specific ledger instead.
+    "consolidator-earnings": {
+      category: "Earnings From Customer",
+      heading: "Consolidator Earnings",
+      fields: [
+        { field: "Consolidator Markup A/c", group: "Incomes" },
+        { field: "Consolidator Addl Markup A/c", group: "Incomes" },
+        { field: "Consolidator Service Fee A/c", group: "Incomes" },
+        { field: "Consolidator Addl Service Fee A/c", group: "Incomes" },
+      ],
+    },
+    "expenditure-to-supplier": {
+      category: "Expenditure To Supplier",
+      fields: [
+        { field: "Supplier Markup A/c", group: "Expenses" },
+        { field: "Supplier Addl Markup A/c", group: "Expenses" },
+        { field: "Supplier Service Fee A/c", group: "Expenses" },
+        { field: "Supplier Addl Service Fee A/c", group: "Expenses" },
+      ],
+    },
+    "gst-and-tds": {
+      category: "GST and TDS",
+      fields: [
+        { field: "Output IGST A/c", group: "Duties and Taxes" },
+        { field: "Output CGST A/c", group: "Duties and Taxes" },
+        { field: "Output SGST A/c", group: "Duties and Taxes" },
+        { field: "Discount TDS A/c", group: "Duties and Taxes" },
+        { field: "Commission TDS A/c", group: "Duties and Taxes" },
+        { field: "Input IGST A/c", group: "Duties and Taxes" },
+        { field: "Input CGST A/c", group: "Duties and Taxes" },
+        { field: "Input SGST A/c", group: "Duties and Taxes" },
+      ],
+    },
+  };
+
+  // The 5 real Masters categories are grouped into just 3 tabs for
+  // display: Customer, Supplier, GST and TDS. Order here is display
+  // order - "consolidator-earnings" is listed last so it renders below
+  // Discount A/c even though it shares a real masters_category with the
+  // "earnings-from-customer" section above it.
   const TAB_GROUPS = [
-    { key: "customer", label: "Customer", categories: ["Earnings From Customer", "Expenditure To Customer"] },
-    { key: "supplier", label: "Supplier", categories: ["Expenditure To Supplier", "Earnings From Supplier"] },
-    { key: "gst-and-tds", label: "GST and TDS", categories: ["GST and TDS"] },
+    { key: "customer", label: "Customer", sections: ["earnings-from-customer", "expenditure-to-customer", "consolidator-earnings"] },
+    { key: "supplier", label: "Supplier", sections: ["expenditure-to-supplier", "earnings-from-supplier"] },
+    { key: "gst-and-tds", label: "GST and TDS", sections: ["gst-and-tds"] },
   ];
 
   function fillPlain(el, values, placeholder) {
@@ -99,9 +131,11 @@
 
     // No per-category heading above the table - the active tab button
     // itself already says which category this is, a repeated heading was
-    // redundant. Categories folded into one tab (e.g. the Customer tab
-    // holds both "Earnings From Customer" and "Expenditure To Customer")
-    // still share one <table>/<thead>, just a separate <tbody> each.
+    // redundant. Sections folded into one tab (e.g. the Customer tab
+    // holds "earnings-from-customer", "expenditure-to-customer" and
+    // "consolidator-earnings") still share one <table>/<thead>, just a
+    // separate <tbody> each - a section with its own "heading" also gets
+    // a small sub-heading row in its own <tbody> right before it.
     categoriesWrap.innerHTML = TAB_GROUPS.map((tab, i) => {
       return `
       <div class="mm-tab-panel ${i === 0 ? "active" : ""}" data-tab-panel="${tab.key}">
@@ -110,7 +144,12 @@
             <thead><tr>
               <th>Field Name</th><th>Ledger Name (Master)</th><th>Effective From Date</th><th>Action</th>
             </tr></thead>
-            ${tab.categories.map((category) => `<tbody id="mm-fields-tbody-${categorySlug(category)}"></tbody>`).join("")}
+            ${tab.sections.map((sectionKey) => {
+              const def = SECTION_DEFS[sectionKey];
+              const heading = def.heading
+                ? `<tbody><tr class="mm-subhead-row"><td colspan="4">${def.heading}</td></tr></tbody>` : "";
+              return `${heading}<tbody id="mm-fields-tbody-${sectionKey}"></tbody>`;
+            }).join("")}
           </table>
         </div>
       </div>
@@ -126,20 +165,21 @@
     });
   }
 
-  async function renderCategoryRows(category) {
+  async function renderCategoryRows(sectionKey) {
     const product = productSel.value;
-    const tbody = document.getElementById(`mm-fields-tbody-${categorySlug(category)}`);
+    const tbody = document.getElementById(`mm-fields-tbody-${sectionKey}`);
     tbody.innerHTML = "";
     if (!product) return;
 
-    const defs = FIELD_DEFS[category] || [];
-    for (const def of defs) {
+    const section = SECTION_DEFS[sectionKey];
+    for (const def of section.fields) {
       const ledgers = await ledgersForGroup(def.group);
       const existing = existingMapping(product, def.field);
       const locked = !!existing;
       const row = document.createElement("tr");
       row.className = "mm-field-row" + (locked ? " mm-locked" : "");
-      row.dataset.category = category;
+      row.dataset.category = section.category; // real masters_category, sent to the backend
+      row.dataset.sectionKey = sectionKey; // which tbody this row lives in, for re-rendering after save/delete
       row.dataset.field = def.field;
       row.dataset.group = def.group;
       if (existing) row.dataset.mappingId = existing.id;
@@ -170,8 +210,8 @@
   }
 
   async function renderAllCategories() {
-    for (const category of MASTERS_CATEGORIES) {
-      await renderCategoryRows(category);
+    for (const sectionKey of Object.keys(SECTION_DEFS)) {
+      await renderCategoryRows(sectionKey);
     }
   }
 
@@ -210,7 +250,7 @@
       return;
     }
     await loadMappings();
-    await renderCategoryRows(row.dataset.category);
+    await renderCategoryRows(row.dataset.sectionKey);
   }
 
   categoriesWrap.addEventListener("click", async (e) => {
@@ -239,7 +279,7 @@
         }
       }
       await loadMappings();
-      await renderCategoryRows(row.dataset.category);
+      await renderCategoryRows(row.dataset.sectionKey);
       return;
     }
   });
@@ -261,11 +301,18 @@
     }
   }
 
-  const active = await VoyagerShell.init({
-    activeKey: "master-mapping",
-    onCompanyChange: (id) => { activeCompanyId = Number(id); },
-  });
+  let active = null;
+  try {
+    active = await VoyagerShell.init({
+      activeKey: "master-mapping",
+      onCompanyChange: (id) => { activeCompanyId = Number(id); },
+    });
+  } catch (err) {
+    console.error("Shell init failed", err);
+  }
   if (active) {
     activeCompanyId = Number(active.id);
+  } else {
+    voyagerAlert("Could not load the active company. Check your connection and reload the page.", { icon: "error" });
   }
 })();

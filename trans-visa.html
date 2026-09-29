@@ -22,7 +22,7 @@
       display: flex; align-items: flex-end; gap: 1rem; flex-wrap: wrap;
     }
     .filter-group { display: flex; flex-direction: column; gap: 0.35rem; }
-    .filter-group label { font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--color-text-muted); letter-spacing: 0.03em; }
+    .filter-group label { font-size: 11px; font-weight: 700; color: var(--color-text-muted); letter-spacing: 0.03em; }
     
     .kpi-grid {
       display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -32,7 +32,7 @@
       background: var(--color-white); border: 1px solid var(--color-border);
       border-radius: var(--radius-md); padding: 1rem 1.25rem;
     }
-    .kpi-card .kpi-label { font-size: 12px; font-weight: 600; color: var(--color-text-muted); text-transform: uppercase; margin-bottom: 0.35rem; }
+    .kpi-card .kpi-label { font-size: 12px; font-weight: 600; color: var(--color-text-muted); margin-bottom: 0.35rem; }
     .kpi-card .kpi-val { font-size: 1.4rem; font-weight: 800; font-family: var(--font-display); color: var(--color-text-dark); }
     .kpi-card.highlight { border-left: 4px solid var(--color-primary); }
     .kpi-card.accent-success { border-left: 4px solid var(--color-success); }
@@ -48,20 +48,16 @@
     }
     .table-search { max-width: 300px; width: 100%; }
     .table-custom { width: 100%; border-collapse: collapse; text-align: left; }
-    .table-custom th {
-      padding: 0.75rem 1rem; background: #F8FAFC; border-bottom: 1px solid var(--color-border);
-      font-size: 11.5px; font-weight: 700; text-transform: uppercase; color: var(--color-text-muted); letter-spacing: 0.03em;
-    }
+    .table-custom th { padding: 0.75rem 1rem; background: #F8FAFC; border-bottom: 1px solid var(--color-border);
+      font-size: 11.5px; font-weight: 700; color: var(--color-text-muted); letter-spacing: 0.03em; }
     .table-custom td {
       padding: 0.75rem 1rem; border-bottom: 1px solid var(--color-border-subtle);
       font-size: 13px; color: var(--color-text); vertical-align: middle;
     }
     .table-custom tbody tr:hover { background: #F8FAFC; }
     .table-custom tbody tr:last-child td { border-bottom: none; }
-    .status-badge {
-      display: inline-flex; align-items: center; padding: 0.2rem 0.55rem;
-      border-radius: 4px; font-size: 11.5px; font-weight: 700; text-transform: uppercase;
-    }
+    .status-badge { display: inline-flex; align-items: center; padding: 0.2rem 0.55rem;
+      border-radius: 4px; font-size: 11.5px; font-weight: 700; }
     .badge-issued, .badge-success { background: #DCFCE7; color: #166534; }
     .badge-pending, .badge-warning { background: #FEF3C7; color: #92400E; }
     .badge-cancelled, .badge-danger { background: #FEE2E2; color: #991B1B; }

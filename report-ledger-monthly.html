@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <title>Monthly Summary — TRAVEL AGENCY</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
+  <link href="assets/css/design-system.css" rel="stylesheet" />
+  <link href="assets/css/app.css" rel="stylesheet" />
+  <link rel="icon" type="image/png" href="assets/img/favicon.png" />
+<link href="assets/css/loader.css" rel="stylesheet" />
+  <style>
+    /* The page itself never scrolls (only ~14 rows total, always fits) -
+       but the grid still gets its own overflow-y:auto as a safety net,
+       so a genuinely short/zoomed viewport scrolls the grid instead of
+       the whole page growing a scrollbar. */
+    html, body { height: 100%; overflow: hidden; margin: 0; }
+    .app-main.ms-main {
+      display: flex;
+      flex-direction: column;
+      height: calc(100vh - var(--topnav-height) - var(--menubar-height, 0px));
+    }
+    .ms-main > .page-header-row, .ms-main > .table-container > .lb-head { flex-shrink: 0; }
+    .ms-main > .table-container {
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+    }
+    .ms-main > .table-container > div[style*="overflow-x"] {
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
+    }
+    .page-header-row { display: flex; flex-direction: column; gap: 0.5rem; margin-bottom: 1.25rem; }
+    .rpt-breadcrumb { font-size: 0.8rem; color: var(--color-text-muted); display: flex; align-items: center; gap: 0.4rem; }
+    .rpt-breadcrumb a { color: var(--color-primary); text-decoration: none; }
+    .rpt-breadcrumb a:hover { text-decoration: underline; }
+    .rpt-breadcrumb .rpt-breadcrumb-current { color: var(--color-primary); font-weight: 700; text-decoration: underline; text-decoration-color: var(--color-primary); text-underline-offset: 3px; }
+
+    .rpt-toolbar { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; width: 100%; }
+    .rpt-toolbar-label { font-size: 11px; font-weight: 700; color: var(--color-text-muted); letter-spacing: 0.03em; }
+    .rpt-toolbar-date { height: 26px; width: 116px; padding: 0 6px; font-size: 12px; box-sizing: border-box; }
+
+    .table-container {
+      background: var(--color-white); border: 1px solid var(--color-border);
+      border-radius: var(--radius-md); overflow: hidden;
+    }
+    .lb-head {
+      padding: 0.5rem 1rem; border-bottom: 1px solid var(--color-border);
+      display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap;
+    }
+    .lb-head .lb-ledger-name { font-size: 0.78rem; font-weight: 700; color: var(--color-text-dark); }
+    .lb-head .lb-ledger-name span { color: var(--color-text-muted); font-weight: 600; margin-right: 0.35rem; }
+    .lb-head .lb-meta { text-align: right; font-size: 11px; color: var(--color-text-muted); }
+    .lb-head .lb-meta .lb-company { display: block; font-weight: 500; color: var(--color-text-dark); font-size: 15px; }
+
+    .table-custom { width: 100%; border-collapse: collapse; text-align: left; table-layout: fixed; }
+    .table-custom th { padding: 0.3rem 0.8rem; background: #F8FAFC; border-bottom: 1px solid var(--color-border);
+      font-size: 10px; font-weight: 700; color: var(--color-text-muted); letter-spacing: 0.03em;
+      white-space: nowrap; text-align: center; }
+    .table-custom td {
+      padding: 0.25rem 0.85rem; border-bottom: 1px solid var(--color-border-subtle);
+      font-size: 12.5px; color: var(--color-text); vertical-align: middle; white-space: nowrap;
+    }
+    .table-custom tbody tr:last-child td { border-bottom: none; }
+    .table-custom tbody tr.ms-month-row { cursor: pointer; }
+    .table-custom tbody tr.ms-month-row.ms-row-selected td { background: var(--color-primary); color: #FFFFFF; }
+    .table-custom tbody tr.ms-month-row.ms-no-activity td { color: var(--color-text-muted); }
+
+    .ms-opening-row td { background: #FAFBFD; font-weight: 700; font-style: italic; border-bottom: 1px solid var(--color-border); }
+    .ms-total-row td { border-top: 2px solid var(--color-border); font-weight: 700; background: #FAFBFD; letter-spacing: 0.08em; }
+
+    .amt { font-family: var(--font-mono); font-weight: 600; text-align: right; }
+    .dr-cr-tag { font-size: 10.5px; font-weight: 700; margin-left: 3px; }
+    .dr-cr-tag.cr { color: var(--color-success, #16A34A); }
+    .dr-cr-tag.dr { color: var(--color-text-muted); }
+    .ms-opening-row .dr-cr-tag, .ms-total-row .dr-cr-tag {
+      padding: 2px 8px; border-radius: 3px; font-size: 11px; margin-left: 6px;
+    }
+    .ms-opening-row .dr-cr-tag.dr, .ms-total-row .dr-cr-tag.dr {
+      background: var(--color-primary-tint, #E8F0FE); color: var(--color-primary, #3B6DB5);
+    }
+    .ms-opening-row .dr-cr-tag.cr, .ms-total-row .dr-cr-tag.cr {
+      background: #DCFCE7; color: #16A34A;
+    }
+  </style>
+</head>
+<body>
+<script src="assets/js/loader.js?v=2"></script>
+  <header class="app-topnav" id="shell-topnav"></header>
+  <div class="app-body">
+    <main class="app-main ms-main" style="max-width: 1440px; margin: 0 auto; padding: 1.5rem 2rem;">
+      <div class="page-header-row">
+        <div class="rpt-breadcrumb" id="rpt-breadcrumb"></div>
+        <div class="rpt-toolbar">
+          <span class="rpt-toolbar-label">From</span>
+          <input type="date" class="form-control-custom rpt-toolbar-date" id="filter-from" />
+          <span class="rpt-toolbar-label">To</span>
+          <input type="date" class="form-control-custom rpt-toolbar-date" id="filter-to" />
+          <button type="button" class="dom-nav-btn btn-primary" onclick="loadMonthlySummary()">Apply</button>
+          <span style="margin-left:auto;"></span>
+          <button type="button" class="dom-nav-btn" onclick="window.print()">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9V2h12v7M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2m-12 0v4h12v-4"/></svg>
+            Print
+          </button>
+          <button type="button" class="dom-nav-btn btn-primary" onclick="exportCSV()">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4m14-7l-5 5-5-5m5 5V3"/></svg>
+            Export CSV
+          </button>
+        </div>
+      </div>
+
+      <div class="table-container">
+        <div class="lb-head">
+          <div class="lb-ledger-name"><span>Ledger:</span><span id="ms-ledger-name"></span></div>
+          <div class="lb-meta">
+            <span class="lb-company" id="ms-company-name"></span>
+          </div>
+        </div>
+        <div style="overflow-x:auto;">
+          <table class="table-custom" id="main-data-table">
+            <thead>
+              <tr>
+                <th style="text-align:left;">Month</th>
+                <th style="width:140px; text-align:right;">Debit</th>
+                <th style="width:140px; text-align:right;">Credit</th>
+                <th style="width:150px; text-align:right;">Closing Balance</th>
+              </tr>
+            </thead>
+            <tbody id="main-data-tbody">
+              <tr><td colspan="4" style="text-align:center; padding:2rem; color:var(--color-text-muted);">Loading...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script src="assets/js/mock-data.js"></script>
+  <script src="assets/js/api.js"></script>
+  <script src="assets/js/hardcode.js"></script>
+  <script src="assets/js/util.js"></script>
+  <script src="assets/js/shell.js"></script>
+  <script>
+    // Not gated on DOMContentLoaded, and wrapped in an IIFE - same reasons
+    // as every other report page (see report-ledger-book.html's own note):
+    // shell.js's SPA navigation re-injects/re-executes this <script> tag
+    // on every visit without a real page reload, and a naive top-level
+    // script would throw "already declared" on the second visit.
+    (function () {
+    let activeCompanyId;
+    let currentLedgerId = null;
+    let lastLoadedData = null;
+
+    (async function init() {
+      try {
+        const active = await VoyagerShell.init({ activeKey: "rep-trial-balance" });
+        if (active) activeCompanyId = Number(active.id);
+        await VoyagerUtil.loadDecimalPlaces(activeCompanyId);
+      } catch (err) {
+        console.error("Shell init failed", err);
+      }
+      renderBreadcrumb();
+      const params = new URLSearchParams(window.location.search);
+      currentLedgerId = Number(params.get("ledger_id")) || null;
+      if (!currentLedgerId) {
+        document.getElementById("main-data-tbody").innerHTML =
+          `<tr><td colspan="4" style="text-align:center; padding:2rem; color:var(--color-text-muted);">No ledger selected - open this from a Trial Balance ledger row.</td></tr>`;
+        return;
+      }
+      loadMonthlySummary();
+    })();
+
+    // "Reports" itself has no landing page of its own (see hardcode.js's
+    // NAV_SECTIONS), so it's plain text, not a link. Whoever sent us here
+    // (Trial Balance) is inserted as its own real, clickable segment.
+    function escHtml(str) {
+      return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    }
+    function renderBreadcrumb() {
+      const params = new URLSearchParams(window.location.search);
+      const from = params.get("from");
+      const fromUrl = params.get("from_url");
+      const el = document.getElementById("rpt-breadcrumb");
+      const parts = [`<span>Reports</span>`];
+      if (from && fromUrl) {
+        parts.push(`<span>&rsaquo;</span>`, `<a href="${escHtml(fromUrl)}">${escHtml(from)}</a>`);
+      }
+      parts.push(`<span>&rsaquo;</span>`, `<span class="rpt-breadcrumb-current">Monthly Summary</span>`);
+      el.innerHTML = parts.join(" ");
+    }
+
+    function fmtAmt(n) {
+      const v = Number(n) || 0;
+      const d = VoyagerUtil.getDecimalPlaces();
+      return "₹" + Math.abs(v).toLocaleString("en-IN", { minimumFractionDigits: d, maximumFractionDigits: d });
+    }
+    function fmtSigned(n) {
+      const v = Number(n) || 0;
+      return `${fmtAmt(v)} <span class="dr-cr-tag ${v < 0 ? "cr" : "dr"}">${v < 0 ? "Cr" : "Dr"}</span>`;
+    }
+    function fmtDateDisplay(iso) {
+      if (!iso) return "-";
+      const d = new Date(iso + "T00:00:00");
+      if (isNaN(d)) return iso;
+      return d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "2-digit" }).replace(/ /g, "-");
+    }
+
+    // ============================================================
+    // Keyboard row navigation - Up/Down moves a highlighted "current
+    // row", Enter opens it (same as clicking it).
+    // ============================================================
+    let selectedRowIndex = -1;
+    function visibleDataRows() {
+      return Array.from(document.querySelectorAll("#main-data-tbody tr.ms-month-row"));
+    }
+    function selectRow(index) {
+      const rows = visibleDataRows();
+      rows.forEach((r) => r.classList.remove("ms-row-selected"));
+      if (!rows.length) { selectedRowIndex = -1; return; }
+      selectedRowIndex = Math.max(0, Math.min(index, rows.length - 1));
+      const row = rows[selectedRowIndex];
+      row.classList.add("ms-row-selected");
+      row.scrollIntoView({ block: "nearest" });
+    }
+    document.getElementById("main-data-tbody").addEventListener("mouseover", (e) => {
+      const row = e.target.closest("tr.ms-month-row");
+      if (!row) return;
+      const idx = visibleDataRows().indexOf(row);
+      if (idx !== -1) selectRow(idx);
+    });
+    document.addEventListener("keydown", (e) => {
+      if (!["ArrowDown", "ArrowUp", "Enter"].includes(e.key)) return;
+      const tag = document.activeElement && document.activeElement.tagName;
+      if (["INPUT", "SELECT", "TEXTAREA"].includes(tag)) return;
+      const rows = visibleDataRows();
+      if (!rows.length) return;
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        selectRow(selectedRowIndex < rows.length - 1 ? selectedRowIndex + 1 : 0);
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        selectRow(selectedRowIndex > 0 ? selectedRowIndex - 1 : rows.length - 1);
+      } else if (e.key === "Enter" && selectedRowIndex >= 0) {
+        e.preventDefault();
+        rows[selectedRowIndex].click();
+      }
+    });
+
+    async function loadMonthlySummary() {
+      const tbody = document.getElementById("main-data-tbody");
+      tbody.innerHTML = `<tr><td colspan="4" style="text-align:center; padding:2rem; color:var(--color-text-muted);">Loading...</td></tr>`;
+      const fromDate = document.getElementById("filter-from").value;
+      const toDate = document.getElementById("filter-to").value;
+      let params = `company_id=${activeCompanyId}&ledger_id=${currentLedgerId}`;
+      if (fromDate) params += `&from_date=${fromDate}`;
+      if (toDate) params += `&to_date=${toDate}`;
+      try {
+        const res = await fetch(`${window.API_BASE || "/api"}/ledger-book/monthly/?${params}`);
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || `Server returned ${res.status}`);
+
+        document.getElementById("ms-ledger-name").textContent = data.ledger_name;
+        document.getElementById("ms-company-name").textContent = data.company_name || "";
+        // First load only - seeds the From/To boxes with whatever window
+        // the backend actually used (the full financial year by default),
+        // so Apply always re-submits from a sensible starting point.
+        if (!document.getElementById("filter-from").value) document.getElementById("filter-from").value = data.from_date;
+        if (!document.getElementById("filter-to").value) document.getElementById("filter-to").value = data.to_date;
+
+        lastLoadedData = data;
+        renderTable(data);
+      } catch (err) {
+        console.error("Could not load the monthly summary - is the Django backend running?", err);
+        tbody.innerHTML = `<tr><td colspan="4" style="text-align:center; padding:2rem; color:var(--color-text-muted);">Could not load data. Is the Django backend running on localhost:8000?</td></tr>`;
+      }
+    }
+
+    function renderTable(data) {
+      const tbody = document.getElementById("main-data-tbody");
+      selectedRowIndex = -1; // stale after a full re-render - rows are new DOM nodes
+
+      let rows = `
+        <tr class="ms-opening-row">
+          <td>Opening Balance</td>
+          <td></td><td></td>
+          <td class="amt">${fmtSigned(data.opening_balance)}</td>
+        </tr>`;
+
+      rows += data.months.map((m) => `
+        <tr class="ms-month-row${m.has_activity ? "" : " ms-no-activity"}" data-from="${m.from_date}" data-to="${m.to_date}" title="Click to view this month in the Ledger Book">
+          <td>${m.month_name}</td>
+          <td class="amt">${m.debit ? fmtAmt(m.debit) : ""}</td>
+          <td class="amt">${m.credit ? fmtAmt(m.credit) : ""}</td>
+          <td class="amt">${fmtSigned(m.closing_balance)}</td>
+        </tr>
+      `).join("");
+
+      rows += `
+        <tr class="ms-total-row">
+          <td>Grand Total :</td>
+          <td class="amt">${fmtAmt(data.total_debit)}</td>
+          <td class="amt">${fmtAmt(data.total_credit)}</td>
+          <td class="amt">${fmtSigned(data.closing_balance)}</td>
+        </tr>`;
+
+      tbody.innerHTML = rows;
+      tbody.querySelectorAll("tr.ms-month-row").forEach((row) => {
+        row.addEventListener("click", () => {
+          const from = encodeURIComponent("Monthly Summary");
+          const fromUrl = encodeURIComponent(window.location.href);
+          window.location.href = `report-ledger-book.html?ledger_id=${currentLedgerId}&from_date=${row.dataset.from}&to_date=${row.dataset.to}&from=${from}&from_url=${fromUrl}`;
+        });
+      });
+    }
+
+    function exportCSV() {
+      let csv = [];
+      const rows = document.querySelectorAll("#main-data-table tr");
+      rows.forEach((row) => {
+        let cols = Array.from(row.querySelectorAll("th, td")).map((td) => `"${td.innerText.replace(/"/g, '""')}"`);
+        csv.push(cols.join(","));
+      });
+      const blob = new Blob([csv.join("\n")], { type: "text/csv;charset=utf-8;" });
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = "ledger-monthly-summary.csv";
+      link.click();
+    }
+
+    // Called from onclick="..." attributes above, which always run in the
+    // real global scope regardless of this IIFE.
+    window.exportCSV = exportCSV;
+    window.loadMonthlySummary = loadMonthlySummary;
+    })();
+  </script>
+</body>
+</html>

@@ -16,6 +16,7 @@
   const formMaster = document.getElementById("pg-form-master");
   const formChargesMaster = document.getElementById("pg-form-charges-master");
   const formChargesPercentage = document.getElementById("pg-form-charges-percentage");
+  const formChargesEffectiveFrom = document.getElementById("pg-form-charges-effective-from");
   const formStatus = document.getElementById("pg-form-status");
   const formStatusLabel = document.getElementById("pg-form-status-label");
   const btnSave = document.getElementById("pg-btn-save");
@@ -27,6 +28,14 @@
   // DOM Elements - Right Grid
   const gatewaysCount = document.getElementById("pg-gateways-count");
   const tbody = document.getElementById("pg-tbody");
+
+  // Effective From can't be backdated - blocks it in the calendar picker
+  // itself (min attribute) as well as any typed-in value at save time.
+  function todayISO() {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  }
+  formChargesEffectiveFrom.min = todayISO();
 
   function populateLedgerOptions(selectedId) {
     formMaster.innerHTML = `<option value="">- Select Ledger from Master -</option>` +
@@ -76,7 +85,7 @@
 
     if (allGateways.length === 0) {
       tbody.innerHTML = `<tr>
-        <td colspan="7" style="text-align:center; padding:2.5rem 1rem; color:var(--color-text-muted);">
+        <td colspan="8" style="text-align:center; padding:2.5rem 1rem; color:var(--color-text-muted);">
           <div style="font-size:13px; font-weight:600; margin-bottom:4px;">No Payment Gateways found</div>
           <div style="font-size:12px; color:var(--color-text-faint);">Use the form on the left to add a new gateway.</div>
         </td>
@@ -98,7 +107,8 @@
         <td><strong style="color:var(--color-text-dark);">${gw.gateway_name}</strong></td>
         <td style="color:var(--color-text-dark); font-weight:500;">${gw.payment_master_ledger_name || "-"}</td>
         <td style="color:var(--color-text-dark); font-weight:500;">${gw.pg_charges_master_ledger_name || "-"}</td>
-        <td style="text-align:center; color:var(--color-text-dark); font-weight:500;">${gw.pg_charges_percentage != null ? `${gw.pg_charges_percentage}%` : "-"}</td>
+        <td style="text-align:center; color:var(--color-text-dark); font-weight:500;">${gw.pg_charges_percentage != null ? `${Number(gw.pg_charges_percentage).toFixed(2)}%` : "-"}</td>
+        <td style="text-align:center; color:var(--color-text-dark); font-weight:500;">${gw.pg_charges_percentage_effective_from || "-"}</td>
         <td style="text-align:center;">${statusHtml}</td>
         <td style="text-align:center;">${minusBtnHtml}</td>
       `;
@@ -114,6 +124,7 @@
     populateLedgerOptions(gw.payment_master_ledger_id);
     populateChargesLedgerOptions(gw.pg_charges_master_ledger_id);
     formChargesPercentage.value = gw.pg_charges_percentage != null ? gw.pg_charges_percentage : "";
+    formChargesEffectiveFrom.value = gw.pg_charges_percentage_effective_from || "";
     formStatus.checked = !!gw.is_active;
     formStatusLabel.textContent = gw.is_active ? "Active" : "Inactive";
 
@@ -141,6 +152,7 @@
     formMaster.value = "";
     formChargesMaster.value = "";
     formChargesPercentage.value = "";
+    formChargesEffectiveFrom.value = "";
     formStatus.checked = true;
     formStatusLabel.textContent = "Active";
 
@@ -177,12 +189,19 @@
       return;
     }
 
+    if (formChargesEffectiveFrom.value && formChargesEffectiveFrom.value < todayISO()) {
+      voyagerAlert("Effective From cannot be a past date.");
+      formChargesEffectiveFrom.focus();
+      return;
+    }
+
     const payload = {
       company_id: activeCompanyId,
       gateway_name: gatewayName,
       payment_master_ledger_id: Number(ledgerId),
       pg_charges_master_ledger_id: chargesLedgerId ? Number(chargesLedgerId) : null,
       pg_charges_percentage: chargesPercentageRaw ? Number(chargesPercentageRaw) : null,
+      pg_charges_percentage_effective_from: formChargesEffectiveFrom.value || null,
       is_active: isActive,
     };
 
@@ -277,17 +296,22 @@
   btnCancel.addEventListener("click", resetForm);
 
   // Initialize Shell & Data
-  const active = await VoyagerShell.init({
-    activeKey: "pg-master",
-    onCompanyChange: async (id) => {
-      activeCompanyId = Number(id);
-      await loadLedgers();
-      await loadChargesLedgers();
-      await loadGateways();
-      resetForm();
-      renderGrid();
-    },
-  });
+  let active = null;
+  try {
+    active = await VoyagerShell.init({
+      activeKey: "pg-master",
+      onCompanyChange: async (id) => {
+        activeCompanyId = Number(id);
+        await loadLedgers();
+        await loadChargesLedgers();
+        await loadGateways();
+        resetForm();
+        renderGrid();
+      },
+    });
+  } catch (err) {
+    console.error("Shell init failed", err);
+  }
 
   if (active) {
     activeCompanyId = Number(active.id);
@@ -295,5 +319,7 @@
     await loadChargesLedgers();
     await loadGateways();
     renderGrid();
+  } else {
+    voyagerAlert("Could not load the active company. Check your connection and reload the page.", { icon: "error" });
   }
 })();

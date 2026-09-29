@@ -113,7 +113,12 @@
     modal.querySelector("#voyager-alert-message").textContent = message;
     modal.querySelector("#voyager-alert-icon").innerHTML = ALERT_ICONS[(opts && opts.icon) || "warning"];
     modal.classList.add("open");
-    modal.querySelector("#voyager-alert-ok").focus();
+    // preventScroll - this modal is position:fixed and already fully in
+    // view regardless of any ancestor's scroll position, but a plain
+    // .focus() still triggers the browser's default scroll-into-view
+    // walk up every scrollable ancestor, visibly jumping the page/table
+    // scroll position underneath the modal for no reason.
+    modal.querySelector("#voyager-alert-ok").focus({ preventScroll: true });
     return new Promise((resolve) => {
       alertResolve = () => {
         // Once closed (OK, X, backdrop or Escape), move the cursor straight
@@ -189,7 +194,8 @@
     modal.querySelector("#voyager-confirm-ok").textContent = (opts && opts.confirmLabel) || "Delete";
     modal.querySelector("#voyager-confirm-icon").innerHTML = CONFIRM_ICONS[(opts && opts.icon) || "warning"];
     modal.classList.add("open");
-    modal.querySelector("#voyager-confirm-cancel").focus();
+    // preventScroll - see voyagerAlert's identical comment above.
+    modal.querySelector("#voyager-confirm-cancel").focus({ preventScroll: true });
     return new Promise((resolve) => { confirmResolve = resolve; });
   };
 

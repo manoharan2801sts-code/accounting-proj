@@ -31,9 +31,9 @@
       { key: "dashboard", label: "Home", href: "dashboard.html", icon: "M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" },
     ]},
     { label: "Masters", forceDropdown: true, items: [
-      { key: "accounts", label: "Chart of Accounts", href: "accounts.html", icon: "M4 19.5A2.5 2.5 0 016.5 17H20M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z" },
       { key: "company-master", label: "Company Master", href: "company-master.html", icon: "M3 21h18M5 21V7l7-4 7 4v14M9 9h1m4 0h1m-6 4h1m4 0h1m-6 4h1m4 0h1" },
       { key: "groups", label: "Groups", href: "groups.html", icon: "M3 3h18v6H3zM3 15h18v6H3zM3 9h18v6H3z" },
+      { key: "accounts", label: "Chart of Accounts", href: "accounts.html", icon: "M4 19.5A2.5 2.5 0 016.5 17H20M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z" },
       { key: "voucher-type", label: "Voucher Type", href: "voucher-type.html", icon: "M17 3a2.85 2.85 0 114 4L7.5 20.5 2 22l1.5-5.5z" },
       { key: "supplier-master", label: "Supplier Master", href: "supplier-master.html", icon: "M1 4h22v16H1zM1 10h22" },
       { key: "master-mapping", label: "Ledger Mapping", href: "master-mapping.html", icon: "M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" },

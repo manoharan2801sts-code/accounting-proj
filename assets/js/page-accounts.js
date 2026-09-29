@@ -1,11 +1,20 @@
 ﻿(async function () {
   const API_BASE = window.API_BASE || "/api";
   const { get } = window.VoyagerAPI;
-  const { fmtMoney, currencyFor } = window.VoyagerUtil;
+  const { currencyFor } = window.VoyagerUtil;
   let allAccounts = [], byParent = {}, byId = {}, currentCcy = "INR", currentCompanyId, currentCountryCode;
 
   function escapeHtml(s) {
     return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  }
+
+  // Chart of Accounts' own Balance format - no currency code, a trailing
+  // Dr/Cr instead (same positive=Debit/negative=Credit sign convention
+  // Ledger.signed_balance and every other report already use), rather
+  // than fmtMoney's generic "<CCY> <amount>" used everywhere else.
+  function fmtBalanceDrCr(value) {
+    const n = Number(value) || 0;
+    return `${n < 0 ? "Cr" : "Dr"} ${Math.abs(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   }
 
   function highlight(text, term) {
@@ -62,7 +71,7 @@
           const nameHtml = a.is_group
             ? highlight(a.name, trimmed)
             : `<a href="${window.VoyagerEntry.zoomInUrl("ledger-entry.html", a.id, "accounts.html")}" title="Click to edit this ledger">${highlight(a.name, trimmed)}</a>`;
-          const balDisplay = a.is_group ? "" : `<span class="drillable" data-ledger="${escapeHtml(a.name)}" title="Click to view the vouchers behind this balance">${fmtMoney(a.balance, currentCcy)}</span>`;
+          const balDisplay = a.is_group ? "" : `<span class="drillable" data-ledger="${escapeHtml(a.name)}" title="Click to view the vouchers behind this balance">${fmtBalanceDrCr(a.balance)}</span>`;
           const actions = a.is_group
             ? ""
             : a.is_in_use
@@ -74,7 +83,6 @@
                  </div>`;
           return `
             <div class="coa-row ${a.is_group ? "group" : ""}">
-              <div class="coa-code">${highlight(a.code, trimmed)}</div>
               <div class="coa-name" style="padding-left:${indent}px;">${nameHtml}</div>
               <div class="coa-type"><span class="pill pill-neutral">${a.account_type}</span></div>
               <div class="coa-balance">${balDisplay}</div>
@@ -134,6 +142,15 @@
 
   document.getElementById("coa-search").addEventListener("input", (e) => render(e.target.value));
 
-  const active = await VoyagerShell.init({ activeKey: "accounts", onCompanyChange: load });
-  if (active) load(active.id, active.country);
+  let active = null;
+  try {
+    active = await VoyagerShell.init({ activeKey: "accounts", onCompanyChange: load });
+  } catch (err) {
+    console.error("Shell init failed", err);
+  }
+  if (active) {
+    load(active.id, active.country);
+  } else {
+    voyagerAlert("Could not load the active company. Check your connection and reload the page.", { icon: "error" });
+  }
 })();

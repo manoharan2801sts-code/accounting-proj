@@ -12,49 +12,75 @@
 <link href="assets/css/loader.css" rel="stylesheet" />
   <link rel="icon" type="image/png" href="assets/img/favicon.png" />
   <style>
+    /* Locked to the viewport - only the grid's own body scrolls, with the
+       Difference/Grand Total rows pinned to the bottom of that scroll
+       area (not the whole page), same pattern as ticket-entry.html. */
+    html, body { height: 100%; overflow: hidden; margin: 0; }
+    .tb-main { display: flex; flex-direction: column; height: calc(100vh - var(--topnav-height) - var(--menubar-height, 0px)); box-sizing: border-box; }
+    .tb-main .page-header-row { flex-shrink: 0; }
+    .tb-main .table-container { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+    .tb-scroll-wrap { flex: 1; min-height: 0; overflow: auto; }
+    .tb-table thead th { position: sticky; top: 0; z-index: 1; }
+    /* Both footer rows get an explicit height so the Difference row's
+       sticky "bottom" offset (= the Grand Total row's own height) is
+       exact, not a guess - Grand Total pins to the very bottom, and
+       Difference stacks directly above it. */
+    .tb-table tfoot tr td { position: sticky; z-index: 1; height: 38px; box-sizing: border-box; }
+    .tb-table tfoot tr.tb-diff-row td { bottom: 37px; }
+    .tb-table tfoot tr.tb-grand-total-row td { bottom: 0; z-index: 2; }
+
     .page-header-row { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 1.25rem; flex-wrap: wrap; }
     .page-title-group h1 { font-size: 1.25rem; font-weight: 700; margin: 0; display: flex; align-items: center; gap: 0.5rem; }
     .page-title-group .breadcrumb { font-size: 0.8rem; color: var(--color-text-muted); margin-bottom: 0.25rem; display: flex; gap: 0.4rem; align-items: center; }
 
-    .filter-card {
-      background: var(--color-white); border: 1px solid var(--color-border);
-      border-radius: var(--radius-md); padding: 1rem 1.25rem; margin-bottom: 1.25rem;
-      display: flex; align-items: flex-end; gap: 1rem; flex-wrap: wrap;
-    }
     .filter-group { display: flex; flex-direction: column; gap: 0.35rem; }
-    .filter-group label { font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--color-text-muted); letter-spacing: 0.03em; }
+
+    /* A single compact toolbar row - date fields sized/aligned to match
+       the plain Print/Export CSV buttons (no stacked label-above-input
+       block, no 34px-tall oversized controls) so everything fits on one
+       line instead of wrapping onto its own row underneath. */
+    .tb-toolbar { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; width: 100%; }
+    .tb-toolbar-label { font-size: 11px; font-weight: 700; color: var(--color-text-muted); letter-spacing: 0.03em; }
+    .tb-toolbar-date { height: 26px; width: 116px; padding: 0 6px; font-size: 12px; box-sizing: border-box; }
+    .filter-group label { font-size: 11px; font-weight: 700; color: var(--color-text-muted); letter-spacing: 0.03em; }
 
     .table-container { background: var(--color-white); border: 1px solid var(--color-border); border-radius: var(--radius-md); overflow: hidden; }
     .table-toolbar {
-      padding: 0.85rem 1.25rem; display: flex; align-items: center; justify-content: space-between;
+      padding: 0.5rem 1rem; display: flex; align-items: center; justify-content: space-between;
       border-bottom: 1px solid var(--color-border); gap: 1rem; flex-wrap: wrap; background: #FAFBFD;
     }
-    .table-search { max-width: 300px; width: 100%; }
+    .table-search { max-width: 220px; width: 100%; height: 26px; font-size: 11.5px; padding: 0 0.5rem; }
 
     .tb-table { width: 100%; border-collapse: collapse; text-align: left; }
-    .tb-table th {
-      padding: 0.5rem 1rem; background: #F8FAFC; border-bottom: 1px solid var(--color-border);
-      font-size: 11.5px; font-weight: 700; text-transform: uppercase; color: var(--color-text-muted); letter-spacing: 0.03em;
-    }
+    .tb-table th { padding: 0.35rem 0.8rem; background: #F8FAFC; border-bottom: 1px solid var(--color-border);
+      font-size: 12.5px; font-weight: 700; color: var(--color-text-muted); letter-spacing: 0.03em; }
     .tb-table th.tb-amt { text-align: right; }
-    .tb-table td { padding: 0.55rem 1rem; border-bottom: 1px solid var(--color-border-subtle); font-size: 13px; color: var(--color-text); vertical-align: middle; }
+    .tb-table td { padding: 0.25rem 1rem; border-bottom: 1px solid var(--color-border-subtle); font-size: 13px; color: var(--color-text); vertical-align: middle; }
     .tb-table tbody tr:last-child td { border-bottom: none; }
-    .tb-amt { font-family: var(--font-mono); font-weight: 600; text-align: right; white-space: nowrap; }
+    .tb-amt { font-family: var(--font-mono); font-weight: 600; text-align: right; white-space: nowrap; width: 140px; }
 
     /* "Group" rows (primary groups at top level, or any sub-group row,
-       wherever it appears) always get Tally's gold/amber styling and are
-       always clickable - drilling in via ?group_id=. "Ledger" rows are
-       plain/italic and link straight to the Ledger report instead. */
-    .tb-group-row td { background: #FDF6E3; font-weight: 700; color: #7A5B00; }
+       wherever it appears) are plain white/black-bold and are always
+       clickable - drilling in via ?group_id=. "Ledger" rows stay plain
+       white/italic and link straight to the Ledger report instead.
+       Both turn solid blue with white text when hovered/keyboard-selected
+       - driven purely by the .tb-row-selected class (kept in sync with
+       real mouse position by a mouseover listener), not a native :hover
+       rule, since combining the two let a stationary mouse's :hover and
+       a keyboard-moved .tb-row-selected light up two rows at once. */
+    .tb-group-row td { font-weight: 700; color: var(--color-text-dark); }
     .tb-group-row { cursor: pointer; }
-    .tb-group-row:hover td { background: #FBEBC0; }
+    .tb-group-row.tb-row-selected td { background: var(--color-primary); color: #FFFFFF; }
     .tb-ledger-row { cursor: pointer; }
     .tb-ledger-row td:first-child { font-style: italic; color: var(--color-text-dark); }
-    .tb-ledger-row:hover { background: #F8FAFC; }
+    .tb-ledger-row.tb-row-selected td { background: var(--color-primary); color: #FFFFFF; }
+    .tb-ledger-row.tb-row-selected td:first-child { color: #FFFFFF; }
     /* Only used in the top-level "Detailed View" - a group row's own
        immediate children, indented beneath it. */
     .tb-indent td:first-child { padding-left: 2rem; }
-    .tb-grand-total-row td { border-top: 2px solid var(--color-border); font-weight: 800; font-size: 13.5px; background: #FAFBFD; }
+    .tb-diff-row td { font-weight: 700; font-style: italic; color: var(--color-text-dark); background: var(--color-primary-tint-strong); }
+    .tb-diff-row:hover td { background: var(--color-primary); color: #FFFFFF; }
+    .tb-grand-total-row td { border-top: none; font-weight: 800; font-size: 13.5px; background: #FAFBFD; }
 
     .tb-detailed-toggle { display: flex; align-items: center; gap: 0.5rem; font-size: 13px; color: var(--color-text-dark); cursor: pointer; user-select: none; }
     .tb-detailed-toggle input { width: 16px; height: 16px; cursor: pointer; }
@@ -70,13 +96,19 @@
 <script src="assets/js/loader.js?v=2"></script>
   <header class="app-topnav" id="shell-topnav"></header>
   <div class="app-body">
-    <main class="app-main" style="max-width: 1440px; margin: 0 auto; padding: 1.5rem 2rem;">
+    <main class="app-main tb-main" style="max-width: 1440px; margin: 0 auto; padding: 1.5rem 2rem; width: 100%;">
       <div class="page-header-row">
-        <div class="page-title-group">
-          <div class="breadcrumb">Reports &rsaquo; Other Reports &rsaquo; Trial Balance</div>
-          <h1><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--color-primary)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg> Trial Balance</h1>
-        </div>
-        <div style="display:flex; gap:0.5rem;">
+        <div class="tb-toolbar">
+          <span class="tb-toolbar-label">From</span>
+          <input type="date" class="form-control-custom tb-toolbar-date" id="filter-from" />
+          <span class="tb-toolbar-label">To</span>
+          <input type="date" class="form-control-custom tb-toolbar-date" id="filter-to" />
+          <button type="button" class="dom-nav-btn btn-primary" onclick="loadTrialBalance()">Apply</button>
+          <label class="tb-detailed-toggle" id="tb-detailed-toggle-wrap">
+            <input type="checkbox" id="tb-detailed-view" checked onchange="loadTrialBalance()" />
+            Detailed View
+          </label>
+          <span style="margin-left:auto;"></span>
           <button type="button" class="dom-nav-btn" onclick="window.print()">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9V2h12v7M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2m-12 0v4h12v-4"/></svg>
             Print
@@ -88,35 +120,16 @@
         </div>
       </div>
 
-      <div class="filter-card">
-        <div class="filter-group">
-          <label>From Date</label>
-          <input type="date" class="form-control-custom" id="filter-from" style="height:34px; padding:0.25rem 0.6rem;" />
-        </div>
-        <div class="filter-group">
-          <label>To Date</label>
-          <input type="date" class="form-control-custom" id="filter-to" style="height:34px; padding:0.25rem 0.6rem;" />
-        </div>
-        <button type="button" class="dom-nav-btn btn-primary" style="height:34px;" onclick="loadTrialBalance()">Apply</button>
-        <label class="tb-detailed-toggle" id="tb-detailed-toggle-wrap">
-          <input type="checkbox" id="tb-detailed-view" checked onchange="loadTrialBalance()" />
-          Detailed View
-        </label>
-      </div>
-
       <div class="table-container">
         <div class="table-toolbar">
-          <div style="font-weight:700; font-size:0.92rem; color:var(--color-text-dark);" id="tb-title">Trial Balance</div>
+          <div style="font-weight:700; font-size:0.78rem; color:var(--color-text-dark);" id="tb-title">Trial Balance</div>
           <input type="text" class="form-control-custom table-search" placeholder="Search records..." oninput="filterTable(this.value)" />
         </div>
-        <div style="overflow-x:auto;">
+        <div class="tb-scroll-wrap">
           <table class="tb-table" id="main-data-table">
             <thead>
               <tr>
-                <th rowspan="2">Particulars</th>
-                <th colspan="2" style="text-align:center;" id="tb-range-header">Closing Balance</th>
-              </tr>
-              <tr>
+                <th>Particulars</th>
                 <th class="tb-amt">Debit</th>
                 <th class="tb-amt">Credit</th>
               </tr>
@@ -125,6 +138,11 @@
               <tr><td colspan="3" style="text-align:center; padding:2rem; color:var(--color-text-muted);">Loading...</td></tr>
             </tbody>
             <tfoot>
+              <tr class="tb-diff-row" id="tb-diff-row" style="display:none;">
+                <td>Difference (Opening/Closing Balances)</td>
+                <td class="tb-amt" id="tb-diff-debit"></td>
+                <td class="tb-amt" id="tb-diff-credit"></td>
+              </tr>
               <tr class="tb-grand-total-row">
                 <td>Grand Total</td>
                 <td class="tb-amt" id="tb-grand-debit">0.00</td>
@@ -146,6 +164,7 @@
   <script src="assets/js/mock-data.js"></script>
   <script src="assets/js/api.js"></script>
   <script src="assets/js/hardcode.js"></script>
+  <script src="assets/js/util.js"></script>
   <script src="assets/js/shell.js"></script>
   <script>
     // Not gated on DOMContentLoaded - this page's <script> can be injected
@@ -177,6 +196,7 @@
       try {
         const active = await VoyagerShell.init({ activeKey: "rep-trial-balance" });
         if (active) activeCompanyId = Number(active.id);
+        await VoyagerUtil.loadDecimalPlaces(activeCompanyId);
       } catch (err) {
         console.error("Shell init failed", err);
       }
@@ -184,29 +204,22 @@
       await loadTrialBalance();
     })();
 
-    // Defaults to this financial year: 1-Apr of the current (or, before
-    // April, previous) year through today - same "FY" convention the
-    // top-nav's own FY chip already uses elsewhere in the app.
+    // Defaults to today, not a wide range - this project posts a lot of
+    // data per day, so a multi-week/FY-wide default window would be
+    // slow/overwhelming to load on first open. (from_date is only
+    // decorative in the header anyway - Closing Balance is always
+    // cumulative-to-date, see trial_balance_report's own docstring.)
     function setDefaultDates() {
-      const today = new Date();
-      const fyStartYear = today.getMonth() >= 3 ? today.getFullYear() : today.getFullYear() - 1;
-      const fyStart = `${fyStartYear}-04-01`;
-      const todayStr = today.toISOString().slice(0, 10);
-      document.getElementById("filter-from").value = fyStart;
+      const todayStr = new Date().toISOString().slice(0, 10);
+      document.getElementById("filter-from").value = todayStr;
       document.getElementById("filter-to").value = todayStr;
     }
 
     function fmtAmt(n) {
       const v = Number(n) || 0;
-      return v.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      const d = VoyagerUtil.getDecimalPlaces();
+      return v.toLocaleString("en-IN", { minimumFractionDigits: d, maximumFractionDigits: d });
     }
-    function fmtDateDisplay(iso) {
-      if (!iso) return "";
-      const d = new Date(iso + "T00:00:00");
-      if (isNaN(d)) return iso;
-      return d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "2-digit" }).replace(/ /g, "-");
-    }
-
     async function loadTrialBalance() {
       const tbody = document.getElementById("main-data-tbody");
       tbody.innerHTML = `<tr><td colspan="3" style="text-align:center; padding:2rem; color:var(--color-text-muted);">Loading...</td></tr>`;
@@ -237,8 +250,6 @@
         if (!res.ok) throw new Error(data.error || `Server returned ${res.status}`);
         lastLoadedData = data;
 
-        document.getElementById("tb-range-header").textContent = data.from_date && data.to_date
-          ? `${fmtDateDisplay(data.from_date)} to ${fmtDateDisplay(data.to_date)}` : "Closing Balance";
         document.getElementById("tb-title").textContent = data.context ? data.context.name : "Trial Balance";
         document.getElementById("tb-back-row").style.display = data.back ? "" : "none";
         if (data.back) document.getElementById("tb-back-label").textContent = `Back to ${data.back.label}`;
@@ -249,6 +260,52 @@
         tbody.innerHTML = `<tr><td colspan="3" style="text-align:center; padding:2rem; color:var(--color-text-muted);">Could not load data. Is the Django backend running on localhost:8000?</td></tr>`;
       }
     }
+
+    // Keyboard row navigation - Up/Down moves a highlighted "current row"
+    // (same look as mouse hover), Enter activates it exactly the same as
+    // clicking it (drills into a group, or opens the ledger's statement).
+    // Ignored while typing in any filter/search field so arrow keys there
+    // still move the text cursor as normal.
+    let selectedRowIndex = -1;
+    function visibleDataRows() {
+      return Array.from(document.querySelectorAll("#main-data-tbody tr.tb-group-row, #main-data-tbody tr.tb-ledger-row")).filter((r) => r.style.display !== "none");
+    }
+    function selectRow(index) {
+      const rows = visibleDataRows();
+      rows.forEach((r) => r.classList.remove("tb-row-selected"));
+      if (!rows.length) { selectedRowIndex = -1; return; }
+      selectedRowIndex = Math.max(0, Math.min(index, rows.length - 1));
+      const row = rows[selectedRowIndex];
+      row.classList.add("tb-row-selected");
+      row.scrollIntoView({ block: "nearest" });
+    }
+    // Keeps the keyboard-selected row in sync with whatever the mouse is
+    // actually over - without this, moving the mouse to hover a different
+    // row while an old keyboard selection is still stuck elsewhere made it
+    // look like hover had stopped working (two rows lit up at once).
+    document.getElementById("main-data-tbody").addEventListener("mouseover", (e) => {
+      const row = e.target.closest("tr.tb-group-row, tr.tb-ledger-row");
+      if (!row) return;
+      const idx = visibleDataRows().indexOf(row);
+      if (idx !== -1) selectRow(idx);
+    });
+    document.addEventListener("keydown", (e) => {
+      if (!["ArrowDown", "ArrowUp", "Enter"].includes(e.key)) return;
+      const tag = document.activeElement && document.activeElement.tagName;
+      if (["INPUT", "SELECT", "TEXTAREA"].includes(tag)) return;
+      const rows = visibleDataRows();
+      if (!rows.length) return;
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        selectRow(selectedRowIndex < rows.length - 1 ? selectedRowIndex + 1 : 0);
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        selectRow(selectedRowIndex > 0 ? selectedRowIndex - 1 : rows.length - 1);
+      } else if (e.key === "Enter" && selectedRowIndex >= 0) {
+        e.preventDefault();
+        rows[selectedRowIndex].click();
+      }
+    });
 
     function rowHtml(row, indent) {
       const isLedger = row.type === "ledger";
@@ -263,12 +320,34 @@
         </tr>`;
     }
 
+    // Grand Total always shows the SAME (balanced) figure on both sides,
+    // like Tally's own Trial Balance - whichever side (Debit or Credit)
+    // actually totalled less gets that shortfall shown on its own
+    // Difference row just above, so Grand Total itself never shows an
+    // unbalanced pair of numbers.
+    function renderTotals(totalDebit, totalCredit) {
+      const diff = Math.round((totalDebit - totalCredit) * 100) / 100;
+      const diffRow = document.getElementById("tb-diff-row");
+      if (diff === 0) {
+        diffRow.style.display = "none";
+        document.getElementById("tb-diff-debit").textContent = "";
+        document.getElementById("tb-diff-credit").textContent = "";
+      } else {
+        diffRow.style.display = "";
+        document.getElementById("tb-diff-debit").textContent = diff < 0 ? fmtAmt(-diff) : "";
+        document.getElementById("tb-diff-credit").textContent = diff > 0 ? fmtAmt(diff) : "";
+      }
+      const grand = Math.max(totalDebit, totalCredit);
+      document.getElementById("tb-grand-debit").textContent = fmtAmt(grand);
+      document.getElementById("tb-grand-credit").textContent = fmtAmt(grand);
+    }
+
     function renderTable(data) {
       const tbody = document.getElementById("main-data-tbody");
+      selectedRowIndex = -1; // stale after a full re-render - rows are new DOM nodes
       if (!data.rows.length) {
         tbody.innerHTML = `<tr><td colspan="3" style="text-align:center; padding:2rem; color:var(--color-text-muted);">No ledger balances found for this period.</td></tr>`;
-        document.getElementById("tb-grand-debit").textContent = fmtAmt(0);
-        document.getElementById("tb-grand-credit").textContent = fmtAmt(0);
+        renderTotals(0, 0);
         return;
       }
 
@@ -281,7 +360,9 @@
 
       tbody.querySelectorAll(".tb-ledger-row").forEach((row) => {
         row.addEventListener("click", () => {
-          window.location.href = `report-ledger-book.html?ledger_id=${row.dataset.ledgerId}`;
+          const from = encodeURIComponent("Trial Balance");
+          const fromUrl = encodeURIComponent(window.location.href);
+          window.location.href = `report-ledger-monthly.html?ledger_id=${row.dataset.ledgerId}&from=${from}&from_url=${fromUrl}`;
         });
       });
       tbody.querySelectorAll(".tb-group-row").forEach((row) => {
@@ -294,8 +375,7 @@
         });
       });
 
-      document.getElementById("tb-grand-debit").textContent = fmtAmt(data.total_debit);
-      document.getElementById("tb-grand-credit").textContent = fmtAmt(data.total_credit);
+      renderTotals(data.total_debit, data.total_credit);
     }
 
     document.getElementById("tb-back-link").addEventListener("click", (e) => {

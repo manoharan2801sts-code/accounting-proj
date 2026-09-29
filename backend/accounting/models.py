@@ -354,6 +354,13 @@ class TicketLine(models.Model):
     # Master ledger is mapped, netted against that same gateway's own
     # ledger credit - see _pg_receipt_lines() in views.py.
     pg_charges = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    # The PG Master -> PG Charges Percentage actually applied to compute
+    # pg_charges above - the PGMasterHistory snapshot effective as of this
+    # ticket's own Booking Ref Date, not necessarily today's live rate.
+    # Stored (not just recomputed) so the Passenger Fare modal can always
+    # show the exact rate this line was charged at, even after later
+    # gateway edits add newer History snapshots.
+    pg_charges_percentage = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
 
     # Markup / service fee / GST
     markup = models.DecimalField(max_digits=14, decimal_places=2, default=0)
@@ -855,6 +862,12 @@ class PGMaster(models.Model):
     # plain number set here, separate from pg_charges_master_ledger's GST%
     # (which is the ledger's tax rate, not the gateway's fee rate).
     pg_charges_percentage = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    # The date this rate/ledger mapping takes effect from. Every save also
+    # snapshots the row into PGMasterHistory keyed by this date - so
+    # tickets always calculate PG Charges using whichever snapshot was
+    # effective as of their own Booking Ref Date, not necessarily the
+    # latest edit (see _pg_master_effective_snapshot()).
+    pg_charges_percentage_effective_from = models.DateField(null=True, blank=True)
 
     is_active = models.BooleanField(default=True)
 
@@ -870,6 +883,41 @@ class PGMaster(models.Model):
 
     def __str__(self):
         return self.gateway_name
+
+
+class PGMasterHistory(models.Model):
+    """
+    One snapshot per (gateway, Effective From date) — written every time
+    pg_master_save() saves a PGMaster row with an Effective From date set.
+    Lets a ticket's PG Charges/JV posting resolve the ledger + percentage
+    that was actually in force on its own Booking Ref Date, instead of
+    always using whatever the gateway's row currently holds (which would
+    silently rewrite already-booked tickets' calculation/ledger every time
+    someone edits the gateway later with a new rate).
+    """
+    pg_master = models.ForeignKey(PGMaster, on_delete=models.CASCADE, related_name="history")
+    company_id = models.IntegerField()
+    gateway_name = models.CharField(max_length=100)
+
+    payment_master_ledger_id = models.IntegerField(null=True, blank=True)
+    payment_master_ledger_name = models.CharField(max_length=200, null=True, blank=True)
+    pg_charges_master_ledger_id = models.IntegerField(null=True, blank=True)
+    pg_charges_master_ledger_name = models.CharField(max_length=200, null=True, blank=True)
+    pg_charges_percentage = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+
+    effective_from = models.DateField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "PGMasterHistory"
+        constraints = [
+            models.UniqueConstraint(fields=["pg_master", "effective_from"], name="uq_pg_master_history_effective_from")
+        ]
+        indexes = [models.Index(fields=["pg_master", "effective_from"])]
+        ordering = ["-effective_from"]
+
+    def __str__(self):
+        return f"{self.gateway_name} @ {self.effective_from}"
 
 
 class CompanyMaster(models.Model):
@@ -898,10 +946,20 @@ class CompanyMaster(models.Model):
     books_beginning_from = models.DateField(null=True, blank=True)
     gst_reg_type = models.CharField(max_length=20, choices=GST_REG_TYPE_CHOICES, default="Regular")
     gst_no = models.CharField(max_length=15, null=True, blank=True)
+    pan_number = models.CharField(max_length=10, null=True, blank=True)
     cin_number = models.CharField(max_length=25, null=True, blank=True)
     tan_number = models.CharField(max_length=15, null=True, blank=True)
     hsn_sac = models.CharField(max_length=20, null=True, blank=True)
-    description = models.TextField(null=True, blank=True)
+    currency_symbol = models.CharField(max_length=5, null=True, blank=True)
+    currency_name = models.CharField(max_length=50, null=True, blank=True)
+    decimal_places = models.PositiveSmallIntegerField(null=True, blank=True, default=2)
+    # Stored as data: URLs (base64) straight in the DB, same as every other
+    # CompanyMaster field - no MEDIA_ROOT/static file serving exists
+    # anywhere in this project yet, and at one logo + one seal per company
+    # (each capped at 2MB client-side) that infra isn't worth adding.
+    logo_base64 = models.TextField(null=True, blank=True)
+    seal_base64 = models.TextField(null=True, blank=True)
+
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

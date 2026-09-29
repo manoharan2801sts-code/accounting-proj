@@ -3,14 +3,28 @@
   const OPT = window.VoyagerHardcode.TICKET_FORM_OPTIONS;
   const params = new URLSearchParams(window.location.search);
   const editId = params.get("id");
+  const rescheduleTicketId = params.get("reschedule_ticket_id");
+  const rescheduleLineId = params.get("reschedule_line_id");
   let activeCompanyId, activeCountry, allCustomers = [], allSuppliers = [], existingTickets = [];
   let voucherTypes = []; // active Voucher Types for the active company - drives the Invoice Type dropdown + Invoice Number auto-numbering
   const VOUCHER_TYPE_API = `${API_BASE}/voucher-type/`;
   let fopMasterCards = []; // active FOP Master cards for the active company, refreshed by populateFopOptions
   let pgMasterGateways = []; // PG Master gateways for the active company, refreshed by populatePgOptions
+  const PG_MASTER_EFFECTIVE_API = `${API_BASE}/pg-master/effective/`;
+  const pgEffectiveCache = new Map(); // `${gatewayName}|${asOfDateISO}` -> resolved snapshot (or null), so re-renders don't refetch
   let passengers = []; // array of passenger objects - source of truth for the register table
   let editingIndex = null;
   let viewMode = false;
+  let rescheduleMode = false; // true only for the "Reschedule" pre-filled new-ticket flow - freezes fare/accounting amounts and Booking Status, and caps the register at the one carried-over passenger
+  // Reschedule's fare modal shows two tabs covering the WHOLE modal (both
+  // Passenger & Segment Details and Base Fare/Customer/Supplier):
+  // "Parent PNR Details" (the original ticket line, frozen/non-editable,
+  // shown purely for reference) and "Reschedule PNR Details" (this brand
+  // new ticket's own data - starts completely blank/0.00, fully editable,
+  // and IS what actually gets saved).
+  let modalRescheduleTab = "parent";
+  let rescheduleParentPassenger = null; // frozen clone of the original ticket line - never touched again
+  let rescheduleEditPassenger = null; // this new ticket's own passenger data - mirrors passengers[0], updated whenever Save & Apply commits
   let modalSectors = []; // current passenger's multi-city sectors - {from,to,travelDate,flightNo,cabin,cls,fareType}
   let editingSectorIndex = null;
 
@@ -35,43 +49,75 @@
   // it's not relevant there. Only clears its value on a genuine user-driven
   // Payment Mode change, not when re-syncing disabled state elsewhere (e.g.
   // loading a saved ticket, or unlocking one for editing).
+  // Resolves the PG Master ledger mapping + PG Charges Percentage that was
+  // actually in force for `gatewayName` on THIS ticket's own Booking Ref
+  // Date (not necessarily whatever the gateway's row currently holds) -
+  // see PGMasterHistory/_pg_master_effective_snapshot() server-side. Every
+  // place that needs PG Charges/PG GST for calculation or JV posting must
+  // go through this, never the raw `pgMasterGateways` cache (that's only
+  // for populating the dropdown's list of active gateway names).
+  async function getPgEffective(gatewayName) {
+    if (!gatewayName || !activeCompanyId) return null;
+    const asOfDate = toISOFromDDMMYYYY(getDateGroupValue(document.getElementById("booking_ref_date"))) || "";
+    const cacheKey = `${gatewayName}|${asOfDate}`;
+    if (pgEffectiveCache.has(cacheKey)) return pgEffectiveCache.get(cacheKey);
+    let snapshot = null;
+    try {
+      const res = await fetch(`${PG_MASTER_EFFECTIVE_API}?company_id=${activeCompanyId}&gateway_name=${encodeURIComponent(gatewayName)}&as_of_date=${asOfDate}`);
+      snapshot = res.ok ? await res.json() : null;
+    } catch (err) {
+      console.error("Could not load effective PG Master snapshot", err);
+    }
+    pgEffectiveCache.set(cacheKey, snapshot);
+    return snapshot;
+  }
+
   // PG GST - display-only, not used in any calculation (see computeFareLine/
   // computed_gst, which deliberately never reference it). Shows
   // PG Charges * whichever gateway is picked's PG Master -> PG Charges
   // Master ledger's own GST%, for reference.
-  function updatePgGstDisplay() {
+  async function updatePgGstDisplay() {
     const el = document.getElementById("modal-pg-gst-pct");
     const pgChargesInput = document.getElementById("modal-pg-charges");
     if (!el || !pgChargesInput) return;
     const gatewayName = document.getElementById("payment_gateway_ref").value;
-    const gateway = pgMasterGateways.find((g) => g.gateway_name === gatewayName);
-    const pct = gateway ? Number(gateway.pg_charges_master_ledger_gst_percentage) || 0 : 0;
+    const snapshot = await getPgEffective(gatewayName);
+    const pct = snapshot ? Number(snapshot.pg_charges_master_ledger_gst_percentage) || 0 : 0;
     const pgCharges = parseFloat(pgChargesInput.value) || 0;
-    el.textContent = (pgCharges * pct / 100).toFixed(2);
+    el.textContent = fmtN(pgCharges * pct / 100);
   }
 
   // PG Charges (Passenger Fare modal) is non-editable - auto-computed as
   // this passenger's own Total Billed times the selected gateway's PG
-  // Master -> PG Charges Percentage (pg-master.html), not typed by hand.
-  // Reads Total Billed off #modal-total-computed, which recalcModalTotal()
-  // keeps current before calling this.
-  function updatePgCharges() {
+  // Master -> PG Charges Percentage AS OF THIS TICKET'S BOOKING REF DATE
+  // (pg-master.html's history), not typed by hand and not necessarily
+  // today's live rate. Reads Total Billed off #modal-total-computed, which
+  // recalcModalTotal() keeps current before calling this.
+  async function updatePgCharges() {
     const input = document.getElementById("modal-pg-charges");
+    const pctInput = document.getElementById("modal-pg-charges-pct");
     if (!input) return;
     const isGateway = document.getElementById("payment_mode").value === "Payment Gateway";
     if (!isGateway) {
-      input.value = "0.00";
-      updatePgGstDisplay();
+      input.value = fmtN(0);
+      if (pctInput) pctInput.value = "0.00%";
+      await updatePgGstDisplay();
       return;
     }
     const gatewayName = document.getElementById("payment_gateway_ref").value;
-    const gateway = pgMasterGateways.find((g) => g.gateway_name === gatewayName);
-    const pct = gateway ? Number(gateway.pg_charges_percentage) || 0 : 0;
+    const snapshot = await getPgEffective(gatewayName);
+    const pct = snapshot ? Number(snapshot.pg_charges_percentage) || 0 : 0;
     const totalBilled = parseFloat(document.getElementById("modal-total-computed").textContent) || 0;
-    input.value = (totalBilled * pct / 100).toFixed(2);
-    updatePgGstDisplay();
+    input.value = fmtN(totalBilled * pct / 100);
+    if (pctInput) pctInput.value = `${pct.toFixed(2)}%`;
+    await updatePgGstDisplay();
   }
   document.getElementById("payment_gateway_ref").addEventListener("change", updatePgCharges);
+  // Booking Ref Date drives which PG Master snapshot applies - recompute
+  // PG Charges if it changes while a gateway is already selected.
+  document.getElementById("booking_ref_date").addEventListener("change", () => {
+    if (document.getElementById("payment_gateway_ref").value) updatePgCharges();
+  });
 
   function updateGatewayRefField() {
     const isGateway = document.getElementById("payment_mode").value === "Payment Gateway";
@@ -410,8 +456,8 @@
       }
       if (rule.comm_on) document.getElementById("modal-supp-comm-on").value = rule.comm_on;
       document.getElementById("modal-supp-comm-type").value = rule.calc_type;
-      document.getElementById("modal-supp-comm-value").value =
-        (rule.calc_type === "Flat" ? rule.flat_amt : rule.calc_pct).toFixed(2);
+      document.getElementById("modal-supp-comm-value").value = rule.calc_type === "Flat"
+        ? fmtN(rule.flat_amt) : Number(rule.calc_pct).toFixed(2);
       updateSuppDiscValueLabel();
       recalcSuppTotal();
     } catch (err) {
@@ -603,11 +649,17 @@
     airline_code: "", airline_name: "", airline_category: "", flight_no: "", ticket_no: "", passenger_name: "", pax_type: "",
     sector: "", travel_date: "", cabin: "", travel_class: "", fare_type: "", basic_fare: 0, yq: 0, yr: 0, k3_tax: 0,
     tax_others: 0, seat: 0, meal: 0,
-    baggage: 0, other_ssr: 0, disc_on: "", disc_type: "", disc_value: 0, tds_per: 0, pg_charges: 0, markup: 0, addl_markup: 0, ssr_markup: 0,
+    baggage: 0, other_ssr: 0, disc_on: "", disc_type: "", disc_value: 0, tds_per: 0, pg_charges: 0, pg_charges_percentage: 0, markup: 0, addl_markup: 0, ssr_markup: 0,
     service_fee: 0, addl_service_fee: 0, ssr_service_fee: 0, gst_pct: 0, supplier_name: "", office_id: "", fop: "Cash", card_number: "",
     supp_comm_on: "", supp_comm_type: "", supp_comm_value: 0, supp_tds_per: 0,
     supp_markup: 0, supp_addl_markup: 0, supp_service_fee: 0, supp_addl_service_fee: 0, supp_gst_pct: 0,
   });
+
+  // Money amounts only (Basic Fare, Taxes, Markup, Service Fee, GST
+  // Amount, Total, etc.) - follows Company Master's "No. of Decimals".
+  // Percentages (GST %, TDS %, ROE, Discount %) stay fixed at 2 decimals
+  // and keep using .toFixed(2) directly - they're rates, not currency.
+  function fmtN(v) { return (Number(v) || 0).toFixed(VoyagerUtil.getDecimalPlaces()); }
 
   function updateDiscValueLabel() {
     const type = document.getElementById("modal-disc-type").value;
@@ -691,7 +743,7 @@
       // Flat has no % field of its own (it's shown as 0) - the flat amount
       // is read straight from Discount Amount instead.
       disc_value: document.getElementById("modal-disc-type").value === "Flat" ? num("modal-disc-computed") : num("modal-disc-value"),
-      tds_per: num("modal-tds-per"), pg_charges: num("modal-pg-charges"), markup: num("modal-markup"), addl_markup: num("modal-addl-markup"), ssr_markup: num("modal-ssr-markup"),
+      tds_per: num("modal-tds-per"), pg_charges: num("modal-pg-charges"), pg_charges_percentage: num("modal-pg-charges-pct"), markup: num("modal-markup"), addl_markup: num("modal-addl-markup"), ssr_markup: num("modal-ssr-markup"),
       service_fee: num("modal-service-fee"), addl_service_fee: num("modal-addl-service-fee"), ssr_service_fee: num("modal-ssr-service-fee"),
       // GST % field is hidden from the UI - never send a value for it.
       gst_pct: 0,
@@ -712,14 +764,14 @@
     const p = readModalPassenger();
     const r = computeFareLine(p);
     if (!opts || !opts.skipDiscAmount) {
-      document.getElementById("modal-disc-computed").value = r.discount.toFixed(2);
+      document.getElementById("modal-disc-computed").value = fmtN(r.discount);
     }
-    document.getElementById("modal-tds-computed").textContent = r.tds.toFixed(2);
-    document.getElementById("modal-gst-computed").textContent = r.gst.toFixed(2);
+    document.getElementById("modal-tds-computed").textContent = fmtN(r.tds);
+    document.getElementById("modal-gst-computed").textContent = fmtN(r.gst);
     // Taxable Amount - display-only, not used in any calculation.
     document.getElementById("modal-taxable-amount").textContent =
-      (p.service_fee + p.addl_service_fee + p.ssr_service_fee).toFixed(2);
-    document.getElementById("modal-total-computed").textContent = r.total.toFixed(2);
+      fmtN(p.service_fee + p.addl_service_fee + p.ssr_service_fee);
+    document.getElementById("modal-total-computed").textContent = fmtN(r.total);
     updatePgCharges();
     return r;
   }
@@ -727,7 +779,6 @@
   // GST Amount calculation breakdown popup - view only, purely reads
   // whatever's already on screen/already computed elsewhere, doesn't
   // feed into any calculation itself.
-  function fmtAmt2(n) { return (Number(n) || 0).toFixed(2); }
   function openGstDetailModal() {
     const p = readModalPassenger();
     const rows = [
@@ -742,11 +793,11 @@
       total += gstAmt;
       return `<tr>
         <td>${row.label}</td>
-        <td>${fmtAmt2(row.amount)}</td>
-        <td>${fmtAmt2(pct)}%</td>
-        <td>${fmtAmt2(gstAmt)}</td>
+        <td>${fmtN(row.amount)}</td>
+        <td>${pct.toFixed(2)}%</td>
+        <td>${fmtN(gstAmt)}</td>
       </tr>`;
-    }).join("") + `<tr class="dom-gst-detail-total"><td colspan="3">GST Amount</td><td>${fmtAmt2(total)}</td></tr>`;
+    }).join("") + `<tr class="dom-gst-detail-total"><td colspan="3">GST Amount</td><td>${fmtN(total)}</td></tr>`;
     document.getElementById("gst-detail-tbody").innerHTML = bodyHtml;
     gstDetailModal.classList.add("open");
   }
@@ -759,10 +810,10 @@
     const p = readModalPassenger();
     const r = computeSuppLine(p);
     if (!opts || !opts.skipComputed) {
-      document.getElementById("modal-supp-comm-computed").value = r.commission.toFixed(2);
+      document.getElementById("modal-supp-comm-computed").value = fmtN(r.commission);
     }
-    document.getElementById("modal-supp-tds-computed").textContent = r.tds.toFixed(2);
-    document.getElementById("modal-supp-gst-computed").textContent = r.gst.toFixed(2);
+    document.getElementById("modal-supp-tds-computed").textContent = fmtN(r.tds);
+    document.getElementById("modal-supp-gst-computed").textContent = fmtN(r.gst);
     return r;
   }
   function writeModalPassenger(p) {
@@ -771,39 +822,40 @@
     document.getElementById("modal-pax-name").value = p.passenger_name;
     document.getElementById("modal-pax-type").value = p.pax_type;
     parseSectorsFromPassenger(p);
-    document.getElementById("modal-basic-fare").value = p.basic_fare.toFixed(2);
-    document.getElementById("modal-yq").value = p.yq.toFixed(2); document.getElementById("modal-yr").value = p.yr.toFixed(2);
-    document.getElementById("modal-k3").value = p.k3_tax.toFixed(2); document.getElementById("modal-tax-others").value = p.tax_others.toFixed(2);
-    document.getElementById("modal-seat").value = p.seat.toFixed(2); document.getElementById("modal-meal").value = p.meal.toFixed(2);
-    document.getElementById("modal-baggage").value = p.baggage.toFixed(2); document.getElementById("modal-other-ssr").value = p.other_ssr.toFixed(2);
+    document.getElementById("modal-basic-fare").value = fmtN(p.basic_fare);
+    document.getElementById("modal-yq").value = fmtN(p.yq); document.getElementById("modal-yr").value = fmtN(p.yr);
+    document.getElementById("modal-k3").value = fmtN(p.k3_tax); document.getElementById("modal-tax-others").value = fmtN(p.tax_others);
+    document.getElementById("modal-seat").value = fmtN(p.seat); document.getElementById("modal-meal").value = fmtN(p.meal);
+    document.getElementById("modal-baggage").value = fmtN(p.baggage); document.getElementById("modal-other-ssr").value = fmtN(p.other_ssr);
     document.getElementById("modal-disc-on").value = p.disc_on; document.getElementById("modal-disc-type").value = p.disc_type;
-    document.getElementById("modal-disc-value").value = p.disc_type === "Flat" ? "0.00" : p.disc_value.toFixed(2);
+    document.getElementById("modal-disc-value").value = p.disc_type === "Flat" ? "0.00" : Number(p.disc_value).toFixed(2);
     // Flat's real amount lives in Discount Amount (readModalPassenger reads
     // it from there for Flat) - seed it here so the recalcModalTotal() call
     // below doesn't derive the discount from a still-blank Amount field.
-    if (p.disc_type === "Flat") document.getElementById("modal-disc-computed").value = p.disc_value.toFixed(2);
-    document.getElementById("modal-tds-per").value = p.tds_per.toFixed(2);
-    // PG Charges itself is not seeded here - it's non-editable and gets
-    // recomputed fresh (against the CURRENT PG Master percentage) by the
+    if (p.disc_type === "Flat") document.getElementById("modal-disc-computed").value = fmtN(p.disc_value);
+    document.getElementById("modal-tds-per").value = Number(p.tds_per).toFixed(2);
+    // PG Charges/PG Charges % are not seeded here - both are non-editable
+    // and get recomputed fresh (against whatever PG Master snapshot was
+    // effective as of this ticket's own Booking Ref Date) by the
     // recalcModalTotal() call below, via updatePgCharges().
-    document.getElementById("modal-markup").value = p.markup.toFixed(2); document.getElementById("modal-addl-markup").value = p.addl_markup.toFixed(2);
-    document.getElementById("modal-ssr-markup").value = (p.ssr_markup || 0).toFixed(2);
-    document.getElementById("modal-service-fee").value = p.service_fee.toFixed(2); document.getElementById("modal-addl-service-fee").value = p.addl_service_fee.toFixed(2);
-    document.getElementById("modal-ssr-service-fee").value = (p.ssr_service_fee || 0).toFixed(2);
-    document.getElementById("modal-gst-pct").value = p.gst_pct.toFixed(2);
+    document.getElementById("modal-markup").value = fmtN(p.markup); document.getElementById("modal-addl-markup").value = fmtN(p.addl_markup);
+    document.getElementById("modal-ssr-markup").value = fmtN(p.ssr_markup || 0);
+    document.getElementById("modal-service-fee").value = fmtN(p.service_fee); document.getElementById("modal-addl-service-fee").value = fmtN(p.addl_service_fee);
+    document.getElementById("modal-ssr-service-fee").value = fmtN(p.ssr_service_fee || 0);
+    document.getElementById("modal-gst-pct").value = Number(p.gst_pct).toFixed(2);
     document.getElementById("modal-supplier").value = p.supplier_name || "";
     document.getElementById("modal-office-id").value = p.office_id || "";
     document.getElementById("modal-fop").value = p.fop || "";
     updateCardNumberField(p.card_number || "");
     document.getElementById("modal-supp-comm-on").value = p.supp_comm_on || "";
     document.getElementById("modal-supp-comm-type").value = p.supp_comm_type || "";
-    document.getElementById("modal-supp-comm-value").value = (p.supp_comm_value || 0).toFixed(2);
-    document.getElementById("modal-supp-tds-per").value = (p.supp_tds_per || 0).toFixed(2);
-    document.getElementById("modal-supp-markup").value = (p.supp_markup || 0).toFixed(2);
-    document.getElementById("modal-supp-addl-markup").value = (p.supp_addl_markup || 0).toFixed(2);
-    document.getElementById("modal-supp-service-fee").value = (p.supp_service_fee || 0).toFixed(2);
-    document.getElementById("modal-supp-addl-service-fee").value = (p.supp_addl_service_fee || 0).toFixed(2);
-    document.getElementById("modal-supp-gst-pct").value = (p.supp_gst_pct || 0).toFixed(2);
+    document.getElementById("modal-supp-comm-value").value = Number(p.supp_comm_value || 0).toFixed(2);
+    document.getElementById("modal-supp-tds-per").value = Number(p.supp_tds_per || 0).toFixed(2);
+    document.getElementById("modal-supp-markup").value = fmtN(p.supp_markup || 0);
+    document.getElementById("modal-supp-addl-markup").value = fmtN(p.supp_addl_markup || 0);
+    document.getElementById("modal-supp-service-fee").value = fmtN(p.supp_service_fee || 0);
+    document.getElementById("modal-supp-addl-service-fee").value = fmtN(p.supp_addl_service_fee || 0);
+    document.getElementById("modal-supp-gst-pct").value = Number(p.supp_gst_pct || 0).toFixed(2);
     // Whatever's already saved counts as a deliberate choice - don't let a
     // later Client Accounting edit silently clobber it. Only a brand-new
     // (blank) passenger starts in "follow Client Accounting" mode.
@@ -901,14 +953,14 @@
     const box = document.getElementById("modal-sector-details");
     box.style.display = modalSectors.length ? "flex" : "none";
     box.innerHTML = modalSectors.map((s, i) => `
-      <div class="dom-sector-detail-row" data-idx="${i}" style="${viewMode ? "" : "cursor:pointer;"}" title="${viewMode ? "" : "Click to view/edit this sector"}">
+      <div class="dom-sector-detail-row" data-idx="${i}" style="cursor:pointer;" title="${viewMode ? "Click to view this sector" : "Click to view/edit this sector"}">
         <span class="dom-sector-detail-head">${s.from}-${s.to}</span>
         <input class="dom-input dsd-flight" value="${s.flightNo || ""}" disabled placeholder="Flight No" />
         <input class="dom-input dsd-class" value="${s.cls || ""}" disabled placeholder="Class" />
         <input class="dom-input dsd-date" value="${s.travelDate || ""}" disabled placeholder="Travel Date" />
       </div>`).join("");
     box.querySelectorAll(".dom-sector-detail-row").forEach((row) => {
-      row.addEventListener("click", () => { if (!viewMode) openSectorModal(Number(row.dataset.idx)); });
+      row.addEventListener("click", () => { openSectorModal(Number(row.dataset.idx)); });
     });
   }
   function renderSectorChips() {
@@ -919,14 +971,14 @@
       return;
     }
     box.innerHTML = modalSectors.map((s, i) => `
-      <span class="dom-sector-chip" data-idx="${i}">
+      <span class="dom-sector-chip" data-idx="${i}" style="cursor:pointer;" title="${viewMode ? "Click to view this sector" : "Click to view/edit this sector"}">
         <span class="dom-sector-chip-label">${s.from}-${s.to}</span>
         ${viewMode ? "" : `<button type="button" class="dom-chip-remove" data-idx="${i}" title="Remove">&times;</button>`}
       </span>`).join("");
     box.querySelectorAll(".dom-sector-chip").forEach((chip) => {
       chip.addEventListener("click", (e) => {
         if (e.target.classList.contains("dom-chip-remove")) return;
-        if (!viewMode) openSectorModal(Number(chip.dataset.idx));
+        openSectorModal(Number(chip.dataset.idx));
       });
     });
     box.querySelectorAll(".dom-chip-remove").forEach((btn) => {
@@ -952,8 +1004,19 @@
     document.getElementById("sector-cabin").value = s.cabin;
     document.getElementById("sector-class").value = s.cls;
     document.getElementById("sector-fare-type").value = s.fareType;
+
+    // Read-only when the ticket itself is being viewed, not edited -
+    // clicking a sector chip/detail row here should just let the user see
+    // its full breakdown, never let them change it outside Edit mode.
+    ["sector-from", "sector-to", "sector-airline-code", "sector-airline-name", "sector-flight-no", "sector-class", "sector-cabin", "sector-fare-type"]
+      .forEach((id) => { document.getElementById(id).disabled = viewMode; });
+    document.getElementById("sector-travel-date").querySelector(".dg-native").disabled = viewMode;
+    document.getElementById("sector-modal-title").textContent = viewMode ? "Sector Details" : (index === null ? "Add Sector" : "Edit Sector");
+    document.getElementById("sector-save-btn").style.display = viewMode ? "none" : "";
+    document.getElementById("sector-cancel-btn").textContent = viewMode ? "Close" : "Cancel";
+
     sectorModal.classList.add("open");
-    setTimeout(() => document.getElementById("sector-from").focus(), 50);
+    if (!viewMode) setTimeout(() => document.getElementById("sector-from").focus(), 50);
   }
   function closeSectorModal() { sectorModal.classList.remove("open"); editingSectorIndex = null; }
   document.getElementById("modal-sector-box").addEventListener("click", (e) => {
@@ -1028,10 +1091,37 @@
     writeModalPassenger(isNew ? blankPassenger() : passengers[index]);
     document.getElementById("modal-save-btn").style.display = viewMode ? "none" : "";
     document.getElementById("modal-sector-add-btn").style.display = viewMode ? "none" : "";
+    // Reschedule's tab bar replaces the plain titlebar entirely (it carries
+    // its own close X) rather than sitting awkwardly under it.
+    document.querySelector("#fare-breakdown-modal .dom-modal-titlebar").style.display = rescheduleMode ? "none" : "";
+    document.getElementById("reschedule-tab-bar").style.display = rescheduleMode ? "" : "none";
+    if (rescheduleMode) applyRescheduleTab("parent");
     fareModal.classList.add("open");
   }
+  // Switches the fare modal between the frozen original ticket line
+  // (Parent) and this brand new ticket's own blank/editable data
+  // (Reschedule) - covers the whole modal, both columns.
+  function applyRescheduleTab(tab) {
+    modalRescheduleTab = tab;
+    document.querySelectorAll("#fare-breakdown-modal input, #fare-breakdown-modal select").forEach((el) => (el.disabled = false));
+    const isParent = tab === "parent";
+    writeModalPassenger(isParent ? rescheduleParentPassenger : rescheduleEditPassenger);
+    if (isParent) {
+      document.querySelectorAll("#fare-breakdown-modal input, #fare-breakdown-modal select").forEach((el) => (el.disabled = true));
+    }
+    document.getElementById("modal-sector-add-btn").style.display = isParent ? "none" : "";
+    // visibility (not display) - keeps their row's height reserved on the
+    // Parent tab too, so switching tabs doesn't shrink/jump the modal.
+    document.getElementById("modal-cancel-btn").style.visibility = isParent ? "hidden" : "";
+    document.getElementById("modal-save-btn").style.visibility = isParent ? "hidden" : "";
+    document.querySelectorAll(".reschedule-tab-btn").forEach((btn) => btn.classList.toggle("active", btn.dataset.tab === tab));
+  }
+  document.querySelectorAll(".reschedule-tab-btn").forEach((btn) => {
+    btn.addEventListener("click", () => applyRescheduleTab(btn.dataset.tab));
+  });
   function closeFareModal() { fareModal.classList.remove("open"); }
   document.getElementById("modal-close-x-btn").addEventListener("click", closeFareModal);
+  document.getElementById("reschedule-tab-close-btn").addEventListener("click", closeFareModal);
   document.getElementById("modal-cancel-btn").addEventListener("click", closeFareModal);
 
   // Proceed is gated on the booking header being complete - these fields
@@ -1089,6 +1179,10 @@
     } else {
       passengers[editingIndex] = p;
     }
+    // Remembers what was just applied so the Reschedule tab shows these
+    // same values (not reset back to blank) next time this modal reopens -
+    // Save & Apply is only reachable from that tab anyway (Parent hides it).
+    if (rescheduleMode) rescheduleEditPassenger = p;
     closeFareModal();
     renderPaxTable();
   });
@@ -1108,30 +1202,41 @@
   function renderPaxTable() {
     const ccy = document.getElementById("currency").textContent || "INR";
     const atCap = passengers.length >= MAX_PASSENGERS;
+    // Reschedule locks the register to exactly the one carried-over
+    // passenger - no Remove, no adding more, so the whole Action column
+    // is pointless and hidden entirely.
+    const actionTh = document.getElementById("pax-action-th");
+    if (actionTh) actionTh.style.display = rescheduleMode ? "none" : "";
 
     const rowsHtml = passengers.map((p, i) => {
       const r = computeFareLine(p);
       const allTaxes = p.yr + p.tax_others + p.seat + p.meal + p.baggage + p.other_ssr + r.tds
         + p.markup + p.addl_markup + (p.ssr_markup || 0) + p.service_fee + p.addl_service_fee + (p.ssr_service_fee || 0) + r.gst - r.discount;
+      // A reschedule's fare figures aren't finalized yet - the carried-over
+      // amounts stay intact underneath (visible, frozen, inside the fare
+      // modal) but every amount shown out here on the register row reads
+      // 0.00 until this new ticket's own numbers are worked out.
+      const z = (v) => (rescheduleMode ? fmtN(0) : fmtN(v));
       return `<tr class="pax-row" data-idx="${i}" title="${viewMode ? "Double-click to view" : "Double-click to edit"}">
         <td style="text-align:center;">${i + 1}</td><td>${p.ticket_no}</td><td>${p.airline_name || p.airline_code || "-"}</td>
         <td>${p.card_number || "-"}</td>
         <td>${p.passenger_name} <span style="color:#94A3B8;">(${p.pax_type || "-"})</span></td>
-        <td class="num">${p.basic_fare.toFixed(2)}</td><td class="num">${p.yq.toFixed(2)}</td><td class="num">${p.k3_tax.toFixed(2)}</td>
-        <td class="num">${(p.seat + p.meal + p.baggage + p.other_ssr).toFixed(2)}</td>
-        <td class="num">${allTaxes.toFixed(2)}</td><td class="num" style="font-weight:700;">${r.total.toFixed(2)}</td>
-        <td style="text-align:center;">
+        <td class="num">${z(p.basic_fare)}</td><td class="num">${z(p.yq)}</td><td class="num">${z(p.k3_tax)}</td>
+        <td class="num">${z(p.seat + p.meal + p.baggage + p.other_ssr)}</td>
+        <td class="num">${z(allTaxes)}</td><td class="num" style="font-weight:700;">${z(r.total)}</td>
+        ${rescheduleMode ? "" : `<td style="text-align:center;">
           ${viewMode ? "" : `<button type="button" class="pax-circle-btn pax-circle-remove pax-remove-btn" data-idx="${i}" title="Remove passenger">REMOVE</button>`}
-        </td>
+        </td>`}
       </tr>`;
     }).join("");
 
-    // Trailing empty row - always present (unless in view mode or at the
-    // 9-passenger cap) with a round "+" to add the next passenger. This is
-    // the only place the "+" appears; once a passenger is added the row it
-    // came from turns into a normal data row above (its "+" is gone, only
-    // "-" remains) and this empty row shifts down for the next one.
-    const addRowHtml = (!viewMode && !atCap) ? `<tr class="pax-row pax-add-row">
+    // Trailing empty row - always present (unless in view mode, reschedule
+    // mode, or at the 9-passenger cap) with a round "+" to add the next
+    // passenger. This is the only place the "+" appears; once a passenger
+    // is added the row it came from turns into a normal data row above
+    // (its "+" is gone, only "-" remains) and this empty row shifts down
+    // for the next one.
+    const addRowHtml = (!viewMode && !rescheduleMode && !atCap) ? `<tr class="pax-row pax-add-row">
         <td colspan="11" style="text-align:center; padding:14px; font-size:11.5px;">
           ${passengers.length === 0
             ? 'No passengers added yet. Fill booking details above, then click <strong style="color:#3B6DB5;">ADD</strong> to add a passenger.'
@@ -1193,31 +1298,35 @@
       suppGst += rs.gst;
     });
     const purchaseTotal = basic + taxes + ssr - suppCommission + suppTds + suppMarkup + suppServiceFee + suppGst;
+    // Same reasoning as the register row above - a reschedule's Purchase/
+    // Sales Cost and Earnings aren't finalized yet, so this whole strip
+    // reads 0.00 rather than the carried-over ticket's real totals.
+    const z = (v) => (rescheduleMode ? fmtN(0) : fmtN(v));
 
-    document.getElementById("pc-basic").textContent = basic.toFixed(2);
-    document.getElementById("pc-taxes").textContent = taxes.toFixed(2);
-    document.getElementById("pc-ssr").textContent = ssr.toFixed(2);
-    document.getElementById("pc-disc").textContent = suppCommission.toFixed(2);
-    document.getElementById("pc-tds").textContent = suppTds.toFixed(2);
-    document.getElementById("pc-markup").textContent = suppMarkup.toFixed(2);
-    document.getElementById("pc-sfee").textContent = suppServiceFee.toFixed(2);
-    document.getElementById("pc-gst").textContent = suppGst.toFixed(2);
-    document.getElementById("pc-total").textContent = purchaseTotal.toFixed(2);
+    document.getElementById("pc-basic").textContent = z(basic);
+    document.getElementById("pc-taxes").textContent = z(taxes);
+    document.getElementById("pc-ssr").textContent = z(ssr);
+    document.getElementById("pc-disc").textContent = z(suppCommission);
+    document.getElementById("pc-tds").textContent = z(suppTds);
+    document.getElementById("pc-markup").textContent = z(suppMarkup);
+    document.getElementById("pc-sfee").textContent = z(suppServiceFee);
+    document.getElementById("pc-gst").textContent = z(suppGst);
+    document.getElementById("pc-total").textContent = z(purchaseTotal);
 
-    document.getElementById("sc-basic").textContent = basic.toFixed(2);
-    document.getElementById("sc-taxes").textContent = taxes.toFixed(2);
-    document.getElementById("sc-ssr").textContent = ssr.toFixed(2);
-    document.getElementById("sc-disc").textContent = discount.toFixed(2);
-    document.getElementById("sc-tds").textContent = tds.toFixed(2);
-    document.getElementById("sc-markup").textContent = markup.toFixed(2);
-    document.getElementById("sc-sfee").textContent = serviceFee.toFixed(2);
-    document.getElementById("sc-gst").textContent = gst.toFixed(2);
-    document.getElementById("sc-total").textContent = total.toFixed(2);
+    document.getElementById("sc-basic").textContent = z(basic);
+    document.getElementById("sc-taxes").textContent = z(taxes);
+    document.getElementById("sc-ssr").textContent = z(ssr);
+    document.getElementById("sc-disc").textContent = z(discount);
+    document.getElementById("sc-tds").textContent = z(tds);
+    document.getElementById("sc-markup").textContent = z(markup);
+    document.getElementById("sc-sfee").textContent = z(serviceFee);
+    document.getElementById("sc-gst").textContent = z(gst);
+    document.getElementById("sc-total").textContent = z(total);
 
     // Earnings = Sales Cost total - Purchase Cost total - Sales TDS - Sales
     // GST - Purchase TDS - Purchase GST.
     const earnings = total - purchaseTotal - tds - gst - suppTds - suppGst;
-    document.getElementById("invoice_total").textContent = earnings.toFixed(2);
+    document.getElementById("invoice_total").textContent = z(earnings);
   }
   document.getElementById("refresh-total-btn").addEventListener("click", recalcSummary);
 
@@ -1261,7 +1370,7 @@
   // open, every fare edit (see liveSyncSummary/renderPaxTable) re-requests
   // this so the JV stays in sync with whatever was last typed.
   // ============================================================
-  function renderJvPreview(jv) {
+  async function renderJvPreview(jv) {
     // Before the ticket is actually posted (draft preview), show the
     // Invoice Number as the stand-in Voucher No - a real voucher_no only
     // exists once Save Ticket auto-posts the JV.
@@ -1275,17 +1384,17 @@
       <tr style="border-bottom:1px solid #E2E8F0;">
         <td style="padding:5px 8px; text-align:center;">${i + 1}</td>
         <td style="padding:5px 8px;">${a.ledger_name || "-"}</td>
-        <td style="padding:5px 8px; text-align:right; font-family:var(--font-mono,monospace);">${a.debit ? a.debit.toFixed(2) : ""}</td>
-        <td style="padding:5px 8px; text-align:right; font-family:var(--font-mono,monospace);">${a.credit ? a.credit.toFixed(2) : ""}</td>
+        <td style="padding:5px 8px; text-align:right; font-family:var(--font-mono,monospace);">${a.debit ? fmtN(a.debit) : ""}</td>
+        <td style="padding:5px 8px; text-align:right; font-family:var(--font-mono,monospace);">${a.credit ? fmtN(a.credit) : ""}</td>
       </tr>`).join("");
-    document.getElementById("jv-total-debit").textContent = jv.total_debit.toFixed(2);
-    document.getElementById("jv-total-credit").textContent = jv.total_credit.toFixed(2);
+    document.getElementById("jv-total-debit").textContent = fmtN(jv.total_debit);
+    document.getElementById("jv-total-credit").textContent = fmtN(jv.total_credit);
     document.getElementById("jv-narration-text").textContent = jv.narration || "-";
     const verifyBox = jvModal.querySelector(".dom-modal-footer div[style*='color:#16A34A']");
     if (verifyBox) {
       const balanced = Math.abs(jv.total_debit - jv.total_credit) < 0.01;
       if (!balanced) {
-        verifyBox.innerHTML = `<span style="color:#DC2626;">X Unbalanced - Debit ${jv.total_debit.toFixed(2)} != Credit ${jv.total_credit.toFixed(2)}</span>`;
+        verifyBox.innerHTML = `<span style="color:#DC2626;">X Unbalanced - Debit ${fmtN(jv.total_debit)} != Credit ${fmtN(jv.total_credit)}</span>`;
       } else if (jv.posted) {
         verifyBox.innerHTML = `<span>OK Double-Entry Verification: Balanced (Posted ${jv.voucher_no})</span>`;
       } else {
@@ -1293,7 +1402,7 @@
       }
     }
     renderFopPaymentTab(jv);
-    renderPgReceiptsTab(jv);
+    await renderPgReceiptsTab(jv);
   }
 
   // Switches the J.V modal to the given tab (voucher/fop/pg) - shared by
@@ -1320,8 +1429,8 @@
       <tr style="border-bottom:1px solid #E2E8F0;">
         <td style="padding:5px 8px; text-align:center;">${i}</td>
         <td style="padding:5px 8px;">${ledgerName || "-"}</td>
-        <td style="padding:5px 8px; text-align:right; font-family:var(--font-mono,monospace);">${debit ? debit.toFixed(2) : ""}</td>
-        <td style="padding:5px 8px; text-align:right; font-family:var(--font-mono,monospace);">${credit ? credit.toFixed(2) : ""}</td>
+        <td style="padding:5px 8px; text-align:right; font-family:var(--font-mono,monospace);">${debit ? fmtN(debit) : ""}</td>
+        <td style="padding:5px 8px; text-align:right; font-family:var(--font-mono,monospace);">${credit ? fmtN(credit) : ""}</td>
       </tr>`;
   }
 
@@ -1364,14 +1473,14 @@
     const totalAmount = supplierRows.reduce((sum, a) => sum + (a.credit || 0), 0);
     const creditRowHtml = jvRowHtml(++i, creditLedgerName, 0, totalAmount);
     document.getElementById("jv-fop-table-body").innerHTML = debitRowsHtml + creditRowHtml;
-    document.getElementById("jv-fop-total-debit").textContent = totalAmount.toFixed(2);
-    document.getElementById("jv-fop-total-credit").textContent = totalAmount.toFixed(2);
+    document.getElementById("jv-fop-total-debit").textContent = fmtN(totalAmount);
+    document.getElementById("jv-fop-total-credit").textContent = fmtN(totalAmount);
   }
 
   // PG Receipts tab - only posts when Payment Mode = "Payment Gateway".
   // Amount is the same customer total already computed for the JV's
   // Customer row.
-  function renderPgReceiptsTab(jv) {
+  async function renderPgReceiptsTab(jv) {
     const table = document.getElementById("jv-tab-panel-pg").querySelector("table").parentElement;
     const empty = document.getElementById("jv-pg-empty");
     const paymentMode = document.getElementById("payment_mode").value;
@@ -1388,7 +1497,11 @@
     empty.style.display = "none";
 
     const gatewayRef = document.getElementById("payment_gateway_ref").value;
-    const gateway = pgMasterGateways.find((g) => g.gateway_name === gatewayRef);
+    // Resolved as of THIS ticket's own Booking Ref Date - see
+    // getPgEffective()/PGMasterHistory - so the preview matches exactly
+    // what the backend will actually post, even if the gateway's rate/
+    // ledger has since been edited with a later Effective From date.
+    const gateway = await getPgEffective(gatewayRef);
     const pgLedgerName = gateway ? (gateway.payment_master_ledger_name || gatewayRef) : (gatewayRef || "PG Platform");
 
     const creditAmount = customerRow.debit || 0;
@@ -1460,8 +1573,8 @@
       }
     }
     document.getElementById("jv-pg-table-body").innerHTML = rowsHtml;
-    document.getElementById("jv-pg-total-debit").textContent = totalDebit.toFixed(2);
-    document.getElementById("jv-pg-total-credit").textContent = totalCredit.toFixed(2);
+    document.getElementById("jv-pg-total-debit").textContent = fmtN(totalDebit);
+    document.getElementById("jv-pg-total-credit").textContent = fmtN(totalCredit);
   }
 
   // J.V modal tab strip - Journal Voucher / FOP Payment / PG Receipts.
@@ -1502,7 +1615,7 @@
       }
       const jv = await res.json();
       if (!res.ok) throw new Error(jv.error || "Could not compute JV.");
-      renderJvPreview(jv);
+      await renderJvPreview(jv);
     } catch (err) {
       document.getElementById("jv-table-body").innerHTML = `<tr><td colspan="4" style="padding:10px; color:#DC2626;">${err.message}</td></tr>`;
     }
@@ -1591,7 +1704,7 @@
         <td style="padding:4px 8px;">${r.gds_pnr || "-"}</td>
         <td style="padding:4px 8px;">${r.ticket_no || "-"}</td>
         <td style="padding:4px 8px;">${r.passenger_name || "-"}</td>
-        <td style="padding:4px 8px; text-align:right;">${(r.total_billed || 0).toFixed(2)}</td>
+        <td style="padding:4px 8px; text-align:right;">${fmtN(r.total_billed || 0)}</td>
       </tr>`).join("");
     document.querySelectorAll(".find-result-row").forEach((row) => {
       row.addEventListener("click", () => {
@@ -1650,7 +1763,7 @@
       cabin: l.cabin, travel_class: l.travel_class, fare_type: l.fare_type,
       basic_fare: l.basic_fare, yq: l.yq, yr: l.yr, k3_tax: l.k3_tax, tax_others: l.tax_others, seat: l.seat, meal: l.meal,
       baggage: l.baggage, other_ssr: l.other_ssr, disc_on: l.disc_on, disc_type: l.disc_type, disc_value: l.disc_value,
-      tds_per: l.tds_per, pg_charges: l.pg_charges || 0, markup: l.markup, addl_markup: l.addl_markup, ssr_markup: l.ssr_markup || 0, service_fee: l.service_fee,
+      tds_per: l.tds_per, pg_charges: l.pg_charges || 0, pg_charges_percentage: l.pg_charges_percentage != null ? l.pg_charges_percentage : 0, markup: l.markup, addl_markup: l.addl_markup, ssr_markup: l.ssr_markup || 0, service_fee: l.service_fee,
       addl_service_fee: l.addl_service_fee, ssr_service_fee: l.ssr_service_fee || 0, gst_pct: l.gst_pct,
       supplier_name: l.supplier_name, office_id: l.office_id, fop: l.fop, card_number: l.card_number || "",
       supp_comm_on: l.supp_comm_on, supp_comm_type: l.supp_comm_type,
@@ -1684,6 +1797,78 @@
     document.getElementById("edit-ticket-btn").style.display = "";
   }
 
+  // Pre-fills a brand-new ticket from an existing one's data, for the
+  // Reschedule flow (trans-airline-reschedule.html) - unlike enterViewMode,
+  // this leaves Invoice Number blank and defaults both dates to today (this
+  // is a new ticket being created, not the original being reopened), keeps
+  // every field editable, and only carries over the ONE passenger line the
+  // user picked on the reschedule screen rather than the whole ticket.
+  async function enterRescheduleMode(t, lineId) {
+    rescheduleMode = true;
+    document.getElementById("page-title").textContent = "Reschedule";
+    // These two fields now track the reschedule's own reference/date, not
+    // the original ticket's, so their labels say so.
+    document.getElementById("booking_reference_label").innerHTML = 'Rescheduled Ref<span class="dom-req">*</span>';
+    document.getElementById("booking_ref_date_label").innerHTML = 'Rescheduled Ref Date<span class="dom-req">*</span>';
+    document.getElementById("booking_reference").style.flex = "0 0 120px";
+    // Parent PNR carries the ORIGINAL ticket's Booking Reference forward
+    // for a visible trail back to it - Booking Reference itself is left
+    // blank so the user enters this reschedule's own new reference.
+    document.getElementById("parent-pnr-field").style.display = "";
+    document.getElementById("parent_pnr").textContent = t.booking_reference || "—";
+    document.getElementById("invoice_type").value = t.invoice_type || "";
+    document.getElementById("booking_mode").value = t.booking_mode || "";
+    document.getElementById("customer").value = t.customer_name || "";
+    document.getElementById("booking_reference").value = "";
+    document.getElementById("booking_given_by").value = t.booking_given_by || "";
+    document.getElementById("booking_type").value = t.booking_type || "";
+    // Frozen to Re-Scheduled regardless of the original ticket's own
+    // status - this new ticket only exists because of the reschedule.
+    document.getElementById("booking_status").value = "Re-Scheduled";
+    document.getElementById("booking_status").disabled = true;
+    document.getElementById("travel_type").value = t.travel_type || "";
+    document.getElementById("user_name").value = t.user_name || "";
+    // Payment Mode is left unset ("Select...") rather than copied from the
+    // original ticket - the reschedule may be settled through a different
+    // mode, so the user picks it fresh.
+    document.getElementById("payment_mode").value = "";
+    document.getElementById("payment_gateway_ref").value = "";
+    updateGatewayRefField();
+    document.getElementById("roe").value = t.roe;
+    document.getElementById("airline_pnr_header").value = t.airline_pnr || "";
+    document.getElementById("gds_pnr_header").value = t.gds_pnr || "";
+    document.getElementById("customer").dispatchEvent(new Event("input"));
+
+    const l = t.lines.find((ln) => String(ln.id) === String(lineId)) || t.lines[0];
+    if (l) {
+      // Parent PNR Details tab - the ORIGINAL ticket line, untouched, shown
+      // purely as a frozen reference (including its real FOP/Card Number,
+      // unlike the old behaviour that used to default FOP to Cash here).
+      rescheduleParentPassenger = {
+        airline_code: l.airline_code, airline_name: l.airline_name, airline_category: l.airline_category,
+        flight_no: l.flight_no, ticket_no: l.ticket_no,
+        passenger_name: l.passenger_name, pax_type: l.pax_type, sector: l.sector, travel_date: l.travel_date,
+        cabin: l.cabin, travel_class: l.travel_class, fare_type: l.fare_type,
+        basic_fare: l.basic_fare, yq: l.yq, yr: l.yr, k3_tax: l.k3_tax, tax_others: l.tax_others, seat: l.seat, meal: l.meal,
+        baggage: l.baggage, other_ssr: l.other_ssr, disc_on: l.disc_on, disc_type: l.disc_type, disc_value: l.disc_value,
+        tds_per: l.tds_per, pg_charges: l.pg_charges || 0, pg_charges_percentage: l.pg_charges_percentage != null ? l.pg_charges_percentage : 0, markup: l.markup, addl_markup: l.addl_markup, ssr_markup: l.ssr_markup || 0, service_fee: l.service_fee,
+        addl_service_fee: l.addl_service_fee, ssr_service_fee: l.ssr_service_fee || 0, gst_pct: l.gst_pct,
+        supplier_name: l.supplier_name, office_id: l.office_id, fop: l.fop, card_number: l.card_number || "",
+        supp_comm_on: l.supp_comm_on, supp_comm_type: l.supp_comm_type,
+        supp_comm_value: l.supp_comm_value, supp_tds_per: l.supp_tds_per,
+        supp_markup: l.supp_markup || 0, supp_addl_markup: l.supp_addl_markup || 0,
+        supp_service_fee: l.supp_service_fee || 0, supp_addl_service_fee: l.supp_addl_service_fee || 0,
+        supp_gst_pct: l.supp_gst_pct || 0,
+      };
+      // Reschedule PNR Details tab - this brand new ticket's own data,
+      // starts fully blank/0.00 (like any other new passenger) and IS what
+      // the register/Summary/save payload actually reflect until filled in.
+      passengers = [blankPassenger()];
+      rescheduleEditPassenger = passengers[0];
+    }
+    renderPaxTable();
+  }
+
   // Unlocks a loaded/saved ticket for editing - re-enables every header
   // field, brings back Save Ticket, and re-renders the passenger table so
   // rows show Edit/Del again instead of View-only. Save Ticket then hits
@@ -1696,6 +1881,11 @@
     document.getElementById("submit-btn").style.display = "";
     document.getElementById("edit-ticket-btn").style.display = "none";
     document.getElementById("cancel-link").textContent = "Discard";
+    // Discard from Edit mode must return to THIS ticket's own view state,
+    // not wherever cancel-link's href was left pointing from enterViewMode
+    // (document.referrer, or the "Back to Tickets" default) - re-loading
+    // this same ?id= is what actually discards the in-progress edits.
+    document.getElementById("cancel-link").setAttribute("href", `ticket-entry.html?id=${editId}`);
     renderPaxTable(); // recomputes proceed/add-line-btn visibility + Edit/Del per row now that viewMode is false
   });
 
@@ -1766,13 +1956,28 @@
     setDateGroupValue(document.getElementById("invoice_date"), todayDDMMYYYY());
     setDateGroupValue(document.getElementById("booking_ref_date"), todayDDMMYYYY());
   }
-  const active = await VoyagerShell.init({ activeKey: "tickets", onCompanyChange: (id, country) => { activeCompanyId = Number(id); activeCountry = country; populateRefs(activeCompanyId); } });
+  let active = null;
+  try {
+    active = await VoyagerShell.init({ activeKey: "tickets", onCompanyChange: (id, country) => { activeCompanyId = Number(id); activeCountry = country; VoyagerUtil.loadDecimalPlaces(activeCompanyId); populateRefs(activeCompanyId); } });
+  } catch (err) {
+    console.error("Shell init failed", err);
+  }
   if (active) {
     activeCompanyId = Number(active.id); activeCountry = active.country;
-    await populateRefs(activeCompanyId);
+    // Company Master's "No. of Decimals" - every fmtN() call below reads
+    // this, so it must resolve before the first render (blank register/
+    // Summary/modal) rather than racing it.
+    await VoyagerUtil.loadDecimalPlaces(activeCompanyId);
     if (editId) {
+      // Ticket fetch runs alongside populateRefs (not after it) - halves
+      // the wait before enterViewMode can start, since neither depends on
+      // the other; enterViewMode itself still only runs once both are
+      // done, since it needs populateRefs' dropdown options in place.
       try {
-        const res = await fetch(`${API_BASE}/tickets/${editId}/?company_id=${activeCompanyId}`);
+        const [, res] = await Promise.all([
+          populateRefs(activeCompanyId),
+          fetch(`${API_BASE}/tickets/${editId}/?company_id=${activeCompanyId}`),
+        ]);
         const ticket = await res.json();
         if (!res.ok) throw new Error(ticket.error || "Ticket not found.");
         await enterViewMode(ticket);
@@ -1780,11 +1985,26 @@
         voyagerAlert(err.message || "Could not load this ticket. Is the Django backend running?", { icon: "error" });
       }
     } else {
+      await populateRefs(activeCompanyId);
       try {
         const res = await fetch(`${API_BASE}/tickets/?company_id=${activeCompanyId}`);
         existingTickets = res.ok ? await res.json() : [];
       } catch (_) { existingTickets = []; }
-      renderPaxTable();
+      if (rescheduleTicketId) {
+        try {
+          const res = await fetch(`${API_BASE}/tickets/${rescheduleTicketId}/?company_id=${activeCompanyId}`);
+          const ticket = await res.json();
+          if (!res.ok) throw new Error(ticket.error || "Ticket not found.");
+          await enterRescheduleMode(ticket, rescheduleLineId);
+        } catch (err) {
+          voyagerAlert(err.message || "Could not load the original ticket for reschedule. Is the Django backend running?", { icon: "error" });
+          renderPaxTable();
+        }
+      } else {
+        renderPaxTable();
+      }
     }
+  } else {
+    voyagerAlert("Could not load the active company. Check your connection and reload the page.", { icon: "error" });
   }
 })();

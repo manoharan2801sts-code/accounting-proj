@@ -326,26 +326,33 @@
   btnCancel.addEventListener("click", resetForm);
 
   // Initialize Shell & Data
-  const active = await VoyagerShell.init({
-    activeKey: "fop-master",
-    onCompanyChange: async (id) => {
-      activeCompanyId = Number(id);
-      await loadLedgers();
-      if (getSelectedCardType()) {
-        await loadCardsForType();
-        resetForm();
-        renderGrid();
-      } else {
-        resetForm();
-        updateCardTypeView();
-      }
-    },
-  });
+  let active = null;
+  try {
+    active = await VoyagerShell.init({
+      activeKey: "fop-master",
+      onCompanyChange: async (id) => {
+        activeCompanyId = Number(id);
+        await loadLedgers();
+        if (getSelectedCardType()) {
+          await loadCardsForType();
+          resetForm();
+          renderGrid();
+        } else {
+          resetForm();
+          updateCardTypeView();
+        }
+      },
+    });
+  } catch (err) {
+    console.error("Shell init failed", err);
+  }
 
   if (active) {
     activeCompanyId = Number(active.id);
     await loadLedgers();
     cardTypeSelect.value = "";
     updateCardTypeView();
+  } else {
+    voyagerAlert("Could not load the active company. Check your connection and reload the page.", { icon: "error" });
   }
 })();

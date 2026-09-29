@@ -23,8 +23,8 @@
     document.getElementById("status").value = p.status;
     document.getElementById("policy_start").value = p.policy_start;
     document.getElementById("policy_end").value = p.policy_end;
-    document.getElementById("premium_cost").value = p.premium_cost;
-    document.getElementById("premium_billed").value = p.premium_billed;
+    document.getElementById("premium_cost").value = Number(p.premium_cost || 0).toFixed(2);
+    document.getElementById("premium_billed").value = Number(p.premium_billed || 0).toFixed(2);
   }
 
   if (!editId) {
@@ -55,10 +55,15 @@
     });
   });
 
-  const active = await VoyagerShell.init({
-    activeKey: "insurance",
-    onCompanyChange: (id) => { activeCompanyId = Number(id); populateRefs(activeCompanyId); },
-  });
+  let active = null;
+  try {
+    active = await VoyagerShell.init({
+      activeKey: "insurance",
+      onCompanyChange: (id) => { activeCompanyId = Number(id); populateRefs(activeCompanyId); },
+    });
+  } catch (err) {
+    console.error("Shell init failed", err);
+  }
   if (active) {
     activeCompanyId = Number(active.id);
     populateRefs(activeCompanyId);
@@ -66,5 +71,7 @@
       const p = await window.VoyagerAPI.get(`/travel/insurance/${editId}`);
       prefill(p);
     }
+  } else {
+    voyagerAlert("Could not load the active company. Check your connection and reload the page.", { icon: "error" });
   }
 })();

@@ -1613,13 +1613,17 @@ input.dom-input[type="number"], input.dom-input.dom-amount {
    that a field isn't currently applicable. */
 .dom-input:disabled, .dom-select:disabled {
   background: #F1F5F9 !important;
-  color: #94A3B8 !important;
+  color: #334155 !important;
+  font-weight: 600 !important;
+  -webkit-text-fill-color: #334155 !important;
+  opacity: 1 !important;
   border-color: #E2E8F0 !important;
   cursor: not-allowed;
 }
 [data-theme="dark"] .dom-input:disabled, [data-theme="dark"] .dom-select:disabled {
   background: #1E293B !important;
-  color: #64748B !important;
+  color: #CBD5E1 !important;
+  -webkit-text-fill-color: #CBD5E1 !important;
   border-color: #334155 !important;
 }
 .dom-input:focus, .dom-select:focus {
@@ -1848,6 +1852,8 @@ input.dom-input[type="number"], input.dom-input.dom-amount {
 }
 .dom-dtls-table {
   flex: 1;
+  width: 100%;
+  table-layout: fixed;
   border-collapse: collapse;
   font-size: 11px;
   background: #FFFFFF;
@@ -1869,6 +1875,7 @@ input.dom-input[type="number"], input.dom-input.dom-amount {
 }
 .dom-dtls-table th:first-child {
   text-align: left;
+  width: 130px;
 }
 .dom-dtls-table td {
   padding: 4px 8px;
@@ -2202,6 +2209,37 @@ input.dom-input[type="number"], input.dom-input.dom-amount {
   gap: 6px;
   min-width: 0;
 }
+.reschedule-tab-bar {
+  display: flex;
+  flex-shrink: 0;
+}
+.reschedule-tab-btn {
+  flex: 1;
+  padding: 8px 8px;
+  font-size: 12px;
+  font-weight: 700;
+  border: none;
+  border-right: 1px solid #CBD5E1;
+  background: #E2E8F0;
+  color: #334155;
+  cursor: pointer;
+}
+.reschedule-tab-btn.active {
+  background: var(--color-primary);
+  color: #FFFFFF;
+}
+.reschedule-tab-close-btn {
+  flex: 0 0 32px;
+  border: none;
+  background: var(--color-primary);
+  color: #FFFFFF;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+.reschedule-tab-close-btn:hover {
+  background: #EF4444;
+}
 .dom-modal-section-title {
   font-size: 11px;
   font-weight: 700;
@@ -2268,6 +2306,7 @@ input.dom-input[type="number"], input.dom-input.dom-amount {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 6px;
+  align-items: stretch;
 }
 .dom-acct-box {
   background: #FFFFFF;
