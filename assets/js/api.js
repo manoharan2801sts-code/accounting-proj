@@ -59,9 +59,11 @@
     }
 
     try {
-      // Abort controller with fast 2.5s timeout to prevent hanging on unreachable backends
+      // Generous timeout: on Render + TiDB Cloud a normal report takes 2-5s
+      // and a cold start (free plan waking from sleep) 30-50s. The old 2.5s
+      // limit aborted those real requests and silently showed mock data.
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 2500);
+      const timeoutId = setTimeout(() => controller.abort(), 90000);
 
       const res = await fetch(`${API_BASE}${path}`, {
         method,
@@ -80,8 +82,10 @@
       }
 
       if (!res.ok) {
-        // If backend route not found or error, fallback to mock data if available
-        if (window.VoyagerMock) {
+        // Only a route the backend doesn't have yet (404 - auth, hotels/visa
+        // etc.) falls back to mock data; a real server error must surface
+        // instead of being hidden behind fake numbers.
+        if (res.status === 404 && window.VoyagerMock) {
           const mockResult = window.VoyagerMock.handle(path, { method, body });
           if (method === "GET") apiCache.set(cacheKey, mockResult);
           else apiCache.clear();
@@ -101,8 +105,10 @@
       else apiCache.clear();
       return data;
     } catch (err) {
-      // Graceful instant fallback to mock data on network error or timeout
-      if (window.VoyagerMock) {
+      // Mock data on network error/timeout only for the standalone frontend
+      // (opened from disk, no backend) - against a real backend, show the
+      // error rather than fake data.
+      if (window.VoyagerMock && window.location.protocol === "file:") {
         const mockResult = window.VoyagerMock.handle(path, { method, body });
         if (method === "GET") apiCache.set(cacheKey, mockResult);
         else apiCache.clear();
