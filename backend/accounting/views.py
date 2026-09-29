@@ -668,6 +668,22 @@ def _pg_receipt_lines(ticket, lines, pg_cache=None):
     return result
 
 
+def _airline_mapping_cache(company_id):
+    """
+    Every Airline Master Mapping for this company, pre-loaded in exactly the
+    (masters_category, field_name) -> (ledger_id, ledger_name) shape
+    _compute_jv_lines' own mapped_ledger() caches, so callers processing
+    many tickets can pass it in and skip one query per mapping per ticket.
+    Unmapped fields still fall through to mapped_ledger()'s own lookup.
+    """
+    return {
+        (m.masters_category, m.field_name): (
+            (m.ledger_id, m.ledger.alias_name or m.ledger.name) if m.ledger else (m.ledger_id, m.field_name)
+        )
+        for m in MasterMapping.objects.filter(company_id=company_id, product_type="Airline").select_related("ledger")
+    }
+
+
 def _ledger_balance_deltas(company_id, as_of_date=None):
     """
     Net Debit-minus-Credit per ledger_id, accumulated from every posted
@@ -689,10 +705,7 @@ def _ledger_balance_deltas(company_id, as_of_date=None):
             add(line.get("ledger_id"), line.get("debit"), line.get("credit"))
 
     # Bulk pre-cache mappings, cards, gateways so we never hit DB in the ticket loop
-    mapping_cache = {
-        (m.masters_category, m.field_name): (m.ledger_id, m.ledger.alias_name or m.ledger.name if m.ledger else "")
-        for m in MasterMapping.objects.filter(company_id=company_id, product_type="Airline").select_related("ledger")
-    }
+    mapping_cache = _airline_mapping_cache(company_id)
     fop_cache = {
         card.card_number: card
         for card in FOPMaster.objects.filter(company_id=company_id)
@@ -771,6 +784,21 @@ def _ledger_transactions(company_id, ledger, from_date=None, to_date=None):
     company = CompanyMaster.objects.filter(id=company_id).first()
     txns = []
 
+    # Shared across every ticket below, same as _ledger_balance_deltas -
+    # without these, each ticket re-queried its Master Mapping ledgers,
+    # company state, FOP card, PG gateway and Journal Voucher separately
+    # (~20 queries per ticket), which took 30s+ against TiDB Cloud with
+    # only 8 tickets.
+    mapping_cache = _airline_mapping_cache(company_id)
+    company_state = ((company.state if company else "") or "").strip().lower()
+    fop_cache = {card.card_number: card for card in FOPMaster.objects.filter(company_id=company_id)}
+    pg_cache = {}
+    voucher_nos = {}
+    for source_ticket_id, voucher_no in JournalVoucher.objects.filter(
+        company_id=company_id, source_ticket__isnull=False
+    ).order_by("id").values_list("source_ticket_id", "voucher_no"):
+        voucher_nos.setdefault(source_ticket_id, voucher_no)
+
     for v in Voucher.objects.filter(company_id=company_id):
         if from_date and v.voucher_date and v.voucher_date.isoformat() < from_date:
             continue
@@ -792,20 +820,22 @@ def _ledger_transactions(company_id, ledger, from_date=None, to_date=None):
             "ticket_id": None,
         })
 
-    tickets = Ticket.objects.filter(company_id=company_id).select_related("customer", "supplier").prefetch_related("lines")
+    tickets = Ticket.objects.filter(company_id=company_id).select_related("customer", "supplier").prefetch_related(
+        Prefetch("lines", queryset=TicketLine.objects.select_related("supplier"))
+    )
     if from_date:
         tickets = tickets.filter(invoice_date__gte=from_date)
     if to_date:
         tickets = tickets.filter(invoice_date__lte=to_date)
     for t in tickets:
-        lines = list(t.lines.select_related("supplier").all())
+        lines = list(t.lines.all())
         if not lines:
             continue
-        accounts, _narration, _td, _tc = _compute_jv_lines(t, lines)
+        accounts, _narration, _td, _tc = _compute_jv_lines(t, lines, mapping_cache=mapping_cache, company_state=company_state)
         combined = list(accounts)
-        for lid, debit, credit in _fop_payment_lines(t, lines):
+        for lid, debit, credit in _fop_payment_lines(t, lines, fop_cache=fop_cache):
             combined.append({"ledger_id": lid, "ledger_name": ledger_names.get(lid, "-"), "debit": debit, "credit": credit})
-        for lid, debit, credit in _pg_receipt_lines(t, lines):
+        for lid, debit, credit in _pg_receipt_lines(t, lines, pg_cache=pg_cache):
             combined.append({"ledger_id": lid, "ledger_name": ledger_names.get(lid, "-"), "debit": debit, "credit": credit})
 
         mine = [a for a in combined if a.get("ledger_id") == ledger_id]
@@ -816,13 +846,13 @@ def _ledger_transactions(company_id, ledger, from_date=None, to_date=None):
         if debit == 0 and credit == 0:
             continue
         others = sorted({a.get("ledger_name") for a in combined if a.get("ledger_id") != ledger_id and a.get("ledger_name")})
-        voucher = JournalVoucher.objects.filter(source_ticket=t).first()
+        voucher_no = voucher_nos.get(t.id)
         airline_names = sorted({n.strip() for l in lines for n in (l.airline_name or "").split(",") if n.strip()})
         ticket_nos = sorted({l.ticket_no for l in lines if l.ticket_no})
         particulars = " - ".join(x for x in [", ".join(airline_names), t.office_id] if x) or "-"
         txns.append({
             "date": t.invoice_date.isoformat() if t.invoice_date else None,
-            "voucher_type": "Tax Invoice", "voucher_no": voucher.voucher_no if voucher else t.invoice_number,
+            "voucher_type": "Tax Invoice", "voucher_no": voucher_no if t.id in voucher_nos else t.invoice_number,
             "particulars": particulars,
             "s_pnr": t.booking_reference or "-", "air_pnr": t.airline_pnr or "-",
             "ticket_no": ", ".join(ticket_nos) or "-",
@@ -1222,13 +1252,22 @@ def dashboard_summary(request):
         b["sales"] += t_sales
         b["profit"] += t_earnings
 
+    # Computed once and shared by every tile below - _ledger_balance_deltas
+    # replays every ticket's postings, and was being re-run for each of
+    # the 6 cash/bank/receivable/payable/GST/TDS figures (plus a Ledger
+    # query per group each time), which made this page take ~17s on TiDB.
+    deltas = _ledger_balance_deltas(company_id)
+    all_groups = list(LedgerGroup.objects.filter(company_id=company_id))
+    ledgers_by_group = {}
+    for l in Ledger.objects.filter(company_id=company_id):
+        ledgers_by_group.setdefault(l.group_id, []).append(l)
+
     def group_net_balance(group_names):
-        deltas = _ledger_balance_deltas(company_id)
         keys = {_normalize_group_name(n) for n in group_names}
-        groups = [g for g in LedgerGroup.objects.filter(company_id=company_id) if _normalize_group_name(g.name) in keys]
+        groups = [g for g in all_groups if _normalize_group_name(g.name) in keys]
         total = 0.0
         for g in groups:
-            for l in Ledger.objects.filter(company_id=company_id, group_id=g.id):
+            for l in ledgers_by_group.get(g.id, []):
                 total += float(l.signed_balance) + deltas.get(l.id, 0.0)
         return total
 
@@ -1238,11 +1277,12 @@ def dashboard_summary(request):
     payables = max(0.0, -group_net_balance(["Sundry Creditors"]))
 
     def duties_taxes_total(keyword):
-        deltas = _ledger_balance_deltas(company_id)
-        groups = [g for g in LedgerGroup.objects.filter(company_id=company_id) if _normalize_group_name(g.name) == _normalize_group_name("Duties & Taxes")]
+        groups = [g for g in all_groups if _normalize_group_name(g.name) == _normalize_group_name("Duties & Taxes")]
         total = 0.0
         for g in groups:
-            for l in Ledger.objects.filter(company_id=company_id, group_id=g.id, name__icontains=keyword):
+            for l in ledgers_by_group.get(g.id, []):
+                if keyword.lower() not in l.name.lower():
+                    continue
                 total += float(l.signed_balance) + deltas.get(l.id, 0.0)
         return max(0.0, -total)
 
