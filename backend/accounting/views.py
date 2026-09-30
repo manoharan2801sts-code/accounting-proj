@@ -624,12 +624,10 @@ def _pg_receipt_lines(ticket, lines, pg_cache=None):
 
     The gateway ledger's own Debit = Total Billed (compute_total(), same
     figure as the Customer credit — includes Sup Markup/Sup Addl
-    Markup/Sup Service Fee/Sup Addl Service Fee/Sup GST Amount) + PG GST
-    (PG Charges * that gateway's PG Charges Master ledger's own GST% —
-    display-only elsewhere, not part of GST Amount/computed_gst, but
-    included here in the gateway's own Debit total). PG Charges itself is
-    NOT added here - it gets its own balanced pair just below instead, so
-    adding it to this gross debit too would double-count it.
+    Markup/Sup Service Fee/Sup Addl Service Fee/Sup GST Amount) + PG
+    Charges + PG GST (PG Charges * that gateway's PG Charges Master
+    ledger's own GST% — display-only elsewhere, not part of GST Amount/
+    computed_gst, but included here in the gateway's own Debit total).
 
     PG Charges are then ALSO debited against that gateway's PG Master ->
     PG Charges Master ledger and credited back against the gateway
@@ -653,14 +651,12 @@ def _pg_receipt_lines(ticket, lines, pg_cache=None):
         pg_gst_pct = snapshot["pg_charges_master_ledger_gst_percentage"]
         pg_gst_total = round(pg_charges_total * pg_gst_pct / 100, 2)
 
-        # NOT + pg_charges_total here - that amount already gets its own
-        # balanced pair below (debit the PG Charges Master ledger, credit
-        # this same gateway ledger back down by it), so folding it into
-        # the gateway's own gross debit too would double-count it: the
-        # gateway would be debited pg_charges_total twice (once here, once
-        # implicitly via the pair) against only one matching credit,
-        # unbalancing the whole JV by exactly pg_charges_total.
-        gateway_debit_total = round(customer_total + pg_gst_total, 2)
+        # Includes pg_charges_total, as in the 30-Sep local build (the user
+        # chose to match it on 2026-09-30). Note this does not balance on
+        # its own: the pair below also debits pg_charges_total, so each PG
+        # ticket's postings come out debit-heavy by its PG Charges and the
+        # Trial Balance differs by the total PG Charges.
+        gateway_debit_total = round(customer_total + pg_charges_total + pg_gst_total, 2)
         result.append((snapshot["payment_master_ledger_id"], gateway_debit_total, 0))
         if pg_charges_total and snapshot["pg_charges_master_ledger_id"]:
             result.append((snapshot["pg_charges_master_ledger_id"], pg_charges_total, 0))
@@ -756,6 +752,12 @@ def accounts_list(request):
     used_ids = set(Ticket.objects.filter(company_id=company_id).values_list("customer_id", flat=True)) | \
                set(Ticket.objects.filter(company_id=company_id).values_list("supplier_id", flat=True))
 
+    # Balance = opening balance + every posted transaction (tickets' JV/FOP/
+    # PG postings + manual vouchers), same as the local build's Chart of
+    # Accounts. Was opening-only for a while to dodge Render timeouts;
+    # _ledger_balance_deltas' shared caches make it cheap enough now.
+    deltas = _ledger_balance_deltas(company_id)
+
     for l in Ledger.objects.filter(company_id=company_id).select_related("group"):
         in_use = l.id in used_ids
         group_code = l.group.code if l.group else ""
@@ -764,7 +766,7 @@ def accounts_list(request):
             "id": l.id, "code": group_code or "", "name": l.name,
             "account_type": l.account_type, "is_group": False,
             "parent_id": parent_id,
-            "balance": float(l.signed_balance),
+            "balance": float(l.signed_balance) + deltas.get(l.id, 0.0),
             "is_in_use": in_use,
         })
     return JsonResponse(rows, safe=False)
@@ -1678,15 +1680,13 @@ def _compute_jv_lines(ticket, lines, mapping_cache=None, company_state=None):
                 output_gst_emitted = True
                 combined_gst = round(role_amounts["gst"] + role_amounts["supp_gst"], 2)
                 if same_state:
-                    # Split combined_gst into two rows that always sum back to
-                    # it exactly - rounding both halves independently
-                    # (combined_gst / 2, twice) drops or adds a stray paisa
-                    # whenever combined_gst has an odd number of paisa,
-                    # unbalancing the whole JV by 0.01.
-                    cgst = round(combined_gst / 2, 2)
-                    sgst = round(combined_gst - cgst, 2)
-                    accounts.append(mapped_row("Credit", "GST and TDS", "Output CGST A/c", cgst))
-                    accounts.append(mapped_row("Credit", "GST and TDS", "Output SGST A/c", sgst))
+                    # Each half rounded on its own, as in the 30-Sep local
+                    # build (the user chose to match it on 2026-09-30). When
+                    # combined_gst has an odd number of paisa, CGST + SGST
+                    # come out 0.01 above it and the JV is off by 0.01.
+                    half = round(combined_gst / 2, 2)
+                    accounts.append(mapped_row("Credit", "GST and TDS", "Output CGST A/c", half))
+                    accounts.append(mapped_row("Credit", "GST and TDS", "Output SGST A/c", half))
                 else:
                     accounts.append(mapped_row("Credit", "GST and TDS", "Output IGST A/c", combined_gst))
             continue
