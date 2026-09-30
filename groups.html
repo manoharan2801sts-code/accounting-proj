@@ -15,7 +15,6 @@
   .grp-row:last-child { border-bottom:none; }
   .grp-row:hover:not(.header) { background:var(--color-bg-subtle); }
   .grp-row.header { background:var(--color-bg-subtle); color:var(--color-text-dark); font-weight:700; border-top:1px solid var(--color-border-subtle); }
-  .grp-code { width:85px; font-family:var(--font-mono); font-size:0.75rem; color:var(--color-text-muted); }
   .grp-name { flex:1; color:var(--color-text-dark); }
   .grp-badge-wrap { width:90px; }
   .grp-actions { width:110px; text-align:right; display:flex; gap:0.3rem; justify-content:flex-end; }
@@ -24,17 +23,38 @@
   .grp-actions button:disabled { opacity:0.35; cursor:not-allowed; }
   .grp-actions button:disabled:hover { border-color:var(--color-border); color:inherit; background:var(--color-white); }
   #group-form-panel { display:none; }
+  /* Page itself never scrolls - title, button, form and the table's header
+     row stay put; only the groups list scrolls inside the table. */
+  html, body { height:100%; overflow:hidden; margin:0; }
+  .app-main.grp-main {
+    display:flex; flex-direction:column;
+    height:calc(100vh - var(--topnav-height) - var(--menubar-height, 0px));
+  }
+  .grp-main > * { flex-shrink:0; }
+  /* Sits higher on the page: tighter top padding and gaps above the table. */
+  .app-main.grp-main { padding-top:6px; }
+  /* Title + description on the left, + New Group on the right, one line -
+     no separate button row (and its gap) above the table. */
+  .grp-head { display:flex; align-items:center; justify-content:space-between; gap:1rem; }
+  .grp-head h1 { margin:0; }
+  .grp-head p.text-muted-custom { margin:0.15rem 0 0; }
+  .grp-head #new-group-btn { flex-shrink:0; white-space:nowrap; }
+  .grp-main > .grp-table-card { margin-top:0.5rem !important; }
+  .grp-main > .grp-table-card { flex:1; min-height:0; display:flex; flex-direction:column; }
+  .grp-table-card > .grp-row.header { flex-shrink:0; }
+  .grp-table-card > #groups-body { flex:1; min-height:0; overflow-y:auto; }
 </style>
 </head><body>
 <script src="assets/js/loader.js?v=2"></script>
 <header class="app-topnav" id="shell-topnav"></header>
 <div class="app-body">
   <aside class="app-sidebar" id="shell-sidebar"></aside>
-  <main class="app-main">
-    <h1 style="font-size:1.15rem;">Account Groups</h1>
-    <p class="text-muted-custom">The 23 standard groups (plus the 4 top-level natures) are system-protected and cannot be edited or deleted. Add your own groups underneath them as needed.</p>
-
-    <div style="text-align:right; margin-top:0.8rem;">
+  <main class="app-main grp-main">
+    <div class="grp-head">
+      <div>
+        <h1 style="font-size:1.15rem;">Account Groups</h1>
+        <p class="text-muted-custom">The 23 standard groups (plus the 4 top-level natures) are system-protected and cannot be edited or deleted. Add your own groups underneath them as needed.</p>
+      </div>
       <button class="btn-brand" id="new-group-btn" style="padding:0.5rem 1rem; font-size:0.85rem;">+ New Group</button>
     </div>
 
@@ -51,9 +71,9 @@
       </div>
     </form>
 
-    <div class="card-glass" style="margin-top:0.7rem; overflow:hidden;">
+    <div class="card-glass grp-table-card" style="margin-top:0.7rem; overflow:hidden;">
       <div class="grp-row header">
-        <div class="grp-code">Code</div><div class="grp-name">Group Name</div>
+        <div class="grp-name">Group Name</div>
         <div class="grp-badge-wrap">Origin</div><div class="grp-actions">Actions</div>
       </div>
       <div id="groups-body"></div>

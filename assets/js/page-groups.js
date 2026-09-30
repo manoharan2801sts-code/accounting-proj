@@ -71,7 +71,6 @@
         const title = g.is_master ? 'title="System group - cannot be modified"' : "";
         return `
           <div class="grp-row">
-            <div class="grp-code">${g.code}</div>
             <div class="grp-name drillable" style="padding-left:${indent}px;" data-id="${g.id}" ${title}>${g.name}</div>
             <div class="grp-badge-wrap">${badge}</div>
             <div class="grp-actions">
