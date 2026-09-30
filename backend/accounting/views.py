@@ -17,7 +17,7 @@ from django.forms.models import model_to_dict
 from django.db import transaction, IntegrityError
 from django.db.models import ProtectedError, Q, Prefetch
 
-from .models import LedgerGroup, Ledger, Ticket, TicketLine, Voucher, JournalVoucher, VoucherType, SupplierCommissionRule, MasterMapping, FOPMaster, PGMaster, PGMasterHistory, CompanyMaster, clear_gst_pct_cache
+from .models import LedgerGroup, Ledger, Ticket, TicketLine, Voucher, JournalVoucher, VoucherType, SupplierCommissionRule, MasterMapping, FOPMaster, PGMaster, PGMasterHistory, CompanyMaster, RescheduleAirlineTicket, RescheduleAirlineTicketLine, clear_gst_pct_cache
 from .jv_hardcode import JV_LINE_MAP
 
 
@@ -559,7 +559,7 @@ def _pg_master_effective_snapshot(company_id, gateway_name, as_of_date, cache=No
     """
     Resolves the PG Master ledger mapping + PG Charges Percentage that was
     actually in force for `gateway_name` on `as_of_date` (a ticket's own
-    Booking Ref Date) - the latest PGMasterHistory row whose effective_from
+    Invoice Date) - the latest PGMasterHistory row whose effective_from
     is on or before that date, falling back to the gateway's live PGMaster
     row when no history snapshot qualifies (tickets booked before any
     Effective From date was ever recorded for this gateway).
@@ -645,9 +645,9 @@ def _pg_receipt_lines(ticket, lines, pg_cache=None):
     if customer_total == 0:
         return []
     result = [(ticket.customer_id, 0, customer_total)]
-    # Resolved as of this ticket's own Booking Ref Date (see
+    # Resolved as of this ticket's own Invoice Date (see
     # _pg_master_effective_snapshot), not the gateway's current row.
-    snapshot = _pg_master_effective_snapshot(ticket.company_id, ticket.payment_gateway_ref or "", ticket.booking_ref_date or ticket.invoice_date, cache=pg_cache)
+    snapshot = _pg_master_effective_snapshot(ticket.company_id, ticket.payment_gateway_ref or "", ticket.invoice_date or ticket.booking_ref_date, cache=pg_cache)
     if snapshot:
         pg_charges_total = round(sum(float(l.pg_charges or 0) for l in lines), 2)
         pg_gst_pct = snapshot["pg_charges_master_ledger_gst_percentage"]
@@ -2063,11 +2063,14 @@ def tickets_list(request):
             "addl_service_fee": float(l.addl_service_fee), "ssr_service_fee": float(l.ssr_service_fee), "gst_pct": float(l.gst_pct),
             "supp_comm_on": l.supp_comm_on, "supp_comm_type": l.supp_comm_type,
             "supp_comm_value": float(l.supp_comm_value), "supp_tds_per": float(l.supp_tds_per),
+            "supp_markup": float(l.supp_markup), "supp_addl_markup": float(l.supp_addl_markup),
+            "supp_service_fee": float(l.supp_service_fee), "supp_addl_service_fee": float(l.supp_addl_service_fee),
             # Server-computed (Discount/TDS follow disc_type/disc_value/
             # tds_per; GST follows each fee field's own Master Mapping
             # ledger GST%) - report-dsr-airline-booking.html's Other Tax
             # column needs these exact figures, not a client-side re-guess.
             "computed_discount": float(l.computed_discount), "computed_tds": float(l.computed_tds), "computed_gst": float(l.computed_gst),
+            "computed_supp_gst": float(l.computed_supp_gst),
         })
     return JsonResponse(rows, safe=False)
 
@@ -2140,6 +2143,352 @@ def ticket_lookup_for_reschedule(request):
         # pre-select that exact passenger instead of just the first row.
         "matched_line_id": matched_line_id,
         "passengers": passengers,
+    })
+
+
+RESCHED_LINE_FIELDS = TICKET_LINE_FIELDS + ["agent_penalty", "supplier_penalty"]
+RESCHED_LINE_NUMERIC_FIELDS = TICKET_LINE_NUMERIC_FIELDS | {"agent_penalty", "supplier_penalty"}
+
+
+@csrf_exempt
+@transaction.atomic
+def reschedule_ticket_create(request):
+    """
+    POST /api/reschedule-tickets/create/
+    Body: { company_id, original_ticket_id, ...header fields (same shape
+    as tickets/create/'s TICKET_HEADER_FIELDS), customer_name,
+    supplier_name, lines: [ {...TICKET_LINE_FIELDS, agent_penalty,
+    supplier_penalty, original_ticket_line_id}, ... ] }
+
+    Persists the brand-new "Reschedule PNR Details" ticket + its lines
+    into RescheduleAirlineTicket/RescheduleAirlineTicketLine — the
+    original ticket/line ("Parent PNR Details") is never touched, only
+    linked via original_ticket / original_ticket_line. No JV is posted
+    here (unlike ticket_create) — that mapping/GL work is out of scope
+    for this endpoint.
+    """
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+
+    try:
+        body = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON body"}, status=400)
+
+    company_id = body.get("company_id")
+    original_ticket_id = body.get("original_ticket_id")
+    lines_in = body.get("lines") or []
+    if not company_id or not original_ticket_id or not body.get("customer_name") or not body.get("invoice_number") or not body.get("booking_reference") or not lines_in:
+        return JsonResponse({"error": "company_id, original_ticket_id, customer_name, invoice_number, booking_reference and at least one line are required."}, status=400)
+
+    try:
+        original_ticket = Ticket.objects.get(id=original_ticket_id, company_id=company_id)
+    except Ticket.DoesNotExist:
+        return JsonResponse({"error": "Original ticket not found."}, status=404)
+
+    missing_required = [
+        label for key, label in
+        [("invoice_type", "Invoice Type"), ("booking_type", "Booking Type"), ("booking_status", "Booking Status")]
+        if not body.get(key)
+    ]
+    if missing_required:
+        verb = "is" if len(missing_required) == 1 else "are"
+        return JsonResponse({"error": f"{', '.join(missing_required)} {verb} required."}, status=400)
+
+    try:
+        customer = Ledger.objects.get(company_id=company_id, name=body["customer_name"], ledger_category="DEBTOR")
+    except Ledger.DoesNotExist:
+        return JsonResponse({"error": f"\"{body['customer_name']}\" is not a real customer ledger (Sundry Debtors)."}, status=400)
+
+    supplier = None
+    if body.get("supplier_name"):
+        try:
+            supplier = Ledger.objects.get(company_id=company_id, name=body["supplier_name"], ledger_category="CREDITOR")
+        except Ledger.DoesNotExist:
+            return JsonResponse({"error": f"\"{body['supplier_name']}\" is not a real supplier ledger (Sundry Creditors)."}, status=400)
+
+    if Ticket.objects.filter(company_id=company_id, invoice_number=body["invoice_number"]).exists() \
+            or RescheduleAirlineTicket.objects.filter(company_id=company_id, invoice_number=body["invoice_number"]).exists():
+        return JsonResponse({"error": f"Invoice Number \"{body['invoice_number']}\" already exists."}, status=409)
+    if Ticket.objects.filter(company_id=company_id, booking_reference=body["booking_reference"]).exists() \
+            or RescheduleAirlineTicket.objects.filter(company_id=company_id, booking_reference=body["booking_reference"]).exists():
+        return JsonResponse({"error": f"Rescheduled Ref \"{body['booking_reference']}\" already exists."}, status=409)
+
+    ticket_nos = [l.get("ticket_no") for l in lines_in]
+    if len(ticket_nos) != len(set(ticket_nos)):
+        return JsonResponse({"error": "Duplicate Ticket Number within this submission."}, status=409)
+    dup = TicketLine.objects.filter(ticket_no__in=ticket_nos).first() \
+        or RescheduleAirlineTicketLine.objects.filter(ticket_no__in=ticket_nos).first()
+    if dup:
+        return JsonResponse({"error": f"Ticket Number \"{dup.ticket_no}\" already exists."}, status=409)
+
+    line_original_ids = [l.get("original_ticket_line_id") for l in lines_in]
+    if not all(line_original_ids):
+        return JsonResponse({"error": "Each line must reference the original ticket line it was rescheduled from."}, status=400)
+    original_lines = {l.id: l for l in TicketLine.objects.filter(id__in=line_original_ids, ticket_id=original_ticket_id)}
+    missing_original = [oid for oid in line_original_ids if oid not in original_lines]
+    if missing_original:
+        return JsonResponse({"error": "One or more lines reference an original ticket line that doesn't belong to this ticket."}, status=400)
+
+    header_kwargs = {f: body[f] for f in TICKET_HEADER_FIELDS if f in body}
+    header_kwargs["invoice_date"] = _parse_date(header_kwargs.get("invoice_date"))
+    header_kwargs["booking_ref_date"] = _parse_date(header_kwargs.get("booking_ref_date"))
+    if "roe" in header_kwargs:
+        header_kwargs["roe"] = _safe_decimal(header_kwargs["roe"], default=1)
+
+    resched_ticket = RescheduleAirlineTicket.objects.create(
+        company_id=company_id, original_ticket=original_ticket, customer=customer, supplier=supplier, **header_kwargs
+    )
+
+    created_lines = []
+    for line_in in lines_in:
+        line_kwargs = {f: line_in[f] for f in RESCHED_LINE_FIELDS if f in line_in}
+        for f in RESCHED_LINE_NUMERIC_FIELDS:
+            if f in line_kwargs:
+                line_kwargs[f] = _safe_decimal(line_kwargs[f])
+
+        line_supplier = None
+        if line_in.get("supplier_name"):
+            try:
+                line_supplier = Ledger.objects.get(company_id=company_id, name=line_in["supplier_name"], ledger_category="CREDITOR")
+            except Ledger.DoesNotExist:
+                transaction.set_rollback(True)
+                return JsonResponse({
+                    "error": f"\"{line_in['supplier_name']}\" (Ticket No. {line_in.get('ticket_no', '?')}) is not a real supplier ledger (Sundry Creditors)."
+                }, status=400)
+
+        line = RescheduleAirlineTicketLine(
+            reschedule_ticket=resched_ticket,
+            original_ticket_line=original_lines[line_in["original_ticket_line_id"]],
+            supplier=line_supplier, **line_kwargs,
+        )
+        line.total_billed = _safe_decimal(line.compute_total())
+        line.save()
+        created_lines.append(line.id)
+
+    return JsonResponse({
+        "id": resched_ticket.id, "line_ids": created_lines,
+        "message": f"Reschedule ticket saved — {len(created_lines)} passenger line(s).",
+    }, status=201)
+
+
+@csrf_exempt
+@transaction.atomic
+def reschedule_ticket_update(request, reschedule_ticket_id):
+    """
+    POST /api/reschedule-tickets/<id>/update/
+    Body: same shape as reschedule-tickets/create/. Used when the
+    Reschedule lookup screen's "Saved" radio finds an already-saved
+    RescheduleAirlineTicket and the user edits/re-saves it from
+    ticket-entry.html. original_ticket is NEVER changed by this endpoint
+    (whatever the body sends for original_ticket_id is ignored) - which
+    original ticket a reschedule was raised against is fixed at creation.
+    Replaces this reschedule ticket's lines wholesale (delete + recreate),
+    same convention as ticket_update.
+    """
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+
+    try:
+        body = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON body"}, status=400)
+
+    company_id = body.get("company_id")
+    lines_in = body.get("lines") or []
+    if not company_id or not body.get("customer_name") or not body.get("invoice_number") or not body.get("booking_reference") or not lines_in:
+        return JsonResponse({"error": "company_id, customer_name, invoice_number, booking_reference and at least one line are required."}, status=400)
+
+    try:
+        resched_ticket = RescheduleAirlineTicket.objects.get(id=reschedule_ticket_id, company_id=company_id)
+    except RescheduleAirlineTicket.DoesNotExist:
+        return JsonResponse({"error": "Reschedule ticket not found."}, status=404)
+
+    missing_required = [
+        label for key, label in
+        [("invoice_type", "Invoice Type"), ("booking_type", "Booking Type"), ("booking_status", "Booking Status")]
+        if not body.get(key)
+    ]
+    if missing_required:
+        verb = "is" if len(missing_required) == 1 else "are"
+        return JsonResponse({"error": f"{', '.join(missing_required)} {verb} required."}, status=400)
+
+    try:
+        customer = Ledger.objects.get(company_id=company_id, name=body["customer_name"], ledger_category="DEBTOR")
+    except Ledger.DoesNotExist:
+        return JsonResponse({"error": f"\"{body['customer_name']}\" is not a real customer ledger (Sundry Debtors)."}, status=400)
+
+    supplier = None
+    if body.get("supplier_name"):
+        try:
+            supplier = Ledger.objects.get(company_id=company_id, name=body["supplier_name"], ledger_category="CREDITOR")
+        except Ledger.DoesNotExist:
+            return JsonResponse({"error": f"\"{body['supplier_name']}\" is not a real supplier ledger (Sundry Creditors)."}, status=400)
+
+    if Ticket.objects.filter(company_id=company_id, invoice_number=body["invoice_number"]).exists() \
+            or RescheduleAirlineTicket.objects.filter(company_id=company_id, invoice_number=body["invoice_number"]).exclude(id=resched_ticket.id).exists():
+        return JsonResponse({"error": f"Invoice Number \"{body['invoice_number']}\" already exists."}, status=409)
+    if Ticket.objects.filter(company_id=company_id, booking_reference=body["booking_reference"]).exists() \
+            or RescheduleAirlineTicket.objects.filter(company_id=company_id, booking_reference=body["booking_reference"]).exclude(id=resched_ticket.id).exists():
+        return JsonResponse({"error": f"Rescheduled Ref \"{body['booking_reference']}\" already exists."}, status=409)
+
+    ticket_nos = [l.get("ticket_no") for l in lines_in]
+    if len(ticket_nos) != len(set(ticket_nos)):
+        return JsonResponse({"error": "Duplicate Ticket Number within this submission."}, status=409)
+    dup = TicketLine.objects.filter(ticket_no__in=ticket_nos).first() \
+        or RescheduleAirlineTicketLine.objects.filter(ticket_no__in=ticket_nos).exclude(reschedule_ticket_id=resched_ticket.id).first()
+    if dup:
+        return JsonResponse({"error": f"Ticket Number \"{dup.ticket_no}\" already exists."}, status=409)
+
+    line_original_ids = [l.get("original_ticket_line_id") for l in lines_in]
+    if not all(line_original_ids):
+        return JsonResponse({"error": "Each line must reference the original ticket line it was rescheduled from."}, status=400)
+    original_lines = {l.id: l for l in TicketLine.objects.filter(id__in=line_original_ids, ticket_id=resched_ticket.original_ticket_id)}
+    missing_original = [oid for oid in line_original_ids if oid not in original_lines]
+    if missing_original:
+        return JsonResponse({"error": "One or more lines reference an original ticket line that doesn't belong to this ticket."}, status=400)
+
+    header_kwargs = {f: body[f] for f in TICKET_HEADER_FIELDS if f in body}
+    header_kwargs["invoice_date"] = _parse_date(header_kwargs.get("invoice_date"))
+    header_kwargs["booking_ref_date"] = _parse_date(header_kwargs.get("booking_ref_date"))
+    if "roe" in header_kwargs:
+        header_kwargs["roe"] = _safe_decimal(header_kwargs["roe"], default=1)
+
+    resched_ticket.customer = customer
+    resched_ticket.supplier = supplier
+    for f, v in header_kwargs.items():
+        setattr(resched_ticket, f, v)
+    resched_ticket.save()
+
+    resched_ticket.lines.all().delete()
+    updated_lines = []
+    for line_in in lines_in:
+        line_kwargs = {f: line_in[f] for f in RESCHED_LINE_FIELDS if f in line_in}
+        for f in RESCHED_LINE_NUMERIC_FIELDS:
+            if f in line_kwargs:
+                line_kwargs[f] = _safe_decimal(line_kwargs[f])
+
+        line_supplier = None
+        if line_in.get("supplier_name"):
+            try:
+                line_supplier = Ledger.objects.get(company_id=company_id, name=line_in["supplier_name"], ledger_category="CREDITOR")
+            except Ledger.DoesNotExist:
+                transaction.set_rollback(True)
+                return JsonResponse({
+                    "error": f"\"{line_in['supplier_name']}\" (Ticket No. {line_in.get('ticket_no', '?')}) is not a real supplier ledger (Sundry Creditors)."
+                }, status=400)
+
+        line = RescheduleAirlineTicketLine(
+            reschedule_ticket=resched_ticket,
+            original_ticket_line=original_lines[line_in["original_ticket_line_id"]],
+            supplier=line_supplier, **line_kwargs,
+        )
+        line.total_billed = _safe_decimal(line.compute_total())
+        line.save()
+        updated_lines.append(line.id)
+
+    return JsonResponse({
+        "id": resched_ticket.id, "line_ids": updated_lines,
+        "message": f"Reschedule ticket updated — {len(updated_lines)} passenger line(s).",
+    })
+
+
+def reschedule_ticket_lookup(request):
+    """
+    GET /api/reschedule-tickets/lookup/?company_id=1&s_pnr=..&airline_pnr=..&ticket_no=..
+    Same identifier-priority convention as tickets/lookup-for-reschedule/
+    (Ticket No first, then S PNR, then Airline PNR) but searches the
+    RescheduleAirlineTicket/RescheduleAirlineTicketLine tables instead -
+    used by the Reschedule lookup screen's "Saved" radio to find an
+    already-saved reschedule (S PNR here means this reschedule's OWN
+    Rescheduled Ref, not the original ticket's Booking Reference).
+    """
+    if request.method != "GET":
+        return HttpResponseNotAllowed(["GET"])
+
+    company_id = request.GET.get("company_id")
+    if not company_id:
+        return JsonResponse({"error": "company_id is required"}, status=400)
+
+    s_pnr = (request.GET.get("s_pnr") or "").strip()
+    airline_pnr = (request.GET.get("airline_pnr") or "").strip()
+    ticket_no = (request.GET.get("ticket_no") or "").strip()
+    if not (s_pnr or airline_pnr or ticket_no):
+        return JsonResponse({"error": "Enter S PNR, Airline PNR or Ticket No to search."}, status=400)
+
+    resched_ticket = None
+    if ticket_no:
+        line = RescheduleAirlineTicketLine.objects.filter(
+            reschedule_ticket__company_id=company_id, ticket_no=ticket_no
+        ).select_related("reschedule_ticket").first()
+        resched_ticket = line.reschedule_ticket if line else None
+    if not resched_ticket and s_pnr:
+        resched_ticket = RescheduleAirlineTicket.objects.filter(company_id=company_id, booking_reference=s_pnr).first()
+    if not resched_ticket and airline_pnr:
+        resched_ticket = RescheduleAirlineTicket.objects.filter(company_id=company_id, airline_pnr=airline_pnr).first()
+
+    if not resched_ticket:
+        return JsonResponse({"error": "No saved reschedule ticket found matching that S PNR / Airline PNR / Ticket No."}, status=404)
+
+    return JsonResponse({"reschedule_ticket_id": resched_ticket.id})
+
+
+def reschedule_ticket_detail(request, reschedule_ticket_id):
+    """
+    GET /api/reschedule-tickets/<id>/?company_id=1
+    Full reschedule ticket header + ALL its lines - same shape/field names
+    as tickets/<id>/ so ticket-entry.html's page-ticket-entry.js can reuse
+    its existing passenger-object handling directly. Does NOT embed the
+    original ticket's own data (Parent PNR Details) - the frontend fetches
+    that separately via tickets/<original_ticket_id>/ (already-existing
+    endpoint), same call enterRescheduleMode() already makes for a
+    brand-new reschedule.
+    """
+    if request.method != "GET":
+        return HttpResponseNotAllowed(["GET"])
+
+    company_id = request.GET.get("company_id")
+    try:
+        rt = RescheduleAirlineTicket.objects.select_related("customer", "supplier").get(id=reschedule_ticket_id, company_id=company_id)
+    except RescheduleAirlineTicket.DoesNotExist:
+        return JsonResponse({"error": "Reschedule ticket not found."}, status=404)
+
+    lines = [{
+        "id": l.id, "original_ticket_line_id": l.original_ticket_line_id,
+        "airline_code": l.airline_code, "airline_name": l.airline_name, "airline_category": l.airline_category,
+        "flight_no": l.flight_no,
+        "ticket_no": l.ticket_no, "passenger_name": l.passenger_name, "pax_type": l.pax_type,
+        "sector": l.sector, "travel_date": l.travel_date,
+        "cabin": l.cabin, "travel_class": l.travel_class, "fare_type": l.fare_type,
+        "basic_fare": float(l.basic_fare), "yq": float(l.yq), "yr": float(l.yr), "k3_tax": float(l.k3_tax),
+        "tax_others": float(l.tax_others), "seat": float(l.seat), "meal": float(l.meal),
+        "baggage": float(l.baggage), "other_ssr": float(l.other_ssr), "disc_on": l.disc_on,
+        "disc_type": l.disc_type, "disc_value": float(l.disc_value), "tds_per": float(l.tds_per),
+        "pg_charges": float(l.pg_charges or 0), "pg_charges_percentage": float(l.pg_charges_percentage) if l.pg_charges_percentage is not None else None,
+        "markup": float(l.markup), "addl_markup": float(l.addl_markup), "ssr_markup": float(l.ssr_markup),
+        "service_fee": float(l.service_fee),
+        "addl_service_fee": float(l.addl_service_fee), "ssr_service_fee": float(l.ssr_service_fee), "gst_pct": float(l.gst_pct),
+        "total_billed": float(l.total_billed), "status": l.status,
+        "supplier_name": l.supplier.name if l.supplier else None, "office_id": l.office_id, "fop": l.fop,
+        "card_number": l.card_number,
+        "supp_comm_on": l.supp_comm_on, "supp_comm_type": l.supp_comm_type,
+        "supp_comm_value": float(l.supp_comm_value), "supp_tds_per": float(l.supp_tds_per),
+        "supp_markup": float(l.supp_markup), "supp_addl_markup": float(l.supp_addl_markup),
+        "supp_service_fee": float(l.supp_service_fee), "supp_addl_service_fee": float(l.supp_addl_service_fee),
+        "supp_gst_pct": float(l.supp_gst_pct),
+        "agent_penalty": float(l.agent_penalty), "supplier_penalty": float(l.supplier_penalty),
+    } for l in rt.lines.select_related("supplier").all()]
+
+    return JsonResponse({
+        "id": rt.id, "original_ticket_id": rt.original_ticket_id,
+        "invoice_number": rt.invoice_number, "invoice_date": rt.invoice_date.isoformat() if rt.invoice_date else None,
+        "invoice_type": rt.invoice_type, "booking_mode": rt.booking_mode, "booking_type": rt.booking_type,
+        "booking_status": rt.booking_status, "customer_name": rt.customer.name, "travel_type": rt.travel_type,
+        "user_name": rt.user_name, "currency": rt.currency, "roe": float(rt.roe), "booking_given_by": rt.booking_given_by,
+        "booking_reference": rt.booking_reference, "booking_ref_date": rt.booking_ref_date.isoformat() if rt.booking_ref_date else None,
+        "airline_pnr": rt.airline_pnr, "gds_pnr": rt.gds_pnr, "supplier_name": rt.supplier.name if rt.supplier else None,
+        "office_id": rt.office_id, "payment_mode": rt.payment_mode, "payment_gateway_ref": rt.payment_gateway_ref,
+        "airline_category": rt.airline_category, "branch_name": rt.branch_name, "lines": lines,
     })
 
 
@@ -2435,9 +2784,7 @@ def _voucher_type_dict(vt):
         "number_method": vt.number_method,
         "allow_additional_numbering": vt.allow_additional_numbering,
         "allow_effective_dates": vt.allow_effective_dates,
-        "allow_zero_value_transaction": vt.allow_zero_value_transaction,
         "allow_narration": vt.allow_narration,
-        "allow_narration_in_each_ledger": vt.allow_narration_in_each_ledger,
         "an_width_of_invoice_number": vt.an_width_of_invoice_number,
         "an_prefill_with_zero": vt.an_prefill_with_zero,
         "an_restart_applicable_from": vt.an_restart_applicable_from.isoformat() if vt.an_restart_applicable_from else None,
@@ -2477,8 +2824,7 @@ def voucher_type_save(request):
             "name": "...", "alias_name": "...", "voucher_category": "General",
             "is_active": true, "number_method": "Automatic",
             "allow_additional_numbering": false, "allow_effective_dates": false,
-            "allow_zero_value_transaction": false, "allow_narration": true,
-            "allow_narration_in_each_ledger": false,
+            "allow_narration": true,
             "an_width_of_invoice_number": 6, "an_prefill_with_zero": false,
             "an_restart_applicable_from": "2026-04-01", "an_restart_starting_number": 1,
             "an_restart_period": "None", "an_prefix_details": "...", "an_suffix_details": "..." }
@@ -2513,9 +2859,7 @@ def voucher_type_save(request):
         "number_method": body.get("number_method") or "Automatic",
         "allow_additional_numbering": bool(body.get("allow_additional_numbering", False)),
         "allow_effective_dates": bool(body.get("allow_effective_dates", False)),
-        "allow_zero_value_transaction": bool(body.get("allow_zero_value_transaction", False)),
         "allow_narration": bool(body.get("allow_narration", True)),
-        "allow_narration_in_each_ledger": bool(body.get("allow_narration_in_each_ledger", False)),
         "an_width_of_invoice_number": body.get("an_width_of_invoice_number") or None,
         "an_prefill_with_zero": bool(body.get("an_prefill_with_zero", False)),
         "an_restart_applicable_from": _parse_date(body.get("an_restart_applicable_from")),
@@ -3085,7 +3429,7 @@ def pg_master_effective(request):
     GET /api/pg-master/effective/?company_id=1&gateway_name=Razorpay&as_of_date=2026-09-24
     The frontend's single source of truth for PG Charges calculation and
     display — resolves via _pg_master_effective_snapshot() so a ticket
-    always uses whatever was in force on its own Booking Ref Date.
+    always uses whatever was in force on its own Invoice Date.
     """
     if request.method != "GET":
         return HttpResponseNotAllowed(["GET"])

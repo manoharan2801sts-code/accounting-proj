@@ -11,8 +11,7 @@
   }
 
   const TOGGLE_IDS = [
-    "vt-active", "vt-addl-numbering", "vt-effective-dates",
-    "vt-zero-value", "vt-narration", "vt-narration-ledger",
+    "vt-active", "vt-addl-numbering", "vt-effective-dates", "vt-narration",
   ];
 
   function updateToggleText(id) {
@@ -93,9 +92,7 @@
     setToggleValue("vt-active", true);
     setToggleValue("vt-addl-numbering", false);
     setToggleValue("vt-effective-dates", false);
-    setToggleValue("vt-zero-value", false);
     setToggleValue("vt-narration", true);
-    setToggleValue("vt-narration-ledger", false);
     anDetailsSaved = false;
     anViewBtn.style.display = "none";
     document.getElementById("an-width").value = "";
@@ -119,9 +116,7 @@
     setToggleValue("vt-active", vt.is_active);
     setToggleValue("vt-addl-numbering", vt.allow_additional_numbering);
     setToggleValue("vt-effective-dates", vt.allow_effective_dates);
-    setToggleValue("vt-zero-value", vt.allow_zero_value_transaction);
     setToggleValue("vt-narration", vt.allow_narration);
-    setToggleValue("vt-narration-ledger", vt.allow_narration_in_each_ledger);
 
     // setToggleValue() above never dispatches "change" (only a real click
     // does), so it won't auto-open the Additional Numbering Details popup -
@@ -206,9 +201,7 @@
       number_method: document.getElementById("vt-number-method").value,
       allow_additional_numbering: getToggleValue("vt-addl-numbering"),
       allow_effective_dates: getToggleValue("vt-effective-dates"),
-      allow_zero_value_transaction: getToggleValue("vt-zero-value"),
       allow_narration: getToggleValue("vt-narration"),
-      allow_narration_in_each_ledger: getToggleValue("vt-narration-ledger"),
       an_width_of_invoice_number: document.getElementById("an-width").value || null,
       an_prefill_with_zero: document.getElementById("an-prefill-zero").checked,
       an_restart_applicable_from: document.getElementById("an-applicable-from").value || null,

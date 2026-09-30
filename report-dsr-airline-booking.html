@@ -392,19 +392,24 @@
           if (!g.sectors.includes(s)) g.sectors.push(s);
         });
         g.basic_fare += Number(r.basic_fare) || 0;
-        // Other Tax = the exact same fields ticket-entry.html's own
-        // Summary strip "Sales Cost" row adds together (see recalcSummary()
-        // in page-ticket-entry.js): Taxes (YQ+YR+K3+Tax & Others) + SSR
-        // (Seat+Meal+Baggage+Other SSR) - Discount + TDS + Markup
-        // (+Addl+SSR) + Service Fee (+Addl+SSR) + GST Amount. Discount/TDS/
-        // GST come straight from the backend's own computed_discount/
-        // computed_tds/computed_gst (Master Mapping-driven), not re-derived here.
+        // Other Tax = ticket-entry.html's Summary strip, both rows added
+        // together (see recalcSummary() in page-ticket-entry.js): Sales
+        // Cost's Taxes (YQ+YR+K3+Tax & Others) + SSR (Seat+Meal+Baggage+
+        // Other SSR) - Discount + TDS + Markup (+Addl+SSR) + Service Fee
+        // (+Addl+SSR) + GST Amount, PLUS Purchase Cost's own Markup
+        // (+Addl) + Service Fee (+Addl) + GST Amount. Discount/TDS/GST
+        // come straight from the backend's own computed_discount/
+        // computed_tds/computed_gst/computed_supp_gst (Master Mapping-
+        // driven), not re-derived here.
         const taxes = (Number(r.yq) || 0) + (Number(r.yr) || 0) + (Number(r.k3_tax) || 0) + (Number(r.tax_others) || 0);
         const ssr = (Number(r.seat) || 0) + (Number(r.meal) || 0) + (Number(r.baggage) || 0) + (Number(r.other_ssr) || 0);
         const markup = (Number(r.markup) || 0) + (Number(r.addl_markup) || 0) + (Number(r.ssr_markup) || 0);
         const serviceFee = (Number(r.service_fee) || 0) + (Number(r.addl_service_fee) || 0) + (Number(r.ssr_service_fee) || 0);
+        const suppMarkup = (Number(r.supp_markup) || 0) + (Number(r.supp_addl_markup) || 0);
+        const suppServiceFee = (Number(r.supp_service_fee) || 0) + (Number(r.supp_addl_service_fee) || 0);
         const lineOtherTax = taxes + ssr - (Number(r.computed_discount) || 0)
-          + (Number(r.computed_tds) || 0) + markup + serviceFee + (Number(r.computed_gst) || 0);
+          + (Number(r.computed_tds) || 0) + markup + serviceFee + (Number(r.computed_gst) || 0)
+          + suppMarkup + suppServiceFee + (Number(r.computed_supp_gst) || 0);
         g.other_tax += lineOtherTax;
       });
       byTicket.forEach((g) => {

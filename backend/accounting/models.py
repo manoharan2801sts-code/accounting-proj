@@ -356,7 +356,7 @@ class TicketLine(models.Model):
     pg_charges = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     # The PG Master -> PG Charges Percentage actually applied to compute
     # pg_charges above - the PGMasterHistory snapshot effective as of this
-    # ticket's own Booking Ref Date, not necessarily today's live rate.
+    # ticket's own Invoice Date, not necessarily today's live rate.
     # Stored (not just recomputed) so the Passenger Fare modal can always
     # show the exact rate this line was charged at, even after later
     # gateway edits add newer History snapshots.
@@ -529,6 +529,267 @@ class TicketLine(models.Model):
         return (self.supp_service_fee + self.supp_addl_service_fee) * (self.supp_gst_pct / 100)
 
 
+class RescheduleAirlineTicket(models.Model):
+    """
+    The header for a rescheduled Airline ticket - mirrors Ticket's own
+    columns exactly (it's a genuinely new booking, with its own Invoice
+    Number/Date, its own Rescheduled Reference & Ref Date shown under
+    "Reschedule PNR Details" as booking_reference/booking_ref_date - same
+    columns, just relabeled in the UI for this flow), PLUS original_ticket,
+    which is what lets the "Parent PNR Details" tab show the original
+    booking's data (Parent PNR, its own invoice/booking details, etc.) by
+    following this link rather than storing a second copy of it here.
+    """
+    id = models.AutoField(primary_key=True)
+    company_id = models.IntegerField()
+    branch_name = models.CharField(max_length=100, null=True, blank=True)
+
+    # The ticket this reschedule was raised against - "Parent PNR Details"
+    # is reconstructed entirely from here (original_ticket.booking_reference
+    # is what the Reschedule screen calls "Parent PNR", etc.) rather than
+    # duplicating any of Ticket's own columns on this table.
+    original_ticket = models.ForeignKey(
+        Ticket, on_delete=models.PROTECT, related_name="reschedules", db_column="original_ticket_id"
+    )
+
+    invoice_number = models.CharField(max_length=20)
+    invoice_date = models.DateField()
+    invoice_type = models.CharField(max_length=100, null=True, blank=True)
+    booking_mode = models.CharField(max_length=20, choices=Ticket.BOOKING_MODE_CHOICES, default="Manual")
+    booking_type = models.CharField(max_length=30, null=True, blank=True)
+    # Always "Re-Scheduled" in practice (see enterRescheduleMode() in
+    # page-ticket-entry.js, which freezes this field) - kept as a real,
+    # editable column rather than hardcoded, same choices as Ticket's own.
+    booking_status = models.CharField(max_length=20, choices=Ticket.BOOKING_STATUS_CHOICES, null=True, blank=True)
+
+    customer = models.ForeignKey(
+        Ledger, on_delete=models.PROTECT, related_name="reschedules_as_customer", db_column="customer_ledger_id"
+    )
+    supplier = models.ForeignKey(
+        Ledger, on_delete=models.PROTECT, related_name="reschedules_as_supplier",
+        null=True, blank=True, db_column="supplier_ledger_id"
+    )
+
+    travel_type = models.CharField(max_length=20, choices=Ticket.TRAVEL_TYPE_CHOICES, null=True, blank=True)
+    user_name = models.CharField(max_length=100, null=True, blank=True)
+    currency = models.CharField(max_length=5, default="INR")
+    roe = models.DecimalField(max_digits=10, decimal_places=4, default=1)
+    booking_given_by = models.CharField(max_length=25, null=True, blank=True)
+
+    # "Rescheduled Reference" / "Rescheduled Ref Date" in the UI - this
+    # new ticket's OWN reference, not the parent's (that's
+    # original_ticket.booking_reference instead).
+    booking_reference = models.CharField(max_length=30)
+    booking_ref_date = models.DateField(null=True, blank=True)
+    airline_pnr = models.CharField(max_length=13, null=True, blank=True)
+    gds_pnr = models.CharField(max_length=13, null=True, blank=True)
+    office_id = models.CharField(max_length=30, null=True, blank=True)
+
+    payment_mode = models.CharField(max_length=20, choices=Ticket.PAYMENT_MODE_CHOICES, null=True, blank=True)
+    payment_gateway_ref = models.CharField(max_length=60, null=True, blank=True)
+    airline_category = models.CharField(max_length=5, choices=Ticket.AIRLINE_CATEGORY_CHOICES, null=True, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "RescheduleAirlineTickets"
+        constraints = [
+            models.UniqueConstraint(fields=["company_id", "invoice_number"], name="uq_resched_ticket_company_invoice_no"),
+            models.UniqueConstraint(fields=["company_id", "booking_reference"], name="uq_resched_ticket_company_booking_ref"),
+        ]
+        indexes = [models.Index(fields=["company_id"]), models.Index(fields=["original_ticket"])]
+
+    def __str__(self):
+        return self.invoice_number
+
+
+class RescheduleAirlineTicketLine(models.Model):
+    """
+    One passenger/line on a rescheduled ticket - mirrors TicketLine's own
+    columns (this is the NEW ticket's actual fare/passenger data, entered
+    fresh under "Reschedule PNR Details"), PLUS original_ticket_line and
+    two fields this flow introduced that TicketLine has no equivalent for
+    (agent_penalty, supplier_penalty). Deliberately does NOT store a second
+    copy of the original line's own data (ticket_no, fare breakdown,
+    discount/markup/etc.) - "Parent PNR Details" reads all of that straight
+    off original_ticket_line instead.
+    """
+    id = models.AutoField(primary_key=True)
+    reschedule_ticket = models.ForeignKey(
+        RescheduleAirlineTicket, on_delete=models.CASCADE, related_name="lines", db_column="reschedule_ticket_id"
+    )
+    # The exact original passenger line this reschedule was raised for -
+    # "Parent PNR Details" is reconstructed entirely from here.
+    original_ticket_line = models.ForeignKey(
+        TicketLine, on_delete=models.PROTECT, related_name="reschedule_lines", db_column="original_ticket_line_id"
+    )
+
+    airline_code = models.CharField(max_length=200, null=True, blank=True)
+    airline_name = models.CharField(max_length=200, null=True, blank=True)
+    airline_category = models.CharField(max_length=5, choices=Ticket.AIRLINE_CATEGORY_CHOICES, null=True, blank=True)
+    flight_no = models.CharField(max_length=200, null=True, blank=True)
+    ticket_no = models.CharField(max_length=30)
+    passenger_name = models.CharField(max_length=50)
+    pax_type = models.CharField(max_length=10, choices=TicketLine.PAX_TYPE_CHOICES, default="Adult")
+    sector = models.CharField(max_length=200, null=True, blank=True)
+    travel_date = models.CharField(max_length=200, null=True, blank=True)
+    cabin = models.CharField(max_length=200, null=True, blank=True)
+    travel_class = models.CharField(max_length=200, null=True, blank=True)
+    fare_type = models.CharField(max_length=300, null=True, blank=True)
+
+    # Fare breakup
+    basic_fare = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    yq = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    yr = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    k3_tax = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    tax_others = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    seat = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    meal = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    baggage = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    other_ssr = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+
+    # Customer discount
+    disc_on = models.CharField(max_length=20, null=True, blank=True)
+    disc_type = models.CharField(max_length=12, choices=TicketLine.DISC_TYPE_CHOICES, null=True, blank=True)
+    disc_value = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    tds_per = models.DecimalField(max_digits=5, decimal_places=2, default=0)
+
+    # PG Charges
+    pg_charges = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    pg_charges_percentage = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+
+    # Markup / service fee / GST
+    markup = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    addl_markup = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    ssr_markup = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    service_fee = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    addl_service_fee = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    ssr_service_fee = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    gst_pct = models.DecimalField(max_digits=5, decimal_places=2, default=0)
+
+    # Supplier commission (mirrors customer discount, but against the supplier)
+    supp_comm_on = models.CharField(max_length=20, null=True, blank=True)
+    supp_comm_type = models.CharField(max_length=12, choices=TicketLine.DISC_TYPE_CHOICES, null=True, blank=True)
+    supp_comm_value = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    supp_tds_per = models.DecimalField(max_digits=5, decimal_places=2, default=0)
+
+    # Markup / service fee / GST on the Supplier Commission side
+    supp_markup = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    supp_addl_markup = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    supp_service_fee = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    supp_addl_service_fee = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    supp_gst_pct = models.DecimalField(max_digits=5, decimal_places=2, default=0)
+
+    # New to the Reschedule flow only - TicketLine has no equivalent
+    # column. UI-only so far (see ticket-entry.html's #modal-agent-penalty/
+    # #modal-supplier-penalty) - not yet part of any calculation.
+    agent_penalty = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    supplier_penalty = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+
+    total_billed = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    status = models.CharField(max_length=15, choices=TicketLine.STATUS_CHOICES, default="ISSUED")
+
+    supplier = models.ForeignKey(
+        Ledger, on_delete=models.PROTECT, related_name="reschedulelines_as_supplier",
+        null=True, blank=True, db_column="supplier_ledger_id"
+    )
+    office_id = models.CharField(max_length=30, null=True, blank=True)
+    fop = models.CharField(max_length=20, choices=TicketLine.FOP_CHOICES, null=True, blank=True)
+    card_number = models.CharField(max_length=40, null=True, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "RescheduleAirlineTicketLines"
+        constraints = [
+            models.UniqueConstraint(fields=["ticket_no"], name="uq_resched_ticketline_ticket_no"),
+        ]
+        indexes = [models.Index(fields=["reschedule_ticket"]), models.Index(fields=["original_ticket_line"])]
+
+    def __str__(self):
+        return self.ticket_no
+
+    # Same formulas as TicketLine's own (see its compute_total()/
+    # supplier_cost/computed_* docstrings) - kept in sync by hand since
+    # this is a genuinely separate model, not a subclass.
+    def compute_total(self):
+        return float(self.supplier_cost) - float(self.computed_discount) + float(self.computed_tds) \
+            + float(self.markup) + float(self.addl_markup) + float(self.ssr_markup) \
+            + float(self.service_fee) + float(self.addl_service_fee) + float(self.ssr_service_fee) + float(self.computed_gst) \
+            + float(self.supp_markup) + float(self.supp_addl_markup) \
+            + float(self.supp_service_fee) + float(self.supp_addl_service_fee) + float(self.computed_supp_gst)
+
+    @property
+    def supplier_cost(self):
+        return (self.basic_fare + self.yq + self.yr + self.k3_tax + self.tax_others
+                + self.seat + self.meal + self.baggage + self.other_ssr)
+
+    @property
+    def computed_discount(self):
+        base_map = {
+            "Basic": self.basic_fare,
+            "Basic + YQ": self.basic_fare + self.yq,
+            "Basic + YR": self.basic_fare + self.yr,
+            "Basic + YQ + YR": self.basic_fare + self.yq + self.yr,
+            "Gross": self.supplier_cost,
+        }
+        disc_base = base_map.get(self.disc_on, 0)
+        if self.disc_type == "Percentage":
+            return disc_base * (self.disc_value / 100)
+        if self.disc_type == "Flat":
+            return self.disc_value
+        return 0
+
+    @property
+    def computed_tds(self):
+        return self.computed_discount * (self.tds_per / 100)
+
+    @property
+    def computed_gst(self):
+        company_id = self.reschedule_ticket.company_id
+
+        def field_ledger_gst_pct(field_name):
+            cache_key = (company_id, field_name)
+            if cache_key not in _gst_pct_cache:
+                m = MasterMapping.objects.filter(
+                    company_id=company_id, product_type="Airline", field_name=field_name
+                ).select_related("ledger").first()
+                _gst_pct_cache[cache_key] = float(m.ledger.gst_percentage) if m and m.ledger_id else 0.0
+            return _gst_pct_cache[cache_key]
+
+        return (
+            float(self.service_fee) * field_ledger_gst_pct("Service Fee A/c") / 100
+            + float(self.addl_service_fee) * field_ledger_gst_pct("Addl Service Fee A/c") / 100
+            + float(self.ssr_service_fee) * field_ledger_gst_pct("SSR Service Fee A/c") / 100
+        )
+
+    @property
+    def computed_supp_commission(self):
+        base_map = {
+            "Basic": self.basic_fare,
+            "Basic + YQ": self.basic_fare + self.yq,
+            "Basic + YR": self.basic_fare + self.yr,
+            "Basic + YQ + YR": self.basic_fare + self.yq + self.yr,
+            "Gross": self.supplier_cost,
+        }
+        comm_base = base_map.get(self.supp_comm_on, 0)
+        if self.supp_comm_type == "Percentage":
+            return comm_base * (self.supp_comm_value / 100)
+        if self.supp_comm_type == "Flat":
+            return self.supp_comm_value
+        return 0
+
+    @property
+    def computed_supp_tds(self):
+        return self.computed_supp_commission * (self.supp_tds_per / 100)
+
+    @property
+    def computed_supp_gst(self):
+        return (self.supp_service_fee + self.supp_addl_service_fee) * (self.supp_gst_pct / 100)
+
+
 class JournalVoucher(models.Model):
     """
     The auto-posted GL entry for a Ticket's JV (Airline/Hotel/Visa/
@@ -665,9 +926,7 @@ class VoucherType(models.Model):
 
     allow_additional_numbering = models.BooleanField(default=False)
     allow_effective_dates = models.BooleanField(default=False)
-    allow_zero_value_transaction = models.BooleanField(default=False)
     allow_narration = models.BooleanField(default=True)
-    allow_narration_in_each_ledger = models.BooleanField(default=False)
 
     # Additional Numbering Details popup — only meaningful when
     # allow_additional_numbering is True.
@@ -865,7 +1124,7 @@ class PGMaster(models.Model):
     # The date this rate/ledger mapping takes effect from. Every save also
     # snapshots the row into PGMasterHistory keyed by this date - so
     # tickets always calculate PG Charges using whichever snapshot was
-    # effective as of their own Booking Ref Date, not necessarily the
+    # effective as of their own Invoice Date, not necessarily the
     # latest edit (see _pg_master_effective_snapshot()).
     pg_charges_percentage_effective_from = models.DateField(null=True, blank=True)
 
@@ -890,7 +1149,7 @@ class PGMasterHistory(models.Model):
     One snapshot per (gateway, Effective From date) — written every time
     pg_master_save() saves a PGMaster row with an Effective From date set.
     Lets a ticket's PG Charges/JV posting resolve the ledger + percentage
-    that was actually in force on its own Booking Ref Date, instead of
+    that was actually in force on its own Invoice Date, instead of
     always using whatever the gateway's row currently holds (which would
     silently rewrite already-booked tickets' calculation/ledger every time
     someone edits the gateway later with a new rate).

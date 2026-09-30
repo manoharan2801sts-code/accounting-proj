@@ -2395,15 +2395,79 @@ input.dom-input[type="number"], input.dom-input.dom-amount {
   min-width: 0;
   width: 100%;
 }
-/* Discount/Commission Amount row: solo by default (Flat/blank) so the
-   editable amount box is wide enough for a full 10-digit number; switches
-   to a 4-column layout only while the % field is also shown (Percentage
-   selected), giving % a modest fixed box and keeping Amount the wide one. */
+/* Discount/Commission Amount row (default/Parent layout only): solo by
+   default (Flat/blank) so the editable amount box is wide enough for a
+   full 10-digit number; switches to a 4-column layout only while the %
+   field is also shown (Percentage selected), giving % a modest fixed box
+   and keeping Amount the wide one. */
 .disc-amount-row {
   grid-template-columns: 138px 1fr;
 }
 .disc-amount-row.pct-active {
   grid-template-columns: 64px 70px 90px 1fr;
+}
+/* Pure pass-through wrapper spans (Reschedule tab moves the real input/
+   value elements they hold out to a different layout - see
+   layoutAcctFieldsForReschedule() in page-ticket-entry.js) - dissolve into
+   the grid so they never introduce an extra column of their own. */
+#default-disc-pct-slot, #default-disc-amt-slot,
+#default-taxable-slot, #default-tdspct-slot, #default-tdsamt-slot,
+#resched-taxable-slot, #resched-disc-pct-slot, #resched-disc-amt-slot,
+#resched-tds-pct-slot, #resched-tds-amt-slot,
+#default-supp-comm-pct-slot, #default-supp-comm-amt-slot,
+#default-supp-tdspct-slot, #default-supp-tdsamt-slot,
+#resched-supp-comm-pct-slot, #resched-supp-comm-amt-slot,
+#resched-supp-tds-pct-slot, #resched-supp-tds-amt-slot,
+#default-supp-gstpct-slot, #default-supp-gstamt-slot,
+#resched-supp-gst-pct-slot, #resched-supp-gst-amt-slot {
+  display: contents;
+}
+/* Merged-row containers (Discount+TDS / Commission+TDS) - flex column so
+   their trailing spacer div (compensating for the row the merge saved,
+   keeping the modal's height identical between Parent/Reschedule tabs)
+   stacks with the same gap as every other field row. The inline
+   "display:none" these start hidden with (and the JS toggle that clears
+   it) both win over this rule automatically, since inline style always
+   outranks a stylesheet selector - no extra specificity trick needed. */
+#acct-resched-disc-row, #acct-resched-supp-row,
+#acct-resched-agent-row, #acct-resched-supp-gst-row {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+/* Reschedule tab's Discount/TDS % field - looks like ONE box with "%"
+   printed inside it (matching PG Charges' box), without actually baking a
+   "%" character into the real editable value (that field is read directly
+   in a couple of places - e.g. syncSuppFromClient - so keeping the stored
+   value pure numeric avoids corrupting those). The wrapper draws the
+   border/background sized to fit "0.00%"; the real <input> inside it goes
+   borderless/transparent so it blends into the wrapper seamlessly. */
+.acct-pct-box {
+  display: flex;
+  align-items: center;
+  width: 54px;
+  flex: none;
+  height: 24px;
+  padding: 0 4px;
+  border: 1px solid var(--cmx-border, #CBD5E1);
+  border-radius: 3px;
+  background: var(--dom-input-bg, #FFFFFF);
+  box-sizing: border-box;
+}
+.acct-pct-box input {
+  border: none !important;
+  background: transparent !important;
+  padding: 0 !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  height: 100% !important;
+  flex: 1 !important;
+  text-align: right;
+}
+.acct-pct-suffix {
+  font-size: 10.5px;
+  color: var(--color-text-muted);
+  flex-shrink: 0;
 }
 .dom-acct-box-actions {
   margin-top: auto;

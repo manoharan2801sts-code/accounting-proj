@@ -218,7 +218,7 @@
     set("agent_id", ledger.agent_id);
     set("tax_category", ledger.tax_category); set("tax_type", ledger.tax_type);
     if (ledger.tax_category === "GST") document.getElementById("tax-type-wrap").style.display = "block";
-    set("gst_applicable", String(!!ledger.gst_applicable)); set("gst_tax_type", ledger.gst_tax_type);
+    set("gst_applicable", String(!!ledger.gst_applicable));
     set("gst_percentage", Number(ledger.gst_percentage || 0).toFixed(2)); set("tds_applicable", String(!!ledger.tds_applicable));
     set("tds_percentage", Number(ledger.tds_percentage || 0).toFixed(2)); set("hsn_code", ledger.hsn_code);
     set("tcs_applicable", String(!!ledger.tcs_applicable)); set("tcs_percentage", Number(ledger.tcs_percentage || 0).toFixed(2));
@@ -336,7 +336,7 @@
       });
     } else if (cat === "INCOME" || cat === "EXPENSE") {
       Object.assign(payload, {
-        gst_applicable: bool("gst_applicable"), gst_tax_type: val("gst_tax_type") || null,
+        gst_applicable: bool("gst_applicable"), gst_tax_type: null,
         gst_percentage: parseFloat(val("gst_percentage")) || 0,
         tds_applicable: bool("tds_applicable"), tds_percentage: parseFloat(val("tds_percentage")) || 0,
         hsn_code: val("hsn_code"),

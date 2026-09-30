@@ -3,8 +3,14 @@
   const OPT = window.VoyagerHardcode.TICKET_FORM_OPTIONS;
   const params = new URLSearchParams(window.location.search);
   const editId = params.get("id");
-  const rescheduleTicketId = params.get("reschedule_ticket_id");
-  const rescheduleLineId = params.get("reschedule_line_id");
+  // Both mutable - the "Saved" reschedule flow (enterSavedRescheduleMode)
+  // resolves these from the saved RescheduleAirlineTicket/Line it loads
+  // instead of the URL, since that flow's own URL only carries
+  // reschedule_saved_id.
+  let rescheduleTicketId = params.get("reschedule_ticket_id");
+  let rescheduleLineId = params.get("reschedule_line_id");
+  const rescheduleSavedId = params.get("reschedule_saved_id");
+  let editingRescheduleId = null; // set once a SAVED reschedule ticket is loaded - routes Save Ticket to reschedule-tickets/<id>/update/ instead of create
   let activeCompanyId, activeCountry, allCustomers = [], allSuppliers = [], existingTickets = [];
   let voucherTypes = []; // active Voucher Types for the active company - drives the Invoice Type dropdown + Invoice Number auto-numbering
   const VOUCHER_TYPE_API = `${API_BASE}/voucher-type/`;
@@ -50,15 +56,15 @@
   // Payment Mode change, not when re-syncing disabled state elsewhere (e.g.
   // loading a saved ticket, or unlocking one for editing).
   // Resolves the PG Master ledger mapping + PG Charges Percentage that was
-  // actually in force for `gatewayName` on THIS ticket's own Booking Ref
-  // Date (not necessarily whatever the gateway's row currently holds) -
+  // actually in force for `gatewayName` on THIS ticket's own Invoice Date
+  // (not necessarily whatever the gateway's row currently holds) -
   // see PGMasterHistory/_pg_master_effective_snapshot() server-side. Every
   // place that needs PG Charges/PG GST for calculation or JV posting must
   // go through this, never the raw `pgMasterGateways` cache (that's only
   // for populating the dropdown's list of active gateway names).
   async function getPgEffective(gatewayName) {
     if (!gatewayName || !activeCompanyId) return null;
-    const asOfDate = toISOFromDDMMYYYY(getDateGroupValue(document.getElementById("booking_ref_date"))) || "";
+    const asOfDate = toISOFromDDMMYYYY(getDateGroupValue(document.getElementById("invoice_date"))) || "";
     const cacheKey = `${gatewayName}|${asOfDate}`;
     if (pgEffectiveCache.has(cacheKey)) return pgEffectiveCache.get(cacheKey);
     let snapshot = null;
@@ -113,9 +119,9 @@
     await updatePgGstDisplay();
   }
   document.getElementById("payment_gateway_ref").addEventListener("change", updatePgCharges);
-  // Booking Ref Date drives which PG Master snapshot applies - recompute
-  // PG Charges if it changes while a gateway is already selected.
-  document.getElementById("booking_ref_date").addEventListener("change", () => {
+  // Invoice Date drives which PG Master snapshot applies - recompute PG
+  // Charges if it changes while a gateway is already selected.
+  document.getElementById("invoice_date").addEventListener("change", () => {
     if (document.getElementById("payment_gateway_ref").value) updatePgCharges();
   });
 
@@ -653,6 +659,7 @@
     service_fee: 0, addl_service_fee: 0, ssr_service_fee: 0, gst_pct: 0, supplier_name: "", office_id: "", fop: "Cash", card_number: "",
     supp_comm_on: "", supp_comm_type: "", supp_comm_value: 0, supp_tds_per: 0,
     supp_markup: 0, supp_addl_markup: 0, supp_service_fee: 0, supp_addl_service_fee: 0, supp_gst_pct: 0,
+    agent_penalty: 0, supplier_penalty: 0,
   });
 
   // Money amounts only (Basic Fare, Taxes, Markup, Service Fee, GST
@@ -664,17 +671,37 @@
   function updateDiscValueLabel() {
     const type = document.getElementById("modal-disc-type").value;
     const isPct = type === "Percentage";
+    const inReschedLayout = rescheduleMode && modalRescheduleTab === "reschedule";
     // Discount % and Cust Discount On stay visible always now - only
     // Percentage makes them editable (Discount % is meaningless for Flat,
-    // Cust Discount On is the base % is calculated against). The row's
-    // 4-column layout is kept permanently (rather than collapsing to a
-    // solo Amount column) since % always has a slot to sit in now.
-    document.getElementById("modal-disc-value-field").style.display = "contents";
+    // Cust Discount On is the base % is calculated against).
+    const discValueField = document.getElementById("modal-disc-value-field");
+    const discValLabel = document.getElementById("modal-disc-val-label");
+    if (inReschedLayout) {
+      // Reschedule's Discount Amount box is a PG-Charges-style single box
+      // (no visible label for the % side) - dissolving this span lets its
+      // input become a true direct child of .acct-pct-box, alongside the
+      // "%" suffix, so the CSS there can size/style it as one seamless box.
+      discValueField.style.display = "contents";
+      discValLabel.style.display = "none";
+    } else {
+      // Default/Parent layout: dissolves into the row's own grid so its
+      // label+input become the grid's own 2 columns directly - the row's
+      // 4-column layout is kept permanently (rather than collapsing to a
+      // solo Amount column) since % always has a slot to sit in now.
+      discValueField.style.display = "contents";
+      discValLabel.style.display = "";
+    }
     document.getElementById("modal-disc-value").disabled = !isPct || viewMode;
     // Flat has no meaningful percentage - show 0 rather than echoing the
     // flat Discount Amount into a field labeled "Discount %".
     if (!isPct) document.getElementById("modal-disc-value").value = "0.00";
-    document.getElementById("modal-disc-computed").closest(".disc-amount-row").classList.add("pct-active");
+    // Only meaningful (and only still inside .disc-amount-row) in the
+    // default layout - Reschedule's own row has a fixed inline grid that
+    // doesn't depend on this class at all.
+    if (!inReschedLayout) {
+      document.getElementById("modal-disc-computed").closest(".disc-amount-row").classList.add("pct-active");
+    }
     document.getElementById("modal-disc-on-field").style.display = "";
     document.getElementById("modal-disc-on").disabled = !isPct || viewMode;
   }
@@ -685,8 +712,12 @@
     const type = document.getElementById("modal-supp-comm-type").value;
     const isPct = type === "Percentage";
     // Commission % and Supplier Commission On stay visible always now -
-    // only Percentage makes them editable.
+    // only Percentage makes them editable. In the Reschedule tab's merged
+    // Commission Amount box, the % side has no visible label (just the
+    // .acct-pct-box's "%" suffix) - same treatment as Discount's own box.
+    const inReschedLayout = rescheduleMode && modalRescheduleTab === "reschedule";
     document.getElementById("modal-supp-comm-value-field").style.display = "contents";
+    document.getElementById("modal-supp-comm-val-label").style.display = inReschedLayout ? "none" : "";
     document.getElementById("modal-supp-comm-value").disabled = !isPct || viewMode;
     document.getElementById("modal-supp-comm-on-field").style.display = "";
     document.getElementById("modal-supp-comm-on").disabled = !isPct || viewMode;
@@ -758,6 +789,7 @@
       supp_markup: num("modal-supp-markup"), supp_addl_markup: num("modal-supp-addl-markup"),
       supp_service_fee: num("modal-supp-service-fee"), supp_addl_service_fee: num("modal-supp-addl-service-fee"),
       supp_gst_pct: num("modal-supp-gst-pct"),
+      agent_penalty: num("modal-agent-penalty"), supplier_penalty: num("modal-supplier-penalty"),
     };
   }
   function recalcModalTotal(opts) {
@@ -836,7 +868,7 @@
     document.getElementById("modal-tds-per").value = Number(p.tds_per).toFixed(2);
     // PG Charges/PG Charges % are not seeded here - both are non-editable
     // and get recomputed fresh (against whatever PG Master snapshot was
-    // effective as of this ticket's own Booking Ref Date) by the
+    // effective as of this ticket's own Invoice Date) by the
     // recalcModalTotal() call below, via updatePgCharges().
     document.getElementById("modal-markup").value = fmtN(p.markup); document.getElementById("modal-addl-markup").value = fmtN(p.addl_markup);
     document.getElementById("modal-ssr-markup").value = fmtN(p.ssr_markup || 0);
@@ -856,6 +888,8 @@
     document.getElementById("modal-supp-service-fee").value = fmtN(p.supp_service_fee || 0);
     document.getElementById("modal-supp-addl-service-fee").value = fmtN(p.supp_addl_service_fee || 0);
     document.getElementById("modal-supp-gst-pct").value = Number(p.supp_gst_pct || 0).toFixed(2);
+    document.getElementById("modal-agent-penalty").value = fmtN(p.agent_penalty || 0);
+    document.getElementById("modal-supplier-penalty").value = fmtN(p.supplier_penalty || 0);
     // Whatever's already saved counts as a deliberate choice - don't let a
     // later Client Accounting edit silently clobber it. Only a brand-new
     // (blank) passenger starts in "follow Client Accounting" mode.
@@ -951,7 +985,20 @@
   // here so it's visible without reopening it).
   function renderSectorDetails() {
     const box = document.getElementById("modal-sector-details");
-    box.style.display = modalSectors.length ? "flex" : "none";
+    if (rescheduleMode) {
+      // This card's own height already caps at 112px (max-height) - always
+      // reserving exactly that in Reschedule mode (visible or not) keeps
+      // the whole modal's height identical whether the active tab's
+      // passenger has sectors yet or not, instead of the modal visibly
+      // shifting every time Parent/Reschedule gets switched.
+      box.style.display = "flex";
+      box.style.minHeight = "112px";
+      box.style.visibility = modalSectors.length ? "visible" : "hidden";
+    } else {
+      box.style.display = modalSectors.length ? "flex" : "none";
+      box.style.minHeight = "";
+      box.style.visibility = "visible";
+    }
     box.innerHTML = modalSectors.map((s, i) => `
       <div class="dom-sector-detail-row" data-idx="${i}" style="cursor:pointer;" title="${viewMode ? "Click to view this sector" : "Click to view/edit this sector"}">
         <span class="dom-sector-detail-head">${s.from}-${s.to}</span>
@@ -1095,14 +1142,107 @@
     // its own close X) rather than sitting awkwardly under it.
     document.querySelector("#fare-breakdown-modal .dom-modal-titlebar").style.display = rescheduleMode ? "none" : "";
     document.getElementById("reschedule-tab-bar").style.display = rescheduleMode ? "" : "none";
-    if (rescheduleMode) applyRescheduleTab("parent");
+    if (rescheduleMode) applyRescheduleTab("reschedule");
     fareModal.classList.add("open");
+  }
+  // Moves the REAL Discount %/Discount Amount/TDS %/TDS Amount/Taxable
+  // Amount/GST Amount elements (never duplicated - same ids, same
+  // listeners) between the default layout (Parent PNR Details + every
+  // normal, non-reschedule ticket) and the Reschedule tab's own merged-row
+  // layout. Since only the DOM parent changes, readModalPassenger()/
+  // writeModalPassenger()/recalcModalTotal() etc. never need to know or
+  // care which layout is currently showing.
+  function layoutAcctFieldsForReschedule(isResched) {
+    const discPctField = document.getElementById("modal-disc-value-field");
+    const discAmt = document.getElementById("modal-disc-computed");
+    const tdsPct = document.getElementById("modal-tds-per");
+    const tdsAmt = document.getElementById("modal-tds-computed");
+    const taxable = document.getElementById("modal-taxable-amount");
+    const gstAmt = document.getElementById("modal-gst-computed");
+    const gstBtn = document.getElementById("modal-gst-detail-btn");
+    const suppCommPctField = document.getElementById("modal-supp-comm-value-field");
+    const suppCommAmt = document.getElementById("modal-supp-comm-computed");
+    const suppTdsPct = document.getElementById("modal-supp-tds-per");
+    const suppTdsAmt = document.getElementById("modal-supp-tds-computed");
+    const suppGstPct = document.getElementById("modal-supp-gst-pct");
+    const suppGstAmt = document.getElementById("modal-supp-gst-computed");
+    // In the default layout these are sized by their own grid column
+    // (64px/70px/90px/1fr etc, via CSS on the row) - the Reschedule row is
+    // a plain flexbox instead (like PG Charges' own dual box), which gives
+    // every child its natural/auto width unless told otherwise, so the %
+    // box and the Amount box need explicit sizing here or they render
+    // as one indistinguishable blob instead of two visible boxes.
+    if (isResched) {
+      // % box itself is sized/styled by the .acct-pct-box wrapper CSS
+      // (fits "0.00%") - only the Amount box needs explicit sizing here so
+      // it fills whatever space that frees up.
+      // flex:1 alone isn't quite enough for true pixel-parity between an
+      // <input> (Commission/Discount Amount, editable) and a <div> (TDS/
+      // GST Amount, computed/readonly) sharing the same flex row - each
+      // element type has its own intrinsic sizing quirks, so width:100% +
+      // border-box is set explicitly on all of them to force identical
+      // actual widths regardless of tag/content.
+      [discAmt, tdsAmt, suppCommAmt, suppTdsAmt, suppGstAmt].forEach((el) => {
+        el.style.flex = "1"; el.style.minWidth = "0"; el.style.width = "100%";
+        el.style.boxSizing = "border-box"; el.style.textAlign = "right";
+      });
+      document.getElementById("resched-disc-pct-slot").append(discPctField);
+      document.getElementById("resched-disc-amt-slot").append(discAmt);
+      document.getElementById("resched-tds-pct-slot").append(tdsPct);
+      document.getElementById("resched-tds-amt-slot").append(tdsAmt);
+      document.getElementById("resched-taxable-slot").append(taxable);
+      document.getElementById("resched-gst-slot").append(gstAmt, gstBtn);
+      document.getElementById("resched-supp-comm-pct-slot").append(suppCommPctField);
+      document.getElementById("resched-supp-comm-amt-slot").append(suppCommAmt);
+      document.getElementById("resched-supp-tds-pct-slot").append(suppTdsPct);
+      document.getElementById("resched-supp-tds-amt-slot").append(suppTdsAmt);
+      document.getElementById("resched-supp-gst-pct-slot").append(suppGstPct);
+      document.getElementById("resched-supp-gst-amt-slot").append(suppGstAmt);
+      document.getElementById("acct-default-disc-row").style.display = "none";
+      document.getElementById("acct-default-taxable-row").style.display = "none";
+      document.getElementById("acct-default-tds-row").style.display = "none";
+      document.getElementById("acct-default-supp-comm-row").style.display = "none";
+      document.getElementById("acct-default-supp-tds-row").style.display = "none";
+      document.getElementById("acct-default-supp-gst-row").style.display = "none";
+      document.getElementById("acct-resched-disc-row").style.display = "";
+      document.getElementById("acct-resched-agent-row").style.display = "";
+      document.getElementById("acct-resched-supp-row").style.display = "";
+      document.getElementById("acct-resched-supp-gst-row").style.display = "";
+    } else {
+      [discAmt, tdsAmt, suppCommAmt, suppTdsAmt, suppGstAmt].forEach((el) => {
+        el.style.flex = ""; el.style.minWidth = ""; el.style.width = "";
+        el.style.boxSizing = ""; el.style.textAlign = "";
+      });
+      document.getElementById("default-disc-pct-slot").append(discPctField);
+      document.getElementById("default-disc-amt-slot").append(discAmt);
+      document.getElementById("default-tdspct-slot").append(tdsPct);
+      document.getElementById("default-tdsamt-slot").append(tdsAmt);
+      document.getElementById("default-taxable-slot").append(taxable);
+      document.getElementById("default-gst-slot").append(gstAmt, gstBtn);
+      document.getElementById("default-supp-comm-pct-slot").append(suppCommPctField);
+      document.getElementById("default-supp-comm-amt-slot").append(suppCommAmt);
+      document.getElementById("default-supp-tdspct-slot").append(suppTdsPct);
+      document.getElementById("default-supp-tdsamt-slot").append(suppTdsAmt);
+      document.getElementById("default-supp-gstpct-slot").append(suppGstPct);
+      document.getElementById("default-supp-gstamt-slot").append(suppGstAmt);
+      document.getElementById("acct-default-disc-row").style.display = "";
+      document.getElementById("acct-default-taxable-row").style.display = "";
+      document.getElementById("acct-default-tds-row").style.display = "";
+      document.getElementById("acct-default-supp-comm-row").style.display = "";
+      document.getElementById("acct-default-supp-tds-row").style.display = "";
+      document.getElementById("acct-default-supp-gst-row").style.display = "";
+      document.getElementById("acct-resched-disc-row").style.display = "none";
+      document.getElementById("acct-resched-agent-row").style.display = "none";
+      document.getElementById("acct-resched-supp-row").style.display = "none";
+      document.getElementById("acct-resched-supp-gst-row").style.display = "none";
+    }
   }
   // Switches the fare modal between the frozen original ticket line
   // (Parent) and this brand new ticket's own blank/editable data
   // (Reschedule) - covers the whole modal, both columns.
   function applyRescheduleTab(tab) {
     modalRescheduleTab = tab;
+    layoutAcctFieldsForReschedule(tab === "reschedule");
     document.querySelectorAll("#fare-breakdown-modal input, #fare-breakdown-modal select").forEach((el) => (el.disabled = false));
     const isParent = tab === "parent";
     writeModalPassenger(isParent ? rescheduleParentPassenger : rescheduleEditPassenger);
@@ -1210,13 +1350,17 @@
 
     const rowsHtml = passengers.map((p, i) => {
       const r = computeFareLine(p);
-      const allTaxes = p.yr + p.tax_others + p.seat + p.meal + p.baggage + p.other_ssr + r.tds
-        + p.markup + p.addl_markup + (p.ssr_markup || 0) + p.service_fee + p.addl_service_fee + (p.ssr_service_fee || 0) + r.gst - r.discount;
-      // A reschedule's fare figures aren't finalized yet - the carried-over
-      // amounts stay intact underneath (visible, frozen, inside the fare
-      // modal) but every amount shown out here on the register row reads
-      // 0.00 until this new ticket's own numbers are worked out.
-      const z = (v) => (rescheduleMode ? fmtN(0) : fmtN(v));
+      const rs = computeSuppLine(p);
+      // Other Taxes = everything besides Basic/YQ/K3/SSR (those already
+      // have their own columns) - YR + Tax & Others, both Supplier and
+      // Customer's Markup/Addl Markup/Service Fee/Addl Service Fee/GST,
+      // Customer's SSR Markup/SSR Service Fee, Customer TDS minus Customer
+      // Discount, plus Agent Penalty + Supplier Penalty.
+      const allTaxes = p.yr + p.tax_others
+        + (p.supp_markup || 0) + (p.supp_addl_markup || 0) + (p.supp_service_fee || 0) + (p.supp_addl_service_fee || 0) + rs.gst
+        + p.markup + p.addl_markup + (p.ssr_markup || 0) + p.service_fee + p.addl_service_fee + (p.ssr_service_fee || 0)
+        + r.gst - r.discount + r.tds + (p.agent_penalty || 0) + (p.supplier_penalty || 0);
+      const z = (v) => fmtN(v);
       return `<tr class="pax-row" data-idx="${i}" title="${viewMode ? "Double-click to view" : "Double-click to edit"}">
         <td style="text-align:center;">${i + 1}</td><td>${p.ticket_no}</td><td>${p.airline_name || p.airline_code || "-"}</td>
         <td>${p.card_number || "-"}</td>
@@ -1283,6 +1427,7 @@
   function recalcSummary() {
     let basic = 0, taxes = 0, ssr = 0, discount = 0, tds = 0, markup = 0, serviceFee = 0, gst = 0, total = 0;
     let suppCommission = 0, suppTds = 0, suppMarkup = 0, suppServiceFee = 0, suppGst = 0;
+    let agentPenalty = 0, supplierPenalty = 0;
     passengers.forEach((p) => {
       const r = computeFareLine(p);
       const rs = computeSuppLine(p);
@@ -1296,19 +1441,19 @@
       suppMarkup += (p.supp_markup || 0) + (p.supp_addl_markup || 0);
       suppServiceFee += (p.supp_service_fee || 0) + (p.supp_addl_service_fee || 0);
       suppGst += rs.gst;
+      agentPenalty += (p.agent_penalty || 0); supplierPenalty += (p.supplier_penalty || 0);
     });
     const purchaseTotal = basic + taxes + ssr - suppCommission + suppTds + suppMarkup + suppServiceFee + suppGst;
-    // Same reasoning as the register row above - a reschedule's Purchase/
-    // Sales Cost and Earnings aren't finalized yet, so this whole strip
-    // reads 0.00 rather than the carried-over ticket's real totals.
-    const z = (v) => (rescheduleMode ? fmtN(0) : fmtN(v));
+    const z = (v) => fmtN(v);
 
     document.getElementById("pc-basic").textContent = z(basic);
     document.getElementById("pc-taxes").textContent = z(taxes);
     document.getElementById("pc-ssr").textContent = z(ssr);
     document.getElementById("pc-disc").textContent = z(suppCommission);
     document.getElementById("pc-tds").textContent = z(suppTds);
-    document.getElementById("pc-markup").textContent = z(suppMarkup);
+    // Purchase Cost's Markup column additionally folds in Supplier Penalty
+    // (display only - purchaseTotal/pc-total above is untouched).
+    document.getElementById("pc-markup").textContent = z(suppMarkup + supplierPenalty);
     document.getElementById("pc-sfee").textContent = z(suppServiceFee);
     document.getElementById("pc-gst").textContent = z(suppGst);
     document.getElementById("pc-total").textContent = z(purchaseTotal);
@@ -1318,14 +1463,16 @@
     document.getElementById("sc-ssr").textContent = z(ssr);
     document.getElementById("sc-disc").textContent = z(discount);
     document.getElementById("sc-tds").textContent = z(tds);
-    document.getElementById("sc-markup").textContent = z(markup);
+    // Sales Cost's Markup column additionally folds in Supplier Penalty +
+    // Agent Penalty (display only - total/sc-total above is untouched).
+    document.getElementById("sc-markup").textContent = z(markup + supplierPenalty + agentPenalty);
     document.getElementById("sc-sfee").textContent = z(serviceFee);
     document.getElementById("sc-gst").textContent = z(gst);
     document.getElementById("sc-total").textContent = z(total);
 
-    // Earnings = Sales Cost total - Purchase Cost total - Sales TDS - Sales
-    // GST - Purchase TDS - Purchase GST.
-    const earnings = total - purchaseTotal - tds - gst - suppTds - suppGst;
+    // Earnings = Sales Cost Total - Purchase Cost Total - Sales Cost GST
+    // Amount - Sales Cost TDS Amount + Purchase Cost TDS Amount.
+    const earnings = total - purchaseTotal - gst - tds + suppTds;
     document.getElementById("invoice_total").textContent = z(earnings);
   }
   document.getElementById("refresh-total-btn").addEventListener("click", recalcSummary);
@@ -1335,9 +1482,20 @@
   // not a real date column, since multi-city sectors can carry different
   // dates, comma-joined.
   function buildTicketPayload() {
-    const lines = passengers.map((p) => ({ ...p }));
+    // Reschedule saves post to reschedule-tickets/create-or-update instead
+    // (see the submit handler) - that endpoint needs to know which
+    // original ticket line each new line was rescheduled from, since it
+    // deliberately doesn't duplicate Parent PNR Details' own columns. A
+    // saved reschedule's passenger already carries its own
+    // original_ticket_line_id (from enterSavedRescheduleMode); a
+    // brand-new one falls back to the URL's reschedule_line_id.
+    const lines = passengers.map((p) => ({
+      ...p,
+      ...(rescheduleMode ? { original_ticket_line_id: p.original_ticket_line_id || Number(rescheduleLineId) } : {}),
+    }));
     return {
       company_id: activeCompanyId,
+      ...(rescheduleMode ? { original_ticket_id: Number(rescheduleTicketId) } : {}),
       invoice_number: document.getElementById("invoice_number").value.trim(),
       invoice_date: toISOFromDDMMYYYY(getDateGroupValue(document.getElementById("invoice_date"))),
       invoice_type: document.getElementById("invoice_type").value,
@@ -1497,7 +1655,7 @@
     empty.style.display = "none";
 
     const gatewayRef = document.getElementById("payment_gateway_ref").value;
-    // Resolved as of THIS ticket's own Booking Ref Date - see
+    // Resolved as of THIS ticket's own Invoice Date - see
     // getPgEffective()/PGMasterHistory - so the preview matches exactly
     // what the backend will actually post, even if the gateway's rate/
     // ledger has since been edited with a later Effective From date.
@@ -1797,6 +1955,30 @@
     document.getElementById("edit-ticket-btn").style.display = "";
   }
 
+  // Builds the frozen "Parent PNR Details" passenger object from an
+  // original TicketLine (as returned by tickets/<id>/) - shared by both
+  // enterRescheduleMode (brand-new reschedule) and enterSavedRescheduleMode
+  // (re-opening an already-saved one), so the two flows can never drift
+  // out of sync on what Parent PNR Details actually shows.
+  function buildParentPassengerFromLine(l) {
+    return {
+      airline_code: l.airline_code, airline_name: l.airline_name, airline_category: l.airline_category,
+      flight_no: l.flight_no, ticket_no: l.ticket_no,
+      passenger_name: l.passenger_name, pax_type: l.pax_type, sector: l.sector, travel_date: l.travel_date,
+      cabin: l.cabin, travel_class: l.travel_class, fare_type: l.fare_type,
+      basic_fare: l.basic_fare, yq: l.yq, yr: l.yr, k3_tax: l.k3_tax, tax_others: l.tax_others, seat: l.seat, meal: l.meal,
+      baggage: l.baggage, other_ssr: l.other_ssr, disc_on: l.disc_on, disc_type: l.disc_type, disc_value: l.disc_value,
+      tds_per: l.tds_per, pg_charges: l.pg_charges || 0, pg_charges_percentage: l.pg_charges_percentage != null ? l.pg_charges_percentage : 0, markup: l.markup, addl_markup: l.addl_markup, ssr_markup: l.ssr_markup || 0, service_fee: l.service_fee,
+      addl_service_fee: l.addl_service_fee, ssr_service_fee: l.ssr_service_fee || 0, gst_pct: l.gst_pct,
+      supplier_name: l.supplier_name, office_id: l.office_id, fop: l.fop, card_number: l.card_number || "",
+      supp_comm_on: l.supp_comm_on, supp_comm_type: l.supp_comm_type,
+      supp_comm_value: l.supp_comm_value, supp_tds_per: l.supp_tds_per,
+      supp_markup: l.supp_markup || 0, supp_addl_markup: l.supp_addl_markup || 0,
+      supp_service_fee: l.supp_service_fee || 0, supp_addl_service_fee: l.supp_addl_service_fee || 0,
+      supp_gst_pct: l.supp_gst_pct || 0,
+    };
+  }
+
   // Pre-fills a brand-new ticket from an existing one's data, for the
   // Reschedule flow (trans-airline-reschedule.html) - unlike enterViewMode,
   // this leaves Invoice Number blank and defaults both dates to today (this
@@ -1844,28 +2026,59 @@
       // Parent PNR Details tab - the ORIGINAL ticket line, untouched, shown
       // purely as a frozen reference (including its real FOP/Card Number,
       // unlike the old behaviour that used to default FOP to Cash here).
-      rescheduleParentPassenger = {
-        airline_code: l.airline_code, airline_name: l.airline_name, airline_category: l.airline_category,
-        flight_no: l.flight_no, ticket_no: l.ticket_no,
-        passenger_name: l.passenger_name, pax_type: l.pax_type, sector: l.sector, travel_date: l.travel_date,
-        cabin: l.cabin, travel_class: l.travel_class, fare_type: l.fare_type,
-        basic_fare: l.basic_fare, yq: l.yq, yr: l.yr, k3_tax: l.k3_tax, tax_others: l.tax_others, seat: l.seat, meal: l.meal,
-        baggage: l.baggage, other_ssr: l.other_ssr, disc_on: l.disc_on, disc_type: l.disc_type, disc_value: l.disc_value,
-        tds_per: l.tds_per, pg_charges: l.pg_charges || 0, pg_charges_percentage: l.pg_charges_percentage != null ? l.pg_charges_percentage : 0, markup: l.markup, addl_markup: l.addl_markup, ssr_markup: l.ssr_markup || 0, service_fee: l.service_fee,
-        addl_service_fee: l.addl_service_fee, ssr_service_fee: l.ssr_service_fee || 0, gst_pct: l.gst_pct,
-        supplier_name: l.supplier_name, office_id: l.office_id, fop: l.fop, card_number: l.card_number || "",
-        supp_comm_on: l.supp_comm_on, supp_comm_type: l.supp_comm_type,
-        supp_comm_value: l.supp_comm_value, supp_tds_per: l.supp_tds_per,
-        supp_markup: l.supp_markup || 0, supp_addl_markup: l.supp_addl_markup || 0,
-        supp_service_fee: l.supp_service_fee || 0, supp_addl_service_fee: l.supp_addl_service_fee || 0,
-        supp_gst_pct: l.supp_gst_pct || 0,
-      };
+      rescheduleParentPassenger = buildParentPassengerFromLine(l);
       // Reschedule PNR Details tab - this brand new ticket's own data,
       // starts fully blank/0.00 (like any other new passenger) and IS what
       // the register/Summary/save payload actually reflect until filled in.
       passengers = [blankPassenger()];
       rescheduleEditPassenger = passengers[0];
     }
+    renderPaxTable();
+  }
+
+  // Re-opens an ALREADY-SAVED RescheduleAirlineTicket (the lookup screen's
+  // "Saved" radio) - unlike enterRescheduleMode above, every field (header
+  // + the one passenger line) is filled from what was actually saved, not
+  // blank, and Save Ticket goes on to UPDATE this same record (see
+  // editingRescheduleId) instead of creating a new one.
+  async function enterSavedRescheduleMode(rt, originalTicket) {
+    rescheduleMode = true;
+    editingRescheduleId = rt.id;
+    rescheduleTicketId = rt.original_ticket_id;
+    document.getElementById("page-title").textContent = "Reschedule";
+    document.getElementById("booking_reference_label").innerHTML = 'Rescheduled Ref<span class="dom-req">*</span>';
+    document.getElementById("booking_ref_date_label").innerHTML = 'Rescheduled Ref Date<span class="dom-req">*</span>';
+    document.getElementById("booking_reference").style.flex = "0 0 120px";
+    document.getElementById("parent-pnr-field").style.display = "";
+    document.getElementById("parent_pnr").textContent = originalTicket.booking_reference || "—";
+    document.getElementById("invoice_number").value = rt.invoice_number || "";
+    setDateGroupValue(document.getElementById("invoice_date"), rt.invoice_date ? isoToDDMMYYYY(rt.invoice_date) : todayDDMMYYYY());
+    document.getElementById("invoice_type").value = rt.invoice_type || "";
+    document.getElementById("booking_mode").value = rt.booking_mode || "";
+    document.getElementById("customer").value = rt.customer_name || "";
+    document.getElementById("booking_reference").value = rt.booking_reference || "";
+    document.getElementById("booking_given_by").value = rt.booking_given_by || "";
+    document.getElementById("booking_type").value = rt.booking_type || "";
+    document.getElementById("booking_status").value = "Re-Scheduled";
+    document.getElementById("booking_status").disabled = true;
+    document.getElementById("travel_type").value = rt.travel_type || "";
+    document.getElementById("user_name").value = rt.user_name || "";
+    document.getElementById("payment_mode").value = rt.payment_mode || "";
+    document.getElementById("payment_gateway_ref").value = rt.payment_gateway_ref || "";
+    updateGatewayRefField();
+    document.getElementById("roe").value = rt.roe;
+    document.getElementById("airline_pnr_header").value = rt.airline_pnr || "";
+    document.getElementById("gds_pnr_header").value = rt.gds_pnr || "";
+    setDateGroupValue(document.getElementById("booking_ref_date"), rt.booking_ref_date ? isoToDDMMYYYY(rt.booking_ref_date) : todayDDMMYYYY());
+    document.getElementById("customer").dispatchEvent(new Event("input"));
+
+    const savedLine = rt.lines[0];
+    const parentLine = savedLine
+      ? originalTicket.lines.find((ln) => String(ln.id) === String(savedLine.original_ticket_line_id))
+      : null;
+    if (parentLine) rescheduleParentPassenger = buildParentPassengerFromLine(parentLine);
+    passengers = savedLine ? [{ ...blankPassenger(), ...savedLine }] : [blankPassenger()];
+    rescheduleEditPassenger = passengers[0];
     renderPaxTable();
   }
 
@@ -1931,7 +2144,11 @@
     if (passengers.length === 0) { voyagerAlert("Add at least one passenger via Proceed ->."); return; }
 
     const payload = buildTicketPayload();
-    const url = editId
+    const url = rescheduleMode
+      ? (editingRescheduleId
+          ? `${API_BASE}/reschedule-tickets/${editingRescheduleId}/update/`
+          : `${API_BASE}/reschedule-tickets/create/`)
+      : editId
       ? `${API_BASE}/tickets/${editId}/update/`
       : `${API_BASE}/tickets/create/`;
 
@@ -1990,7 +2207,20 @@
         const res = await fetch(`${API_BASE}/tickets/?company_id=${activeCompanyId}`);
         existingTickets = res.ok ? await res.json() : [];
       } catch (_) { existingTickets = []; }
-      if (rescheduleTicketId) {
+      if (rescheduleSavedId) {
+        try {
+          const res = await fetch(`${API_BASE}/reschedule-tickets/${rescheduleSavedId}/?company_id=${activeCompanyId}`);
+          const rt = await res.json();
+          if (!res.ok) throw new Error(rt.error || "Saved reschedule ticket not found.");
+          const origRes = await fetch(`${API_BASE}/tickets/${rt.original_ticket_id}/?company_id=${activeCompanyId}`);
+          const originalTicket = await origRes.json();
+          if (!origRes.ok) throw new Error(originalTicket.error || "Original ticket not found.");
+          await enterSavedRescheduleMode(rt, originalTicket);
+        } catch (err) {
+          voyagerAlert(err.message || "Could not load this saved reschedule ticket. Is the Django backend running?", { icon: "error" });
+          renderPaxTable();
+        }
+      } else if (rescheduleTicketId) {
         try {
           const res = await fetch(`${API_BASE}/tickets/${rescheduleTicketId}/?company_id=${activeCompanyId}`);
           const ticket = await res.json();

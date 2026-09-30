@@ -107,6 +107,20 @@
           <label>Ticket No</label>
           <input type="text" class="form-control-custom" id="rs-search-ticket-no" placeholder="Ticket No" autocomplete="off" style="height:34px;" />
         </div>
+        <!-- New = look up the ORIGINAL ticket (current behaviour, unchanged)
+             and show the Passengers/Sectors picker below. Saved = look up
+             an ALREADY-SAVED reschedule ticket instead and jump straight
+             into ticket-entry.html pre-filled with it (both its own data
+             and the original's Parent PNR Details) - no picker needed,
+             since a saved reschedule already has exactly one passenger. -->
+        <div class="filter-group" style="flex-direction:row; align-items:center; gap:1rem; padding-bottom:6px;">
+          <label style="display:flex; align-items:center; gap:0.35rem; font-weight:600; color:var(--color-text-dark); cursor:pointer;">
+            <input type="radio" name="rs-lookup-mode" id="rs-mode-new" value="new" checked /> New
+          </label>
+          <label style="display:flex; align-items:center; gap:0.35rem; font-weight:600; color:var(--color-text-dark); cursor:pointer;">
+            <input type="radio" name="rs-lookup-mode" id="rs-mode-saved" value="saved" /> Saved
+          </label>
+        </div>
         <button type="button" class="dom-nav-btn btn-primary" style="height:34px;" id="rs-get-btn">Get</button>
       </div>
 
@@ -238,7 +252,43 @@
         voyagerAlert(err.message || "Could not search for this ticket. Is the Django backend running?", { icon: "error" });
       }
     }
-    document.getElementById("rs-get-btn").addEventListener("click", lookupTicketForReschedule);
+    // "Saved" mode looks up an already-saved RescheduleAirlineTicket
+    // (searched against ITS OWN S PNR/Airline PNR/Ticket No, not the
+    // original ticket's) and jumps straight into ticket-entry.html - no
+    // Passengers/Sectors picker, since a saved reschedule already has
+    // exactly one line.
+    async function lookupSavedRescheduleTicket() {
+      if (!activeCompanyId) {
+        const selector = document.getElementById("company-selector");
+        if (selector && selector.value) activeCompanyId = Number(selector.value);
+      }
+      if (!activeCompanyId) {
+        voyagerAlert("Could not determine the active company. Check your connection and try Get again.");
+        return;
+      }
+      const sPnr = document.getElementById("rs-search-spnr").value.trim();
+      const airlinePnr = document.getElementById("rs-search-airline-pnr").value.trim();
+      const ticketNo = document.getElementById("rs-search-ticket-no").value.trim();
+      if (!sPnr && !airlinePnr && !ticketNo) {
+        voyagerAlert("Enter S PNR, Airline PNR or Ticket No to search.");
+        return;
+      }
+      try {
+        const params = new URLSearchParams({ company_id: activeCompanyId, s_pnr: sPnr, airline_pnr: airlinePnr, ticket_no: ticketNo });
+        const res = await fetch(`${window.API_BASE || "/api"}/reschedule-tickets/lookup/?${params}`);
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Saved reschedule ticket not found.");
+        window.location.href = `ticket-entry.html?reschedule_saved_id=${data.reschedule_ticket_id}`;
+      } catch (err) {
+        voyagerAlert(err.message || "Could not search for this reschedule ticket. Is the Django backend running?", { icon: "error" });
+      }
+    }
+
+    document.getElementById("rs-get-btn").addEventListener("click", () => {
+      const mode = document.querySelector('input[name="rs-lookup-mode"]:checked').value;
+      if (mode === "saved") lookupSavedRescheduleTicket();
+      else lookupTicketForReschedule();
+    });
 
     function renderPassengers() {
       const tbody = document.getElementById("rs-pax-tbody");

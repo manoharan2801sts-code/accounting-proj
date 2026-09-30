@@ -448,13 +448,48 @@
                 <label>Cust Discount On</label>
                 <select class="dom-select modal-calc" id="modal-disc-on"></select>
               </div>
-              <div class="dom-acct-field dom-acct-field-dual disc-amount-row">
-                <span id="modal-disc-value-field" style="display:none;">
-                  <label id="modal-disc-val-label">Discount %</label>
-                  <input class="dom-input modal-calc dom-acct-input-sm dom-amount" type="text" inputmode="decimal" id="modal-disc-value" min="0" step="0.01" value="0.00" />
+              <!-- Reschedule tab ONLY - Discount Amount and TDS Amount
+                   merged onto one row (each its own label + dual %/amount
+                   box), sitting right after Cust Discount On (same
+                   position the default Discount Amount row below has).
+                   Empty slots here get filled by moving the SAME real
+                   elements out of the default rows further down (see
+                   layoutAcctFieldsForReschedule() in page-ticket-entry.js). -->
+              <div id="acct-resched-disc-row" style="display:none;">
+                <div class="dom-acct-field dom-acct-field-dual" style="grid-template-columns: 50px 1fr 50px 1fr;">
+                  <label style="white-space:normal; line-height:1.1; font-size:10px;">Discount Amount</label>
+                  <span id="resched-disc-box" style="display:flex; align-items:center; gap:4px;">
+                    <span class="acct-pct-box"><span id="resched-disc-pct-slot"></span><span class="acct-pct-suffix">%</span></span>
+                    <span id="resched-disc-amt-slot" style="flex:1; min-width:0;"></span>
+                  </span>
+                  <label style="white-space:normal; line-height:1.1; font-size:10px;">TDS Amount</label>
+                  <span id="resched-tds-box" style="display:flex; align-items:center; gap:4px;">
+                    <span class="acct-pct-box"><span id="resched-tds-pct-slot"></span><span class="acct-pct-suffix">%</span></span>
+                    <span id="resched-tds-amt-slot" style="flex:1; min-width:0;"></span>
+                  </span>
+                </div>
+              </div>
+              <!-- Discount/TDS/Taxable/GST - Reschedule tab rearranges
+                   these onto a different set of rows (see acct-resched-disc-row
+                   above and acct-resched-agent-row further down) by MOVING
+                   the real input/value elements between here and there via
+                   JS (applyRescheduleTab() / layoutAcctFieldsForReschedule())
+                   - never duplicating them, so calculation code
+                   (readModalPassenger etc.) never needs to know or care
+                   which layout is showing. This block is exactly the
+                   original, unmodified structure - what Parent PNR Details
+                   and every normal (non-reschedule) ticket always show. -->
+              <div class="dom-acct-field dom-acct-field-dual disc-amount-row" id="acct-default-disc-row">
+                <span id="default-disc-pct-slot">
+                  <span id="modal-disc-value-field" style="display:none;">
+                    <label id="modal-disc-val-label">Discount %</label>
+                    <input class="dom-input modal-calc dom-acct-input-sm dom-amount" type="text" inputmode="decimal" id="modal-disc-value" min="0" step="0.01" value="0.00" />
+                  </span>
                 </span>
                 <label>Discount Amount</label>
-                <input class="dom-input dom-acct-input-sm dom-amount" type="text" inputmode="decimal" id="modal-disc-computed" min="0" step="0.01" value="0.00" />
+                <span id="default-disc-amt-slot">
+                  <input class="dom-input dom-acct-input-sm dom-amount" type="text" inputmode="decimal" id="modal-disc-computed" min="0" step="0.01" value="0.00" />
+                </span>
               </div>
               <div class="dom-acct-field dom-acct-field-triple">
                 <label>Markup</label>
@@ -477,22 +512,52 @@
                    calculation (view purposes only). GST Amount = each of
                    those times its own mapped ledger's GST% (see
                    computeFareLine). -->
-              <div class="dom-acct-field dom-acct-field-dual" style="grid-template-columns: 84px 1fr 68px 1fr;">
+              <div class="dom-acct-field dom-acct-field-dual" id="acct-default-taxable-row" style="grid-template-columns: 84px 1fr 68px 1fr;">
                 <label style="white-space:normal; line-height:1.1; font-size:10px;">Taxable Amount</label>
-                <div class="dom-input-readonly" id="modal-taxable-amount" style="text-align:right; justify-content:flex-end;">0.00</div>
+                <span id="default-taxable-slot">
+                  <div class="dom-input-readonly" id="modal-taxable-amount" style="text-align:right; justify-content:flex-end;">0.00</div>
+                </span>
                 <label style="white-space:normal; line-height:1.1; font-size:10px;">GST Amount</label>
-                <div style="display:flex; align-items:center; gap:4px;">
+                <span id="default-gst-slot" style="display:flex; align-items:center; gap:4px;">
                   <div class="dom-input-readonly" id="modal-gst-computed" style="flex:1; min-width:0; text-align:right; justify-content:flex-end;">0.00</div>
                   <button type="button" class="dom-eye-btn" id="modal-gst-detail-btn" title="View GST Amount calculation">
                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
                   </button>
-                </div>
+                </span>
               </div>
-              <div class="dom-acct-field dom-acct-field-dual" style="grid-template-columns: 84px 1fr 68px 1fr;">
+              <div class="dom-acct-field dom-acct-field-dual" id="acct-default-tds-row" style="grid-template-columns: 84px 1fr 68px 1fr;">
                 <label style="white-space:normal; line-height:1.1; font-size:10px;">TDS %</label>
-                <input class="dom-input modal-calc dom-acct-input-sm dom-amount" type="text" inputmode="decimal" id="modal-tds-per" min="0" step="0.01" value="0.00" />
+                <span id="default-tdspct-slot">
+                  <input class="dom-input modal-calc dom-acct-input-sm dom-amount" type="text" inputmode="decimal" id="modal-tds-per" min="0" step="0.01" value="0.00" />
+                </span>
                 <label style="white-space:normal; line-height:1.1; font-size:10px;">TDS Amount</label>
-                <div class="dom-input-readonly dom-acct-input-sm" id="modal-tds-computed">0.00</div>
+                <span id="default-tdsamt-slot">
+                  <div class="dom-input-readonly dom-acct-input-sm" id="modal-tds-computed">0.00</div>
+                </span>
+              </div>
+              <!-- Reschedule tab ONLY - Agent Penalty added left of
+                   Taxable Amount (TDS already moved up into
+                   acct-resched-disc-row above, so this row only needs
+                   Agent Penalty/Taxable/GST). Agent Penalty is the only
+                   genuinely new field (UI-only for now, not wired to any
+                   save/calculation). -->
+              <div id="acct-resched-agent-row" style="display:none;">
+                <div class="dom-acct-field dom-acct-field-triple" style="grid-template-columns: 50px minmax(48px, 1fr) 50px minmax(48px, 1fr) 50px minmax(48px, 1fr);">
+                  <label>Agent Penalty</label>
+                  <input class="dom-input modal-calc dom-acct-input-sm dom-max10 dom-amount" type="text" inputmode="decimal" id="modal-agent-penalty" min="0" max="9999999999" step="0.01" value="0.00" />
+                  <label>Taxable Amount</label>
+                  <span id="resched-taxable-slot" style="text-align:right;"></span>
+                  <label>GST Amount</label>
+                  <span id="resched-gst-slot" style="display:flex; align-items:center; gap:4px;"></span>
+                </div>
+                <!-- Merging Discount Amount + TDS Amount onto one row above
+                     leaves this card one row shorter than the default
+                     (Parent) layout, which showed them as two separate
+                     rows - this spacer, at the bottom of the card, makes up
+                     that difference so the whole modal's height stays
+                     identical switching tabs, instead of visibly shrinking/
+                     jumping. -->
+                <div style="height:24px; flex-shrink:0;"></div>
               </div>
               <!-- Only shown when the ticket's Payment Mode is "Payment
                    Gateway" - posts against that gateway's PG Master ->
@@ -509,7 +574,7 @@
                      applied (also saved on the ticket line), the second
                      box the resulting amount. -->
                 <div style="display:flex; align-items:center; gap:4px;">
-                  <input class="dom-input-readonly dom-acct-input-sm" type="text" id="modal-pg-charges-pct" readonly value="0.00%" style="width:48px; flex:none; text-align:right;" title="PG Charges Percentage applied (as of Booking Ref Date)" />
+                  <input class="dom-input-readonly dom-acct-input-sm" type="text" id="modal-pg-charges-pct" readonly value="0.00%" style="width:48px; flex:none; text-align:right;" title="PG Charges Percentage applied (as of Invoice Date)" />
                   <input class="dom-input-readonly dom-acct-input-sm" type="text" id="modal-pg-charges" readonly value="0.00" style="flex:1; min-width:0; text-align:right;" />
                 </div>
                 <label>PG GST</label>
@@ -528,18 +593,46 @@
               <div class="dom-acct-field dom-acct-field-dual">
                 <label>Commission Type</label>
                 <select class="dom-select modal-calc dom-acct-input-sm" id="modal-supp-comm-type"></select>
-                <span id="modal-supp-comm-value-field" style="display:contents;">
-                  <label id="modal-supp-comm-val-label">Commission %</label>
-                  <input class="dom-input modal-calc dom-acct-input-sm dom-amount" type="text" inputmode="decimal" id="modal-supp-comm-value" min="0" step="0.01" value="0.00" />
+                <span id="default-supp-comm-pct-slot">
+                  <span id="modal-supp-comm-value-field" style="display:contents;">
+                    <label id="modal-supp-comm-val-label">Commission %</label>
+                    <input class="dom-input modal-calc dom-acct-input-sm dom-amount" type="text" inputmode="decimal" id="modal-supp-comm-value" min="0" step="0.01" value="0.00" />
+                  </span>
                 </span>
               </div>
               <div class="dom-acct-field" id="modal-supp-comm-on-field" style="display:none;">
                 <label>Commission On</label>
                 <select class="dom-select modal-calc" id="modal-supp-comm-on"></select>
               </div>
-              <div class="dom-acct-field">
+              <!-- Reschedule tab ONLY - Commission Amount and TDS Amount
+                   merged onto one row (each its own label + dual %/amount
+                   box, same .acct-pct-box pattern as the Customer card's
+                   own Discount Amount/TDS Amount row), sitting right after
+                   Commission On. Empty slots here get filled by moving the
+                   SAME real elements out of the default rows below (see
+                   layoutAcctFieldsForReschedule() in page-ticket-entry.js). -->
+              <div id="acct-resched-supp-row" style="display:none;">
+                <div class="dom-acct-field dom-acct-field-dual" style="grid-template-columns: 50px 1fr 50px 1fr;">
+                  <label style="white-space:normal; line-height:1.1; font-size:10px;">Commission Amount</label>
+                  <span id="resched-supp-comm-box" style="display:flex; align-items:center; gap:4px;">
+                    <span class="acct-pct-box"><span id="resched-supp-comm-pct-slot"></span><span class="acct-pct-suffix">%</span></span>
+                    <span id="resched-supp-comm-amt-slot" style="flex:1; min-width:0;"></span>
+                  </span>
+                  <label style="white-space:normal; line-height:1.1; font-size:10px;">TDS Amount</label>
+                  <span id="resched-supp-tds-box" style="display:flex; align-items:center; gap:4px;">
+                    <span class="acct-pct-box"><span id="resched-supp-tds-pct-slot"></span><span class="acct-pct-suffix">%</span></span>
+                    <span id="resched-supp-tds-amt-slot" style="flex:1; min-width:0;"></span>
+                  </span>
+                </div>
+              </div>
+              <!-- Commission Amount/TDS - default (Parent PNR Details +
+                   every normal, non-reschedule ticket) layout, exactly as
+                   before the Reschedule-only redesign. -->
+              <div class="dom-acct-field" id="acct-default-supp-comm-row">
                 <label>Commission Amount</label>
-                <input class="dom-input dom-amount" type="text" inputmode="decimal" id="modal-supp-comm-computed" min="0" step="0.01" value="0.00" />
+                <span id="default-supp-comm-amt-slot">
+                  <input class="dom-input dom-amount" type="text" inputmode="decimal" id="modal-supp-comm-computed" min="0" step="0.01" value="0.00" />
+                </span>
               </div>
               <div class="dom-acct-field dom-acct-field-dual">
                 <label>Markup</label>
@@ -553,17 +646,52 @@
                 <label>Addl Service Fee</label>
                 <input class="dom-input modal-calc dom-acct-input-sm dom-max10 dom-amount" type="text" inputmode="decimal" id="modal-supp-addl-service-fee" min="0" max="9999999999" step="0.01" value="0.00" />
               </div>
-              <div class="dom-acct-field dom-acct-field-dual">
+              <div class="dom-acct-field dom-acct-field-dual" id="acct-default-supp-tds-row">
                 <label>TDS %</label>
-                <input class="dom-input modal-calc dom-acct-input-sm dom-amount" type="text" inputmode="decimal" id="modal-supp-tds-per" min="0" step="0.01" value="0.00" />
+                <span id="default-supp-tdspct-slot">
+                  <input class="dom-input modal-calc dom-acct-input-sm dom-amount" type="text" inputmode="decimal" id="modal-supp-tds-per" min="0" step="0.01" value="0.00" />
+                </span>
                 <label>TDS Amount</label>
-                <div class="dom-input-readonly dom-acct-input-sm" id="modal-supp-tds-computed">0.00</div>
+                <span id="default-supp-tdsamt-slot">
+                  <div class="dom-input-readonly dom-acct-input-sm" id="modal-supp-tds-computed">0.00</div>
+                </span>
               </div>
-              <div class="dom-acct-field dom-acct-field-dual">
+              <!-- Reschedule tab ONLY - GST Amount in the same
+                   .acct-pct-box dual-box format as Commission Amount
+                   above (one label, % box with "%" printed inside + wide
+                   amount box) instead of two separate GST %/GST Amount
+                   fields. -->
+              <!-- Supplier Penalty is UI-only for now - not wired to any
+                   save/calculation yet (same as Agent Penalty on the
+                   Customer card). -->
+              <div id="acct-resched-supp-gst-row" style="display:none;">
+                <div class="dom-acct-field dom-acct-field-dual" style="grid-template-columns: 50px 1fr 50px 1fr;">
+                  <label style="white-space:normal; line-height:1.1; font-size:10px;">GST Amount</label>
+                  <span id="resched-supp-gst-box" style="display:flex; align-items:center; gap:4px;">
+                    <span class="acct-pct-box"><span id="resched-supp-gst-pct-slot"></span><span class="acct-pct-suffix">%</span></span>
+                    <span id="resched-supp-gst-amt-slot" style="flex:1; min-width:0;"></span>
+                  </span>
+                  <label style="white-space:normal; line-height:1.1; font-size:10px;">Supplier Penalty</label>
+                  <input class="dom-input modal-calc dom-acct-input-sm dom-max10 dom-amount" type="text" inputmode="decimal" id="modal-supplier-penalty" min="0" max="9999999999" step="0.01" value="0.00" />
+                </div>
+                <!-- Merging Commission Amount + TDS Amount onto one row
+                     above (in acct-resched-supp-row) leaves this card one
+                     row shorter than the default (Parent) layout - this
+                     spacer, at the bottom of the card, makes up that
+                     difference, same reasoning as the Customer card's own. -->
+                <div style="height:24px; flex-shrink:0;"></div>
+              </div>
+              <!-- GST % / GST Amount - default (Parent PNR Details + every
+                   normal, non-reschedule ticket) layout, unchanged. -->
+              <div class="dom-acct-field dom-acct-field-dual" id="acct-default-supp-gst-row">
                 <label>GST %</label>
-                <input class="dom-input modal-calc dom-acct-input-sm dom-amount" type="text" inputmode="decimal" id="modal-supp-gst-pct" min="0" step="0.01" value="0.00" />
+                <span id="default-supp-gstpct-slot">
+                  <input class="dom-input modal-calc dom-acct-input-sm dom-amount" type="text" inputmode="decimal" id="modal-supp-gst-pct" min="0" step="0.01" value="0.00" />
+                </span>
                 <label>GST Amount</label>
-                <div class="dom-input-readonly dom-acct-input-sm" id="modal-supp-gst-computed">0.00</div>
+                <span id="default-supp-gstamt-slot">
+                  <div class="dom-input-readonly dom-acct-input-sm" id="modal-supp-gst-computed">0.00</div>
+                </span>
               </div>
             </div>
             <div class="dom-acct-box-actions">
