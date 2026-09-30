@@ -199,7 +199,6 @@
   // "TeSePr Accounting Software" field spec (Airline Ticket sheet, Part 1-3).
   // Kept here (not inline in the HTML) so this is the one place to edit them.
   const TICKET_FORM_OPTIONS = {
-    invoiceTypes: ["Tax Invoice", "Others"],
     bookingModes: ["Manual", "Auto Push"],
     // Locked to this until the real API push is connected — see bookingModes above
     // for the full list this will switch back to being a dropdown of, later.
