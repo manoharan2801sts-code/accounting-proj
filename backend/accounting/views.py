@@ -468,7 +468,7 @@ def parties_customers_list(request):
     customers = Ledger.objects.filter(company_id=company_id, ledger_category="DEBTOR")
     data = [
         {
-            "id": c.id, "name": c.alias_name or c.name, "code": f"LED-{c.id:05d}",
+            "id": c.id, "name": c.name, "code": f"LED-{c.id:05d}",
             "customer_type": c.customer_type or "RETAIL",
             "credit_limit": float(c.credit_limit or 0),
             "credit_days": c.credit_days or 0,
@@ -500,7 +500,7 @@ def parties_suppliers_list(request):
     suppliers = Ledger.objects.filter(company_id=company_id, ledger_category="CREDITOR")
     data = [
         {
-            "id": s.id, "name": s.alias_name or s.name, "code": s.supplier_code or f"LED-{s.id:05d}",
+            "id": s.id, "name": s.name, "code": s.supplier_code or f"LED-{s.id:05d}",
             "supplier_type": s.creditor_type or "General Creditor",
             "credit_days": s.credit_days or 0,
             # Clamped at 0 - a ledger that's actually net-debit (we're owed
@@ -676,7 +676,7 @@ def _airline_mapping_cache(company_id):
     """
     return {
         (m.masters_category, m.field_name): (
-            (m.ledger_id, m.ledger.alias_name or m.ledger.name) if m.ledger else (m.ledger_id, m.field_name)
+            (m.ledger_id, m.ledger.name) if m.ledger else (m.ledger_id, m.field_name)
         )
         for m in MasterMapping.objects.filter(company_id=company_id, product_type="Airline").select_related("ledger")
     }
@@ -784,7 +784,7 @@ def _ledger_transactions(company_id, ledger, from_date=None, to_date=None):
     (company, txns, opening, closing, total_debit, total_credit).
     """
     ledger_id = ledger.id
-    ledger_names = {l.id: (l.alias_name or l.name) for l in Ledger.objects.filter(company_id=company_id)}
+    ledger_names = {l.id: l.name for l in Ledger.objects.filter(company_id=company_id)}
     company = CompanyMaster.objects.filter(id=company_id).first()
     txns = []
 
@@ -910,7 +910,7 @@ def ledger_book_report(request):
     company, txns, opening, closing, total_debit, total_credit = _ledger_transactions(company_id, ledger, from_date, to_date)
 
     return JsonResponse({
-        "ledger_id": ledger.id, "ledger_name": ledger.alias_name or ledger.name,
+        "ledger_id": ledger.id, "ledger_name": ledger.name,
         "company_name": company.company_name if company else "",
         "from_date": from_date, "to_date": to_date,
         "opening_balance": opening,
@@ -1015,7 +1015,7 @@ def ledger_monthly_summary(request):
     total_credit = round(sum(m["credit"] for m in months), 2)
 
     return JsonResponse({
-        "ledger_id": ledger.id, "ledger_name": ledger.alias_name or ledger.name,
+        "ledger_id": ledger.id, "ledger_name": ledger.name,
         "company_name": company.company_name if company else "",
         "financial_year_from": fy_start.isoformat(), "financial_year_to": fy_end.isoformat(),
         "from_date": window_from.isoformat(), "to_date": window_to.isoformat(),
@@ -1162,7 +1162,7 @@ def cash_bank_book_report(request):
         group_total = 0.0
         for l in Ledger.objects.filter(company_id=company_id, group_id=g.id).order_by("name"):
             bal = round(float(l.signed_balance) + deltas.get(l.id, 0.0), 2)
-            ledger_rows.append({"id": l.id, "name": l.alias_name or l.name, "closing_balance": bal})
+            ledger_rows.append({"id": l.id, "name": l.name, "closing_balance": bal})
             group_total += bal
         group_total = round(group_total, 2)
         groups_out.append({"group_name": g.name, "closing_balance": group_total, "ledgers": ledger_rows})
@@ -1450,7 +1450,7 @@ def trial_balance_report(request):
             total_credit += credit
         for l in sorted(ledgers_by_group.get(parent_group_id, []), key=lambda l: l.name):
             l_debit, l_credit = _trial_balance_dr_cr(ledger_balance(l))
-            rows.append({"type": "ledger", "id": l.id, "name": l.alias_name or l.name, "debit": l_debit, "credit": l_credit})
+            rows.append({"type": "ledger", "id": l.id, "name": l.name, "debit": l_debit, "credit": l_credit})
             total_debit += l_debit
             total_credit += l_credit
         return rows, round(total_debit, 2), round(total_credit, 2)
@@ -1612,7 +1612,7 @@ def _compute_jv_lines(ticket, lines, mapping_cache=None, company_state=None):
     def customer_rows(dr_cr, amount):
         debit, credit = dr_cr_amounts(dr_cr, amount)
         return [{"role": "customer", "ledger_id": ticket.customer_id,
-                 "ledger_name": ticket.customer.alias_name or ticket.customer.name,
+                 "ledger_name": ticket.customer.name,
                  "debit": debit, "credit": credit}]
 
     def supplier_rows(dr_cr):
@@ -1620,7 +1620,7 @@ def _compute_jv_lines(ticket, lines, mapping_cache=None, company_state=None):
         for g in supplier_groups.values():
             debit, credit = dr_cr_amounts(dr_cr, g["amount"])
             ledger = g["ledger"]
-            name = (ledger.alias_name or ledger.name) if ledger else "— (no supplier selected)"
+            name = ledger.name if ledger else "— (no supplier selected)"
             rows.append({
                 "role": "supplier",
                 "ledger_id": ledger.id if ledger else None,
@@ -1642,7 +1642,7 @@ def _compute_jv_lines(ticket, lines, mapping_cache=None, company_state=None):
                 masters_category=masters_category, field_name=field_name,
             ).select_related("ledger").first()
             mapping_cache[key] = (
-                (m.ledger_id, m.ledger.alias_name or m.ledger.name) if m and m.ledger
+                (m.ledger_id, m.ledger.name) if m and m.ledger
                 else (m.ledger_id, field_name) if m
                 else (None, f"{field_name} (not mapped in Master Mapping)")
             )
