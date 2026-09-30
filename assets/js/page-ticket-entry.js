@@ -257,6 +257,10 @@
     "modal-supp-markup": "Supplier Markup A/c", "modal-supp-addl-markup": "Supplier Addl Markup A/c",
     "modal-supp-service-fee": "Supplier Service Fee A/c", "modal-supp-addl-service-fee": "Supplier Addl Service Fee A/c",
     "modal-supp-gst-pct": "Input IGST A/c",
+    // Reschedule PNR Details tab only - same guard, so these can't hold a
+    // value either until their own Master Mapping ledger is set.
+    "modal-agent-penalty": "Agent Penalty A/c",
+    "modal-reschedule-penalty": "Supplier Reschedule Penalty A/c",
   };
   const jvGuardWarned = new Set();
   document.addEventListener("focusin", (e) => { jvGuardWarned.delete(e.target.id); });
@@ -655,11 +659,11 @@
     airline_code: "", airline_name: "", airline_category: "", flight_no: "", ticket_no: "", passenger_name: "", pax_type: "",
     sector: "", travel_date: "", cabin: "", travel_class: "", fare_type: "", basic_fare: 0, yq: 0, yr: 0, k3_tax: 0,
     tax_others: 0, seat: 0, meal: 0,
-    baggage: 0, other_ssr: 0, disc_on: "", disc_type: "", disc_value: 0, tds_per: 0, pg_charges: 0, pg_charges_percentage: 0, markup: 0, addl_markup: 0, ssr_markup: 0,
+    baggage: 0, other_ssr: 0, supplier_penalty: 0, disc_on: "", disc_type: "", disc_value: 0, tds_per: 0, pg_charges: 0, pg_charges_percentage: 0, markup: 0, addl_markup: 0, ssr_markup: 0,
     service_fee: 0, addl_service_fee: 0, ssr_service_fee: 0, gst_pct: 0, supplier_name: "", office_id: "", fop: "Cash", card_number: "",
     supp_comm_on: "", supp_comm_type: "", supp_comm_value: 0, supp_tds_per: 0,
     supp_markup: 0, supp_addl_markup: 0, supp_service_fee: 0, supp_addl_service_fee: 0, supp_gst_pct: 0,
-    agent_penalty: 0, supplier_penalty: 0,
+    agent_penalty: 0, reschedule_penalty: 0,
   });
 
   // Money amounts only (Basic Fare, Taxes, Markup, Service Fee, GST
@@ -769,7 +773,8 @@
       fare_type: joinSectorField("fareType"),
       basic_fare: num("modal-basic-fare"), yq: num("modal-yq"), yr: num("modal-yr"), k3_tax: num("modal-k3"),
       tax_others: num("modal-tax-others"), seat: num("modal-seat"), meal: num("modal-meal"), baggage: num("modal-baggage"),
-      other_ssr: num("modal-other-ssr"), disc_on: document.getElementById("modal-disc-on").value,
+      other_ssr: num("modal-other-ssr"), supplier_penalty: num("modal-fare-supplier-penalty"),
+      disc_on: document.getElementById("modal-disc-on").value,
       disc_type: document.getElementById("modal-disc-type").value,
       // Flat has no % field of its own (it's shown as 0) - the flat amount
       // is read straight from Discount Amount instead.
@@ -789,7 +794,7 @@
       supp_markup: num("modal-supp-markup"), supp_addl_markup: num("modal-supp-addl-markup"),
       supp_service_fee: num("modal-supp-service-fee"), supp_addl_service_fee: num("modal-supp-addl-service-fee"),
       supp_gst_pct: num("modal-supp-gst-pct"),
-      agent_penalty: num("modal-agent-penalty"), supplier_penalty: num("modal-supplier-penalty"),
+      agent_penalty: num("modal-agent-penalty"), reschedule_penalty: num("modal-reschedule-penalty"),
     };
   }
   function recalcModalTotal(opts) {
@@ -859,6 +864,7 @@
     document.getElementById("modal-k3").value = fmtN(p.k3_tax); document.getElementById("modal-tax-others").value = fmtN(p.tax_others);
     document.getElementById("modal-seat").value = fmtN(p.seat); document.getElementById("modal-meal").value = fmtN(p.meal);
     document.getElementById("modal-baggage").value = fmtN(p.baggage); document.getElementById("modal-other-ssr").value = fmtN(p.other_ssr);
+    document.getElementById("modal-fare-supplier-penalty").value = fmtN(p.supplier_penalty || 0);
     document.getElementById("modal-disc-on").value = p.disc_on; document.getElementById("modal-disc-type").value = p.disc_type;
     document.getElementById("modal-disc-value").value = p.disc_type === "Flat" ? "0.00" : Number(p.disc_value).toFixed(2);
     // Flat's real amount lives in Discount Amount (readModalPassenger reads
@@ -889,7 +895,7 @@
     document.getElementById("modal-supp-addl-service-fee").value = fmtN(p.supp_addl_service_fee || 0);
     document.getElementById("modal-supp-gst-pct").value = Number(p.supp_gst_pct || 0).toFixed(2);
     document.getElementById("modal-agent-penalty").value = fmtN(p.agent_penalty || 0);
-    document.getElementById("modal-supplier-penalty").value = fmtN(p.supplier_penalty || 0);
+    document.getElementById("modal-reschedule-penalty").value = fmtN(p.reschedule_penalty || 0);
     // Whatever's already saved counts as a deliberate choice - don't let a
     // later Client Accounting edit silently clobber it. Only a brand-new
     // (blank) passenger starts in "follow Client Accounting" mode.
@@ -1243,17 +1249,23 @@
   function applyRescheduleTab(tab) {
     modalRescheduleTab = tab;
     layoutAcctFieldsForReschedule(tab === "reschedule");
-    document.querySelectorAll("#fare-breakdown-modal input, #fare-breakdown-modal select").forEach((el) => (el.disabled = false));
     const isParent = tab === "parent";
+    // Reschedule PNR Details is only actually editable when viewMode is
+    // off (a saved reschedule ticket opens read-only first, same as any
+    // other saved ticket, until Edit is clicked) - Parent PNR Details
+    // stays frozen/read-only regardless, same as always.
+    const readOnly = isParent || viewMode;
+    document.querySelectorAll("#fare-breakdown-modal input, #fare-breakdown-modal select").forEach((el) => (el.disabled = readOnly));
     writeModalPassenger(isParent ? rescheduleParentPassenger : rescheduleEditPassenger);
-    if (isParent) {
-      document.querySelectorAll("#fare-breakdown-modal input, #fare-breakdown-modal select").forEach((el) => (el.disabled = true));
-    }
-    document.getElementById("modal-sector-add-btn").style.display = isParent ? "none" : "";
+    // Supplier Penalty (Base Fare & Tax Components card) is a
+    // RescheduleAirlineTicketLines-only column - TicketLines has no such
+    // field, so it never shows on Parent PNR Details.
+    document.getElementById("modal-fare-supplier-penalty-field").style.display = isParent ? "none" : "";
+    document.getElementById("modal-sector-add-btn").style.display = readOnly ? "none" : "";
     // visibility (not display) - keeps their row's height reserved on the
     // Parent tab too, so switching tabs doesn't shrink/jump the modal.
-    document.getElementById("modal-cancel-btn").style.visibility = isParent ? "hidden" : "";
-    document.getElementById("modal-save-btn").style.visibility = isParent ? "hidden" : "";
+    document.getElementById("modal-cancel-btn").style.visibility = readOnly ? "hidden" : "";
+    document.getElementById("modal-save-btn").style.visibility = readOnly ? "hidden" : "";
     document.querySelectorAll(".reschedule-tab-btn").forEach((btn) => btn.classList.toggle("active", btn.dataset.tab === tab));
   }
   document.querySelectorAll(".reschedule-tab-btn").forEach((btn) => {
@@ -1355,11 +1367,15 @@
       // have their own columns) - YR + Tax & Others, both Supplier and
       // Customer's Markup/Addl Markup/Service Fee/Addl Service Fee/GST,
       // Customer's SSR Markup/SSR Service Fee, Customer TDS minus Customer
-      // Discount, plus Agent Penalty + Supplier Penalty.
+      // Discount, plus Supplier Penalty + Reschedule Penalty + Agent Penalty.
+      const penalties = (p.supplier_penalty || 0) + (p.reschedule_penalty || 0) + (p.agent_penalty || 0);
       const allTaxes = p.yr + p.tax_others
         + (p.supp_markup || 0) + (p.supp_addl_markup || 0) + (p.supp_service_fee || 0) + (p.supp_addl_service_fee || 0) + rs.gst
         + p.markup + p.addl_markup + (p.ssr_markup || 0) + p.service_fee + p.addl_service_fee + (p.ssr_service_fee || 0)
-        + r.gst - r.discount + r.tds + (p.agent_penalty || 0) + (p.supplier_penalty || 0);
+        + r.gst - r.discount + r.tds + penalties;
+      // Total = the fare-line total plus those same 3 penalties, so
+      // Basic+YQ+K3+SSR+Other Taxes still always equals this Total exactly.
+      const lineTotal = r.total + penalties;
       const z = (v) => fmtN(v);
       return `<tr class="pax-row" data-idx="${i}" title="${viewMode ? "Double-click to view" : "Double-click to edit"}">
         <td style="text-align:center;">${i + 1}</td><td>${p.ticket_no}</td><td>${p.airline_name || p.airline_code || "-"}</td>
@@ -1367,7 +1383,7 @@
         <td>${p.passenger_name} <span style="color:#94A3B8;">(${p.pax_type || "-"})</span></td>
         <td class="num">${z(p.basic_fare)}</td><td class="num">${z(p.yq)}</td><td class="num">${z(p.k3_tax)}</td>
         <td class="num">${z(p.seat + p.meal + p.baggage + p.other_ssr)}</td>
-        <td class="num">${z(allTaxes)}</td><td class="num" style="font-weight:700;">${z(r.total)}</td>
+        <td class="num">${z(allTaxes)}</td><td class="num" style="font-weight:700;">${z(lineTotal)}</td>
         ${rescheduleMode ? "" : `<td style="text-align:center;">
           ${viewMode ? "" : `<button type="button" class="pax-circle-btn pax-circle-remove pax-remove-btn" data-idx="${i}" title="Remove passenger">REMOVE</button>`}
         </td>`}
@@ -1427,7 +1443,7 @@
   function recalcSummary() {
     let basic = 0, taxes = 0, ssr = 0, discount = 0, tds = 0, markup = 0, serviceFee = 0, gst = 0, total = 0;
     let suppCommission = 0, suppTds = 0, suppMarkup = 0, suppServiceFee = 0, suppGst = 0;
-    let agentPenalty = 0, supplierPenalty = 0;
+    let agentPenalty = 0, reschedulePenalty = 0, supplierPenaltyField = 0;
     passengers.forEach((p) => {
       const r = computeFareLine(p);
       const rs = computeSuppLine(p);
@@ -1441,34 +1457,48 @@
       suppMarkup += (p.supp_markup || 0) + (p.supp_addl_markup || 0);
       suppServiceFee += (p.supp_service_fee || 0) + (p.supp_addl_service_fee || 0);
       suppGst += rs.gst;
-      agentPenalty += (p.agent_penalty || 0); supplierPenalty += (p.supplier_penalty || 0);
+      agentPenalty += (p.agent_penalty || 0); reschedulePenalty += (p.reschedule_penalty || 0);
+      // p.supplier_penalty is the Base Fare & Tax Components card's own
+      // field (distinct from reschedule_penalty above, the Supplier
+      // accounting card's field).
+      supplierPenaltyField += (p.supplier_penalty || 0);
     });
     const purchaseTotal = basic + taxes + ssr - suppCommission + suppTds + suppMarkup + suppServiceFee + suppGst;
+    // Purchase/Sales Cost's Other Taxes/Total columns fold in the
+    // penalties (per the project owner's explicit formula); Earnings
+    // below stays on the un-penalized purchaseTotal/total, same as always.
+    const pcTaxesDisplay = taxes + supplierPenaltyField;
+    const scTaxesDisplay = taxes + supplierPenaltyField;
+    const pcTotalDisplay = purchaseTotal + reschedulePenalty + supplierPenaltyField;
+    // Sales Cost Total = the per-line total (already folds in every
+    // Supplier AND Customer fare component - see computeFareLine's own
+    // `total`) plus Agent Penalty + Reschedule Penalty + Supplier Penalty.
+    const scTotalDisplay = total + agentPenalty + reschedulePenalty + supplierPenaltyField;
     const z = (v) => fmtN(v);
 
     document.getElementById("pc-basic").textContent = z(basic);
-    document.getElementById("pc-taxes").textContent = z(taxes);
+    document.getElementById("pc-taxes").textContent = z(pcTaxesDisplay);
     document.getElementById("pc-ssr").textContent = z(ssr);
     document.getElementById("pc-disc").textContent = z(suppCommission);
     document.getElementById("pc-tds").textContent = z(suppTds);
-    // Purchase Cost's Markup column additionally folds in Supplier Penalty
-    // (display only - purchaseTotal/pc-total above is untouched).
-    document.getElementById("pc-markup").textContent = z(suppMarkup + supplierPenalty);
+    // Purchase Cost's Markup column additionally folds in Reschedule Penalty.
+    document.getElementById("pc-markup").textContent = z(suppMarkup + reschedulePenalty);
     document.getElementById("pc-sfee").textContent = z(suppServiceFee);
     document.getElementById("pc-gst").textContent = z(suppGst);
-    document.getElementById("pc-total").textContent = z(purchaseTotal);
+    document.getElementById("pc-total").textContent = z(pcTotalDisplay);
 
     document.getElementById("sc-basic").textContent = z(basic);
-    document.getElementById("sc-taxes").textContent = z(taxes);
+    document.getElementById("sc-taxes").textContent = z(scTaxesDisplay);
     document.getElementById("sc-ssr").textContent = z(ssr);
     document.getElementById("sc-disc").textContent = z(discount);
     document.getElementById("sc-tds").textContent = z(tds);
-    // Sales Cost's Markup column additionally folds in Supplier Penalty +
-    // Agent Penalty (display only - total/sc-total above is untouched).
-    document.getElementById("sc-markup").textContent = z(markup + supplierPenalty + agentPenalty);
-    document.getElementById("sc-sfee").textContent = z(serviceFee);
-    document.getElementById("sc-gst").textContent = z(gst);
-    document.getElementById("sc-total").textContent = z(total);
+    // Sales Cost's Markup/Service Fee/GST Amount columns additionally fold
+    // in the Purchase Cost side's own Markup/Service Fee/GST (plus Agent
+    // Penalty on Markup).
+    document.getElementById("sc-markup").textContent = z(markup + suppMarkup + reschedulePenalty + agentPenalty);
+    document.getElementById("sc-sfee").textContent = z(serviceFee + suppServiceFee);
+    document.getElementById("sc-gst").textContent = z(gst + suppGst);
+    document.getElementById("sc-total").textContent = z(scTotalDisplay);
 
     // Earnings = Sales Cost Total - Purchase Cost Total - Sales Cost GST
     // Amount - Sales Cost TDS Amount + Purchase Cost TDS Amount.
@@ -2045,7 +2075,13 @@
     rescheduleMode = true;
     editingRescheduleId = rt.id;
     rescheduleTicketId = rt.original_ticket_id;
-    document.getElementById("page-title").textContent = "Reschedule";
+    // Opens read-only first, same as any other saved ticket (enterViewMode)
+    // - the "Edit" button unlocks it, rather than landing straight in an
+    // editable form the way a brand-new reschedule (enterRescheduleMode)
+    // does.
+    viewMode = true;
+    document.getElementById("page-title").textContent =
+      `View Reschedule - ${rt.lines[0]?.ticket_no || rt.invoice_number} (${rt.lines[0]?.passenger_name || ""})`;
     document.getElementById("booking_reference_label").innerHTML = 'Rescheduled Ref<span class="dom-req">*</span>';
     document.getElementById("booking_ref_date_label").innerHTML = 'Rescheduled Ref Date<span class="dom-req">*</span>';
     document.getElementById("booking_reference").style.flex = "0 0 120px";
@@ -2080,6 +2116,13 @@
     passengers = savedLine ? [{ ...blankPassenger(), ...savedLine }] : [blankPassenger()];
     rescheduleEditPassenger = passengers[0];
     renderPaxTable();
+
+    document.querySelectorAll(".dom-form-grid input, .dom-form-grid select").forEach((el) => (el.disabled = true));
+    document.getElementById("proceed-btn").style.display = "none";
+    document.getElementById("submit-btn").style.display = "none";
+    document.getElementById("cancel-link").textContent = "<- Back to Reschedule";
+    document.getElementById("cancel-link").setAttribute("href", "trans-airline-reschedule.html");
+    document.getElementById("edit-ticket-btn").style.display = "";
   }
 
   // Unlocks a loaded/saved ticket for editing - re-enables every header
@@ -2090,6 +2133,10 @@
     viewMode = false;
     document.querySelectorAll(".dom-form-grid input, .dom-form-grid select").forEach((el) => (el.disabled = false));
     document.getElementById("booking_mode").disabled = true; // stays frozen at Manual regardless of mode
+    // A saved Reschedule ticket keeps Booking Status frozen at
+    // Re-Scheduled even once unlocked for editing (same as when it was
+    // first created - see enterSavedRescheduleMode/enterRescheduleMode).
+    if (rescheduleMode) document.getElementById("booking_status").disabled = true;
     updateGatewayRefField(); // re-applies its own read-only/editable rule, not just "everything enabled"
     document.getElementById("submit-btn").style.display = "";
     document.getElementById("edit-ticket-btn").style.display = "none";
@@ -2097,8 +2144,10 @@
     // Discard from Edit mode must return to THIS ticket's own view state,
     // not wherever cancel-link's href was left pointing from enterViewMode
     // (document.referrer, or the "Back to Tickets" default) - re-loading
-    // this same ?id= is what actually discards the in-progress edits.
-    document.getElementById("cancel-link").setAttribute("href", `ticket-entry.html?id=${editId}`);
+    // this same ?id=/?reschedule_saved_id= is what actually discards the
+    // in-progress edits.
+    document.getElementById("cancel-link").setAttribute("href",
+      rescheduleMode ? `ticket-entry.html?reschedule_saved_id=${editingRescheduleId}` : `ticket-entry.html?id=${editId}`);
     renderPaxTable(); // recomputes proceed/add-line-btn visibility + Edit/Del per row now that viewMode is false
   });
 

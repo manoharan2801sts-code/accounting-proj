@@ -2146,8 +2146,8 @@ def ticket_lookup_for_reschedule(request):
     })
 
 
-RESCHED_LINE_FIELDS = TICKET_LINE_FIELDS + ["agent_penalty", "supplier_penalty"]
-RESCHED_LINE_NUMERIC_FIELDS = TICKET_LINE_NUMERIC_FIELDS | {"agent_penalty", "supplier_penalty"}
+RESCHED_LINE_FIELDS = TICKET_LINE_FIELDS + ["agent_penalty", "reschedule_penalty", "supplier_penalty"]
+RESCHED_LINE_NUMERIC_FIELDS = TICKET_LINE_NUMERIC_FIELDS | {"agent_penalty", "reschedule_penalty", "supplier_penalty"}
 
 
 @csrf_exempt
@@ -2158,7 +2158,7 @@ def reschedule_ticket_create(request):
     Body: { company_id, original_ticket_id, ...header fields (same shape
     as tickets/create/'s TICKET_HEADER_FIELDS), customer_name,
     supplier_name, lines: [ {...TICKET_LINE_FIELDS, agent_penalty,
-    supplier_penalty, original_ticket_line_id}, ... ] }
+    reschedule_penalty, supplier_penalty, original_ticket_line_id}, ... ] }
 
     Persists the brand-new "Reschedule PNR Details" ticket + its lines
     into RescheduleAirlineTicket/RescheduleAirlineTicketLine — the
@@ -2476,7 +2476,8 @@ def reschedule_ticket_detail(request, reschedule_ticket_id):
         "supp_markup": float(l.supp_markup), "supp_addl_markup": float(l.supp_addl_markup),
         "supp_service_fee": float(l.supp_service_fee), "supp_addl_service_fee": float(l.supp_addl_service_fee),
         "supp_gst_pct": float(l.supp_gst_pct),
-        "agent_penalty": float(l.agent_penalty), "supplier_penalty": float(l.supplier_penalty),
+        "agent_penalty": float(l.agent_penalty), "reschedule_penalty": float(l.reschedule_penalty),
+        "supplier_penalty": float(l.supplier_penalty),
     } for l in rt.lines.select_related("supplier").all()]
 
     return JsonResponse({

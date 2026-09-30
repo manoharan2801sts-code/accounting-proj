@@ -430,6 +430,13 @@
               <label>Other SSR</label>
               <input class="dom-input modal-calc dom-amount" type="text" inputmode="decimal" id="modal-other-ssr" min="0" step="0.01" value="0.00" />
             </div>
+            <!-- Reschedule PNR Details tab ONLY - hidden on Parent PNR
+                 Details and every normal, non-reschedule ticket (neither
+                 has this column) - toggled in applyRescheduleTab(). -->
+            <div class="fare-item" id="modal-fare-supplier-penalty-field" style="display:none;">
+              <label>Supplier Penalty</label>
+              <input class="dom-input modal-calc dom-amount" type="text" inputmode="decimal" id="modal-fare-supplier-penalty" min="0" step="0.01" value="0.00" />
+            </div>
           </div>
         </div>
 
@@ -661,9 +668,6 @@
                    above (one label, % box with "%" printed inside + wide
                    amount box) instead of two separate GST %/GST Amount
                    fields. -->
-              <!-- Supplier Penalty is UI-only for now - not wired to any
-                   save/calculation yet (same as Agent Penalty on the
-                   Customer card). -->
               <div id="acct-resched-supp-gst-row" style="display:none;">
                 <div class="dom-acct-field dom-acct-field-dual" style="grid-template-columns: 50px 1fr 50px 1fr;">
                   <label style="white-space:normal; line-height:1.1; font-size:10px;">GST Amount</label>
@@ -671,8 +675,8 @@
                     <span class="acct-pct-box"><span id="resched-supp-gst-pct-slot"></span><span class="acct-pct-suffix">%</span></span>
                     <span id="resched-supp-gst-amt-slot" style="flex:1; min-width:0;"></span>
                   </span>
-                  <label style="white-space:normal; line-height:1.1; font-size:10px;">Supplier Penalty</label>
-                  <input class="dom-input modal-calc dom-acct-input-sm dom-max10 dom-amount" type="text" inputmode="decimal" id="modal-supplier-penalty" min="0" max="9999999999" step="0.01" value="0.00" />
+                  <label style="white-space:normal; line-height:1.1; font-size:10px;">Reschedule Penalty</label>
+                  <input class="dom-input modal-calc dom-acct-input-sm dom-max10 dom-amount" type="text" inputmode="decimal" id="modal-reschedule-penalty" min="0" max="9999999999" step="0.01" value="0.00" />
                 </div>
                 <!-- Merging Commission Amount + TDS Amount onto one row
                      above (in acct-resched-supp-row) leaves this card one

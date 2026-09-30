@@ -610,7 +610,7 @@ class RescheduleAirlineTicketLine(models.Model):
     columns (this is the NEW ticket's actual fare/passenger data, entered
     fresh under "Reschedule PNR Details"), PLUS original_ticket_line and
     two fields this flow introduced that TicketLine has no equivalent for
-    (agent_penalty, supplier_penalty). Deliberately does NOT store a second
+    (agent_penalty, reschedule_penalty). Deliberately does NOT store a second
     copy of the original line's own data (ticket_no, fare breakdown,
     discount/markup/etc.) - "Parent PNR Details" reads all of that straight
     off original_ticket_line instead.
@@ -648,6 +648,13 @@ class RescheduleAirlineTicketLine(models.Model):
     meal = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     baggage = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     other_ssr = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    # New to the Reschedule flow only - TicketLines has no equivalent
+    # column (shown in ticket-entry.html's Base Fare & Tax Components
+    # card, Reschedule PNR Details tab only - see
+    # #modal-fare-supplier-penalty-field). Not the same field as
+    # agent_penalty/reschedule_penalty below (those live in the
+    # Customer/Supplier accounting cards) - a genuinely separate column.
+    supplier_penalty = models.DecimalField(max_digits=14, decimal_places=2, default=0)
 
     # Customer discount
     disc_on = models.CharField(max_length=20, null=True, blank=True)
@@ -682,10 +689,12 @@ class RescheduleAirlineTicketLine(models.Model):
     supp_gst_pct = models.DecimalField(max_digits=5, decimal_places=2, default=0)
 
     # New to the Reschedule flow only - TicketLine has no equivalent
-    # column. UI-only so far (see ticket-entry.html's #modal-agent-penalty/
-    # #modal-supplier-penalty) - not yet part of any calculation.
+    # column (see ticket-entry.html's #modal-agent-penalty/
+    # #modal-reschedule-penalty). Folded into the Reschedule screen's
+    # Other Taxes/Purchase Cost/Sales Cost Markup/Total figures - see
+    # renderPaxTable()/recalcSummary() in page-ticket-entry.js.
     agent_penalty = models.DecimalField(max_digits=14, decimal_places=2, default=0)
-    supplier_penalty = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    reschedule_penalty = models.DecimalField(max_digits=14, decimal_places=2, default=0)
 
     total_billed = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     status = models.CharField(max_length=15, choices=TicketLine.STATUS_CHOICES, default="ISSUED")

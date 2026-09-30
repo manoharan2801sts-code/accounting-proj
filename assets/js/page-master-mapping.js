@@ -34,6 +34,11 @@
       category: "Expenditure To Customer",
       fields: [
         { field: "Discount A/c", group: "Expenses" },
+        // Reschedule flow's Agent Penalty (see ticket-entry.html's
+        // Reschedule PNR Details tab) - an income to the agency (charged
+        // to the customer), unlike Discount A/c above, so its ledger
+        // comes from Incomes rather than Expenses.
+        { field: "Agent Penalty A/c", group: "Incomes" },
       ],
     },
     // Separate income ledgers for the JV's supplier-fed Markup/Service Fee
@@ -48,6 +53,7 @@
         { field: "Consolidator Addl Markup A/c", group: "Incomes" },
         { field: "Consolidator Service Fee A/c", group: "Incomes" },
         { field: "Consolidator Addl Service Fee A/c", group: "Incomes" },
+        { field: "Consolidator Reschedule Penalty A/c", group: "Incomes" },
       ],
     },
     "expenditure-to-supplier": {
@@ -57,6 +63,7 @@
         { field: "Supplier Addl Markup A/c", group: "Expenses" },
         { field: "Supplier Service Fee A/c", group: "Expenses" },
         { field: "Supplier Addl Service Fee A/c", group: "Expenses" },
+        { field: "Supplier Reschedule Penalty A/c", group: "Expenses" },
       ],
     },
     "gst-and-tds": {
