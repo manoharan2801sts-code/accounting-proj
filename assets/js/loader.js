@@ -238,50 +238,13 @@
 
   window.VoyagerLoader = VoyagerLoader;
 
-  // Initial page load trigger - the overlay stays up until the page has
-  // loaded AND its first round of API calls has finished, so the page is
-  // never shown half-filled behind it. Every fetch() made before then is
-  // counted (this script runs before any page script, so it wraps fetch
-  // first); the loader hides once none has been in flight for QUIET_MS -
-  // long enough for a follow-up request that starts right after another
-  // finishes (shell loads companies, then the page loads its data).
+  // Initial page load trigger
   if (document.body && !document.getElementById("vloaderOverlay")) {
     overlayEl = build();
     document.body.appendChild(overlayEl);
     startFlightAnimation(overlayEl);
-
-    const QUIET_MS = 400;
-    const MAX_WAIT_MS = 60000; // never stuck: a slow/cold backend still reveals the page
-    let pending = 0;
-    let pageLoaded = false;
-    let done = false;
-    let quietTimer = null;
-
-    const finish = () => {
-      if (done) return;
-      done = true;
-      clearTimeout(quietTimer);
-      VoyagerLoader.hide();
-    };
-    const check = () => {
-      clearTimeout(quietTimer);
-      if (!done && pageLoaded && pending === 0) quietTimer = setTimeout(finish, QUIET_MS);
-    };
-
-    const originalFetch = window.fetch ? window.fetch.bind(window) : null;
-    if (originalFetch) {
-      window.fetch = function (...args) {
-        if (done) return originalFetch(...args);
-        pending++;
-        clearTimeout(quietTimer);
-        return originalFetch(...args).finally(() => {
-          pending--;
-          check();
-        });
-      };
-    }
-
-    window.addEventListener("load", () => { pageLoaded = true; check(); });
-    setTimeout(finish, MAX_WAIT_MS);
+    const hideNow = () => VoyagerLoader.hide();
+    window.addEventListener("load", hideNow);
+    setTimeout(hideNow, 6000);
   }
 })(window);
