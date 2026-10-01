@@ -28,7 +28,7 @@
 
   .cmx-main {
     max-width: 100%; padding: 14px 24px; box-sizing: border-box;
-    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    display: flex; flex-direction: column; align-items: center; justify-content: safe center;
     height: calc(100vh - var(--topnav-height) - var(--menubar-height, 0px)); overflow: hidden;
   }
 
@@ -51,7 +51,10 @@
   }
   .cmx-titlebar-edit-btn:hover { background: rgba(255, 255, 255, 0.28); }
 
-  .cmx-body { padding: 12px 18px 6px; overflow: hidden; box-sizing: border-box; }
+  /* On a short laptop screen the form scrolls inside the card (title bar
+     and Save/Cancel stay visible) instead of the bottom rows - Upload
+     Logo/Seal - being cut off. Tall screens still show it all, no scroll. */
+  .cmx-body { padding: 12px 18px 6px; overflow-y: auto; flex: 1 1 auto; min-height: 0; box-sizing: border-box; }
 
   /* Desktop: 3 columns. Tightened row/column gaps keep the whole form
      short enough to fit 100vh without scrolling. */
