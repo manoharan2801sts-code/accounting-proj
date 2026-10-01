@@ -795,6 +795,12 @@
       supp_service_fee: num("modal-supp-service-fee"), supp_addl_service_fee: num("modal-supp-addl-service-fee"),
       supp_gst_pct: num("modal-supp-gst-pct"),
       agent_penalty: num("modal-agent-penalty"), reschedule_penalty: num("modal-reschedule-penalty"),
+      // original_ticket_line_id has no modal field of its own - carry it
+      // forward from whatever this passenger already had (set by
+      // enterRescheduleMode/enterSavedRescheduleMode when the modal first
+      // opened), so editing a passenger's fare via Save & Apply never
+      // drops the link back to its original ticket line.
+      ...(rescheduleMode && rescheduleEditPassenger ? { original_ticket_line_id: rescheduleEditPassenger.original_ticket_line_id } : {}),
     };
   }
   function recalcModalTotal(opts) {
@@ -1808,16 +1814,170 @@
       document.getElementById("jv-table-body").innerHTML = `<tr><td colspan="4" style="padding:10px; color:#DC2626;">${err.message}</td></tr>`;
     }
   }
+
+  // ============================================================
+  // Reschedule-only Journal Voucher (project owner's fixed 26-field spec,
+  // 2026-09-30) - a completely separate preview path from loadJvPreview/
+  // renderJvPreview above (Booking's own JV), which this never touches or
+  // reuses data from. JV-1..JV-5 per Payment Mode + FOP:
+  //   Topup+Cash -> JV-1 (Main only)
+  //   Payment Gateway+Cash -> JV-2 (Main + PG Receipt)
+  //   Topup+Own Card -> JV-3 (Main + FOP Payment)
+  //   Topup+Client Card -> JV-4 (Main + FOP Payment)
+  //   Payment Gateway+Own Card -> JV-5 (Main + PG Receipt)
+  // Any other combination (e.g. Payment Gateway+Client Card, not covered
+  // by the spec) shows Main only, same as JV-1.
+  // ============================================================
+  function jvTabForPaymentFop(paymentMode, fop) {
+    if (paymentMode === "Topup" && fop === "Cash") return null;
+    if (paymentMode === "Payment Gateway" && fop === "Cash") return "pg";
+    if (paymentMode === "Topup" && fop === "Own Card") return "fop";
+    if (paymentMode === "Topup" && fop === "Client Card") return "fop";
+    if (paymentMode === "Payment Gateway" && fop === "Own Card") return "pg";
+    return null;
+  }
+
+  // Main JV - unlike renderJvPreview, never filters out zero-amount rows
+  // ("Do not remove any field") and never shows the Booking JV's own
+  // Balanced/Posted badge wording (a Reschedule JV is never "posted" -
+  // no JournalVoucher is created for a reschedule ticket yet).
+  async function renderRescheduleJvPreview(jv) {
+    const displayVno = jv.voucher_no || document.getElementById("invoice_number").value.trim() || "Preview";
+    document.getElementById("jv-meta-vno").textContent = displayVno;
+    document.getElementById("jv-meta-date").textContent = jv.voucher_date ? isoToDDMMYYYY(jv.voucher_date) : "-";
+    document.getElementById("jv-meta-currency").textContent = jv.currency || document.getElementById("currency").textContent;
+    document.getElementById("jv-table-body").innerHTML = jv.accounts.map((a, i) => `
+      <tr style="border-bottom:1px solid #E2E8F0;">
+        <td style="padding:5px 8px; text-align:center;">${i + 1}</td>
+        <td style="padding:5px 8px;">${a.ledger_name || "-"}</td>
+        <td style="padding:5px 8px; text-align:right; font-family:var(--font-mono,monospace);">${fmtN(a.debit || 0)}</td>
+        <td style="padding:5px 8px; text-align:right; font-family:var(--font-mono,monospace);">${fmtN(a.credit || 0)}</td>
+      </tr>`).join("");
+    document.getElementById("jv-total-debit").textContent = fmtN(jv.total_debit);
+    document.getElementById("jv-total-credit").textContent = fmtN(jv.total_credit);
+    document.getElementById("jv-narration-text").textContent = jv.narration || "-";
+    const verifyBox = jvModal.querySelector(".dom-modal-footer div[style*='color:#16A34A']");
+    if (verifyBox) {
+      const balanced = Math.abs(jv.total_debit - jv.total_credit) < 0.01;
+      verifyBox.innerHTML = balanced
+        ? `<span style="color:#D97706;">Computed - not yet posted (live preview)</span>`
+        : `<span style="color:#DC2626;">X Unbalanced - Debit ${fmtN(jv.total_debit)} != Credit ${fmtN(jv.total_credit)}</span>`;
+    }
+
+    const paymentMode = document.getElementById("payment_mode").value;
+    const p = passengers[0];
+    const fop = p ? (p.fop || "Cash") : "Cash";
+    const tab = jvTabForPaymentFop(paymentMode, fop);
+    if (tab === "fop") {
+      setJvTabVisible("pg", false);
+      renderRescheduleFopPaymentTab(jv, fop, p);
+      setJvTabVisible("fop", true);
+    } else if (tab === "pg") {
+      setJvTabVisible("fop", false);
+      await renderReschedulePgReceiptTab(jv, p);
+      setJvTabVisible("pg", true);
+    } else {
+      setJvTabVisible("fop", false);
+      setJvTabVisible("pg", false);
+    }
+  }
+
+  // FOP Payment tab (JV-3 Own Card / JV-4 Client Card) - Supplier's amount
+  // already includes Supplier Penalty + Reschedule Penalty (see
+  // _compute_reschedule_jv_lines' own supplier formula), reused as-is via
+  // jv.accounts' "supplier" role rows. JV-3 credits the FOP Card's own
+  // ledger; JV-4 credits Customer instead - both per spec.
+  function renderRescheduleFopPaymentTab(jv, fopType, p) {
+    const supplierRows = (jv.accounts || []).filter((a) => a.role === "supplier");
+    let creditLedgerName;
+    if (fopType === "Own Card") {
+      const cardNumber = (p && p.card_number) || "";
+      const card = fopMasterCards.find((c) => c.card_number === cardNumber);
+      creditLedgerName = card ? (card.card_master_ledger_name || cardNumber) : (cardNumber || "FOP Card");
+    } else {
+      const customerRow = (jv.accounts || []).find((a) => a.role === "customer");
+      creditLedgerName = customerRow ? customerRow.ledger_name : "Customer";
+    }
+    let i = 0;
+    const debitRowsHtml = supplierRows.length
+      ? supplierRows.map((a) => jvRowHtml(++i, a.ledger_name, a.credit, 0)).join("")
+      : jvRowHtml(++i, "— (no supplier selected)", 0, 0);
+    const totalAmount = supplierRows.reduce((sum, a) => sum + (a.credit || 0), 0);
+    const creditRowHtml = jvRowHtml(++i, creditLedgerName, 0, totalAmount);
+    document.getElementById("jv-fop-table-body").innerHTML = debitRowsHtml + creditRowHtml;
+    document.getElementById("jv-fop-total-debit").textContent = fmtN(totalAmount);
+    document.getElementById("jv-fop-total-credit").textContent = fmtN(totalAmount);
+    document.getElementById("jv-tab-panel-fop").querySelector("table").parentElement.style.display = "";
+    document.getElementById("jv-fop-empty").style.display = "none";
+  }
+
+  // PG Receipt tab (JV-2/JV-5) - per spec: Customer Credit, PG Charges
+  // Credit, GST Credit (one row - no same/different-state CGST/SGST
+  // split, that's a Booking-only convention), PG Platform Debit =
+  // Customer + PG Charges + GST. Always shows all 4 rows even at zero.
+  async function renderReschedulePgReceiptTab(jv, p) {
+    const customerRow = (jv.accounts || []).find((a) => a.role === "customer");
+    const creditAmount = customerRow ? (customerRow.debit || 0) : 0;
+    const gatewayRef = document.getElementById("payment_gateway_ref").value;
+    const gateway = await getPgEffective(gatewayRef);
+    const pgLedgerName = gateway ? (gateway.payment_master_ledger_name || gatewayRef) : (gatewayRef || "PG Platform");
+    const pgChargesLedgerName = gateway ? (gateway.pg_charges_master_ledger_name || "PG Charges") : "PG Charges";
+
+    const pgChargesTotal = p ? (p.pg_charges || 0) : 0;
+    const pgGstPct = gateway ? Number(gateway.pg_charges_master_ledger_gst_percentage) || 0 : 0;
+    const pgGstTotal = Math.round(pgChargesTotal * pgGstPct / 100 * 100) / 100;
+    if ((pgChargesTotal > 0 || pgGstTotal > 0) && gateway && !gateway.pg_charges_master_ledger_id) {
+      warnUnmappedPgLedger(gatewayRef);
+    }
+    const debitAmount = creditAmount + pgChargesTotal + pgGstTotal;
+
+    const rowsHtml =
+      jvRowHtml(1, customerRow ? customerRow.ledger_name : "Customer", 0, creditAmount) +
+      jvRowHtml(2, pgChargesLedgerName, 0, pgChargesTotal) +
+      jvRowHtml(3, pgChargesLedgerName, 0, pgGstTotal) +
+      jvRowHtml(4, pgLedgerName, debitAmount, 0);
+    document.getElementById("jv-pg-table-body").innerHTML = rowsHtml;
+    document.getElementById("jv-pg-total-debit").textContent = fmtN(debitAmount);
+    document.getElementById("jv-pg-total-credit").textContent = fmtN(creditAmount + pgChargesTotal + pgGstTotal);
+    document.getElementById("jv-tab-panel-pg").querySelector("table").parentElement.style.display = "";
+    document.getElementById("jv-pg-empty").style.display = "none";
+  }
+
+  async function loadRescheduleJvPreview(showLoading) {
+    primeJvHeaderFromInvoice();
+    if (showLoading) {
+      document.getElementById("jv-table-body").innerHTML = `<tr><td colspan="4" style="padding:10px;">Loading...</td></tr>`;
+    }
+    try {
+      let res;
+      if (editingRescheduleId) {
+        res = await fetch(`${API_BASE}/reschedule-tickets/${editingRescheduleId}/jv-preview/?company_id=${activeCompanyId}`);
+      } else {
+        if (passengers.length === 0) throw new Error("Fill in the Reschedule PNR Details passenger to preview the JV.");
+        res = await fetch(`${API_BASE}/reschedule-tickets/jv-preview-draft/`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(buildTicketPayload()),
+        });
+      }
+      const jv = await res.json();
+      if (!res.ok) throw new Error(jv.error || "Could not compute JV.");
+      await renderRescheduleJvPreview(jv);
+    } catch (err) {
+      document.getElementById("jv-table-body").innerHTML = `<tr><td colspan="4" style="padding:10px; color:#DC2626;">${err.message}</td></tr>`;
+    }
+  }
+
   document.getElementById("jv-btn").addEventListener("click", () => {
     jvModal.classList.add("open");
     switchJvTab("voucher");
-    loadJvPreview(true);
+    if (rescheduleMode) loadRescheduleJvPreview(true); else loadJvPreview(true);
   });
   // Called after every passenger add/edit/delete/live-fare-edit - no-op
   // unless the JV modal is actually open, and skips the "Loading..." flicker
   // since it's re-fetching in the background while the user keeps typing.
   function maybeRefreshJvPreview() {
-    if (jvModal.classList.contains("open")) loadJvPreview(false);
+    if (!jvModal.classList.contains("open")) return;
+    if (rescheduleMode) loadRescheduleJvPreview(false); else loadJvPreview(false);
   }
   document.getElementById("jv-close-x-btn").addEventListener("click", () => jvModal.classList.remove("open"));
   document.getElementById("jv-ok-btn").addEventListener("click", () => jvModal.classList.remove("open"));
@@ -2209,7 +2369,13 @@
       try { result = await res.json(); }
       catch (_) { throw new Error(`The server returned an unexpected response (status ${res.status}). Check the Django terminal.`); }
       if (!res.ok) throw new Error(result.error || "Could not save this ticket.");
-      window.VoyagerEntry.showToast(result.message || `${payload.lines.length} ticket(s) saved.`, "ticket-entry.html");
+      // Reschedule saves land back on this same reschedule ticket in its
+      // view state (Edit button again, not the blank New Ticket screen) -
+      // unlike a normal ticket save, which still goes to a fresh blank
+      // form. result.id is the RescheduleAirlineTicket's own id either way
+      // (create or update).
+      const redirectTo = rescheduleMode ? `ticket-entry.html?reschedule_saved_id=${result.id}` : "ticket-entry.html";
+      window.VoyagerEntry.showToast(result.message || `${payload.lines.length} ticket(s) saved.`, redirectTo);
     } catch (err) {
       voyagerAlert(err.message || "Could not save this ticket. Is the Django backend running?", { icon: "error" });
     }

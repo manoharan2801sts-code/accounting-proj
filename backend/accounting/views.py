@@ -2393,6 +2393,259 @@ def reschedule_ticket_update(request, reschedule_ticket_id):
     })
 
 
+# ============================================================
+# Reschedule-only Journal Voucher (project owner's spec, 2026-09-30) -
+# entirely separate from _compute_jv_lines/JV_LINE_MAP (jv_hardcode.py),
+# which is Booking's own JV and must never be touched by this. Every one
+# of the 26 Main JV fields below is fixed and always emitted (even at
+# zero) - "Do not remove any field" - unlike the Booking JV, which hides
+# zero-amount rows and combines/state-splits its two "Output IGST A/c"
+# entries. Here they stay as two separate, literal rows.
+# ============================================================
+RESCHED_JV_LINE_MAP = [
+    ("Credit", "Earnings From Supplier", "Commission A/c", "commission"),
+    ("Debit", "GST and TDS", "Commission TDS A/c", "commission_tds"),
+    ("Debit", "Expenditure To Supplier", "Supplier Markup A/c", "supp_markup"),
+    ("Debit", "Expenditure To Supplier", "Supplier Addl Markup A/c", "supp_addl_markup"),
+    ("Debit", "Expenditure To Supplier", "Supplier Service Fee A/c", "supp_service_fee"),
+    ("Debit", "Expenditure To Supplier", "Supplier Addl Service Fee A/c", "supp_addl_service_fee"),
+    ("Debit", "GST and TDS", "Input IGST A/c", "supp_gst"),
+    ("Debit", "Expenditure To Supplier", "Supplier Reschedule Penalty A/c", "reschedule_penalty"),
+    ("Credit", "Earnings From Customer", "Consolidator Markup A/c", "supp_markup"),
+    ("Credit", "Earnings From Customer", "Consolidator Addl Markup A/c", "supp_addl_markup"),
+    ("Credit", "Earnings From Customer", "Consolidator Service Fee A/c", "supp_service_fee"),
+    ("Credit", "Earnings From Customer", "Consolidator Addl Service Fee A/c", "supp_addl_service_fee"),
+    ("Credit", "GST and TDS", "Output IGST A/c", "supp_gst"),
+    ("Credit", "Earnings From Customer", "Consolidator Reschedule Penalty A/c", "reschedule_penalty"),
+    ("Debit", "Expenditure To Customer", "Discount A/c", "discount"),
+    ("Credit", "GST and TDS", "Discount TDS A/c", "discount_tds"),
+    ("Credit", "Earnings From Customer", "Markup A/c", "markup"),
+    ("Credit", "Earnings From Customer", "Addl Markup A/c", "addl_markup"),
+    ("Credit", "Earnings From Customer", "SSR Markup A/c", "ssr_markup"),
+    ("Credit", "Earnings From Customer", "Service Fee A/c", "service_fee"),
+    ("Credit", "Earnings From Customer", "Addl Service Fee A/c", "addl_service_fee"),
+    ("Credit", "Earnings From Customer", "SSR Service Fee A/c", "ssr_service_fee"),
+    ("Credit", "GST and TDS", "Output IGST A/c", "gst"),
+    ("Credit", "Expenditure To Customer", "Agent Penalty A/c", "agent_penalty"),
+]
+
+
+def _compute_reschedule_jv_lines(resched_ticket, lines, mapping_cache=None):
+    """
+    Customer (Debit) = Basic+YQ+YR+K3+Tax&Others+Seat+Meal+Baggage+Other
+    SSR + Customer TDS + Customer Markup/Addl Markup/Service Fee/Addl
+    Service Fee/SSR Markup/SSR Service Fee + Customer GST - Cust Discount
+    + Sup Markup/Addl Markup/Service Fee/Addl Service Fee/GST + Supplier
+    Penalty + Reschedule Penalty + Agent Penalty. The first 15 terms
+    (everything up to "- Cust Discount") plus the Sup Markup/Service Fee/
+    GST terms are exactly RescheduleAirlineTicketLine.compute_total() -
+    reused directly, then the 3 penalties are added on top (compute_total()
+    predates them and intentionally excludes them, same as Booking's own
+    TicketLine.compute_total()).
+
+    Supplier (Credit) = Basic+YQ+YR+K3+Tax&Others+Seat+Meal+Baggage+Other
+    SSR - Supplier Commission + Supplier TDS + Sup Markup/Addl Markup/
+    Service Fee/Addl Service Fee/GST + Supplier Penalty + Reschedule
+    Penalty (no Agent Penalty here - that's Customer-only).
+    """
+    role_amounts = {
+        "commission": sum(float(l.computed_supp_commission) for l in lines),
+        "commission_tds": sum(float(l.computed_supp_tds) for l in lines),
+        "supp_markup": sum(float(l.supp_markup) for l in lines),
+        "supp_addl_markup": sum(float(l.supp_addl_markup) for l in lines),
+        "supp_service_fee": sum(float(l.supp_service_fee) for l in lines),
+        "supp_addl_service_fee": sum(float(l.supp_addl_service_fee) for l in lines),
+        "supp_gst": sum(float(l.computed_supp_gst) for l in lines),
+        "reschedule_penalty": sum(float(l.reschedule_penalty) for l in lines),
+        "discount": sum(float(l.computed_discount) for l in lines),
+        "discount_tds": sum(float(l.computed_tds) for l in lines),
+        "markup": sum(float(l.markup) for l in lines),
+        "addl_markup": sum(float(l.addl_markup) for l in lines),
+        "ssr_markup": sum(float(l.ssr_markup) for l in lines),
+        "service_fee": sum(float(l.service_fee) for l in lines),
+        "addl_service_fee": sum(float(l.addl_service_fee) for l in lines),
+        "ssr_service_fee": sum(float(l.ssr_service_fee) for l in lines),
+        "gst": sum(float(l.computed_gst) for l in lines),
+        "agent_penalty": sum(float(l.agent_penalty) for l in lines),
+    }
+    penalties_total = sum(
+        float(l.supplier_penalty) + float(l.reschedule_penalty) + float(l.agent_penalty) for l in lines
+    )
+    customer_total = sum(float(l.compute_total()) for l in lines) + penalties_total
+
+    supplier_groups = {}
+    for l in lines:
+        group = supplier_groups.setdefault(l.supplier_id, {"ledger": l.supplier, "amount": 0.0})
+        group["amount"] += (
+            float(l.supplier_cost) - float(l.computed_supp_commission) + float(l.computed_supp_tds)
+            + float(l.supp_markup) + float(l.supp_addl_markup)
+            + float(l.supp_service_fee) + float(l.supp_addl_service_fee)
+            + float(l.computed_supp_gst)
+            + float(l.supplier_penalty) + float(l.reschedule_penalty)
+        )
+
+    def dr_cr_amounts(dr_cr, amount):
+        amount = round(amount, 2)
+        return (amount, 0) if dr_cr == "Debit" else (0, amount)
+
+    def customer_rows(dr_cr, amount):
+        debit, credit = dr_cr_amounts(dr_cr, amount)
+        return [{"role": "customer", "ledger_id": resched_ticket.customer_id,
+                 "ledger_name": resched_ticket.customer.name, "debit": debit, "credit": credit}]
+
+    def supplier_rows(dr_cr):
+        rows = []
+        for g in supplier_groups.values():
+            debit, credit = dr_cr_amounts(dr_cr, g["amount"])
+            ledger = g["ledger"]
+            name = ledger.name if ledger else "— (no supplier selected)"
+            rows.append({"role": "supplier", "ledger_id": ledger.id if ledger else None,
+                         "ledger_name": name, "debit": debit, "credit": credit})
+        return rows
+
+    if mapping_cache is None:
+        mapping_cache = {}
+
+    def mapped_ledger(masters_category, field_name):
+        key = (resched_ticket.company_id, masters_category, field_name)
+        if key not in mapping_cache:
+            m = MasterMapping.objects.filter(
+                company_id=resched_ticket.company_id, product_type="Airline",
+                masters_category=masters_category, field_name=field_name,
+            ).select_related("ledger").first()
+            mapping_cache[key] = (
+                (m.ledger_id, m.ledger.name) if m
+                else (None, f"{field_name} (not mapped in Master Mapping)")
+            )
+        return mapping_cache[key]
+
+    def mapped_row(dr_cr, masters_category, field_name, amount):
+        debit, credit = dr_cr_amounts(dr_cr, amount)
+        ledger_id, ledger_name = mapped_ledger(masters_category, field_name)
+        return {"role": field_name, "ledger_id": ledger_id, "ledger_name": ledger_name, "debit": debit, "credit": credit}
+
+    accounts = customer_rows("Debit", customer_total) + supplier_rows("Credit")
+    for dr_cr, masters_category, field_name, amount_key in RESCHED_JV_LINE_MAP:
+        accounts.append(mapped_row(dr_cr, masters_category, field_name, role_amounts[amount_key]))
+
+    narration = " / ".join(filter(None, [
+        resched_ticket.booking_reference, resched_ticket.airline_pnr,
+        lines[0].ticket_no if lines else None,
+    ]))
+    total_debit = round(sum(a["debit"] for a in accounts), 2)
+    total_credit = round(sum(a["credit"] for a in accounts), 2)
+    return accounts, narration, total_debit, total_credit
+
+
+def reschedule_jv_preview(request, reschedule_ticket_id):
+    """
+    GET /api/reschedule-tickets/<id>/jv-preview/?company_id=1
+    Reschedule-only JV preview for an already-saved RescheduleAirlineTicket
+    - see _compute_reschedule_jv_lines. No JournalVoucher is ever posted
+    for a reschedule ticket yet (out of scope so far - reschedule_ticket_
+    create/update only persist RescheduleAirlineTicket/Line rows), so
+    "posted" is always False here.
+    """
+    if request.method != "GET":
+        return HttpResponseNotAllowed(["GET"])
+
+    company_id = request.GET.get("company_id")
+    try:
+        rt = RescheduleAirlineTicket.objects.select_related("customer", "supplier").get(id=reschedule_ticket_id, company_id=company_id)
+    except RescheduleAirlineTicket.DoesNotExist:
+        return JsonResponse({"error": "Reschedule ticket not found."}, status=404)
+
+    lines = list(rt.lines.all())
+    if not lines:
+        return JsonResponse({"error": "This reschedule ticket has no lines to build a voucher from."}, status=400)
+
+    accounts, narration, total_debit, total_credit = _compute_reschedule_jv_lines(rt, lines)
+
+    return JsonResponse({
+        "posted": False, "voucher_id": None, "voucher_no": None,
+        "branch_name": rt.branch_name or "Chennai Branch",
+        "voucher_type": "Tax Invoice",
+        "voucher_date": rt.invoice_date.isoformat() if rt.invoice_date else None,
+        "narration": narration,
+        "accounts": accounts,
+        "total_debit": total_debit,
+        "total_credit": total_credit,
+    })
+
+
+@csrf_exempt
+def reschedule_jv_preview_draft(request):
+    """
+    POST /api/reschedule-tickets/jv-preview-draft/
+    Same body shape as reschedule-tickets/create/ - lets the Reschedule
+    PNR Details form show a live JV preview before Save Ticket. Builds
+    UNSAVED RescheduleAirlineTicket/RescheduleAirlineTicketLine instances
+    (never .save()'d) to run through the exact same _compute_reschedule_
+    jv_lines used above, same looseness as ticket_jv_preview_draft (a
+    missing/invalid supplier just posts that line's Supplier row against
+    no ledger rather than rejecting the whole preview).
+    """
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+
+    try:
+        body = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON body"}, status=400)
+
+    company_id = body.get("company_id")
+    lines_in = body.get("lines") or []
+    if not company_id or not lines_in:
+        return JsonResponse({"error": "company_id and at least one line are required."}, status=400)
+
+    customer = None
+    if body.get("customer_name"):
+        customer = Ledger.objects.filter(company_id=company_id, name=body["customer_name"], ledger_category="DEBTOR").first()
+    if customer is None:
+        return JsonResponse({"error": "Pick a Customer before previewing the JV."}, status=400)
+
+    supplier = None
+    if body.get("supplier_name"):
+        supplier = Ledger.objects.filter(company_id=company_id, name=body["supplier_name"], ledger_category="CREDITOR").first()
+
+    header_kwargs = {f: body[f] for f in TICKET_HEADER_FIELDS if f in body}
+    header_kwargs["invoice_date"] = _parse_date(header_kwargs.get("invoice_date"))
+    header_kwargs["booking_ref_date"] = _parse_date(header_kwargs.get("booking_ref_date"))
+    if "roe" in header_kwargs:
+        header_kwargs["roe"] = _safe_decimal(header_kwargs["roe"], default=1)
+
+    resched_ticket = RescheduleAirlineTicket(company_id=company_id, customer=customer, supplier=supplier, **header_kwargs)
+
+    line_objs = []
+    for line_in in lines_in:
+        line_kwargs = {f: line_in[f] for f in RESCHED_LINE_FIELDS if f in line_in}
+        for f in RESCHED_LINE_NUMERIC_FIELDS:
+            if f in line_kwargs:
+                line_kwargs[f] = _safe_decimal(line_kwargs[f])
+
+        line_supplier = None
+        if line_in.get("supplier_name"):
+            line_supplier = Ledger.objects.filter(company_id=company_id, name=line_in["supplier_name"], ledger_category="CREDITOR").first()
+
+        line = RescheduleAirlineTicketLine(reschedule_ticket=resched_ticket, supplier=line_supplier, **line_kwargs)
+        line.total_billed = _safe_decimal(line.compute_total())
+        line_objs.append(line)
+
+    accounts, narration, total_debit, total_credit = _compute_reschedule_jv_lines(resched_ticket, line_objs)
+    total_debit, total_credit = round(total_debit, 2), round(total_credit, 2)
+
+    return JsonResponse({
+        "posted": False, "voucher_id": None, "voucher_no": None,
+        "branch_name": resched_ticket.branch_name or "Chennai Branch",
+        "voucher_type": "Tax Invoice",
+        "voucher_date": resched_ticket.invoice_date.isoformat() if resched_ticket.invoice_date else None,
+        "narration": narration,
+        "accounts": accounts,
+        "total_debit": total_debit,
+        "total_credit": total_credit,
+    })
+
+
 def reschedule_ticket_lookup(request):
     """
     GET /api/reschedule-tickets/lookup/?company_id=1&s_pnr=..&airline_pnr=..&ticket_no=..
