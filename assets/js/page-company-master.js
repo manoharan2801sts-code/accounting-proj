@@ -152,29 +152,82 @@
     India: { symbol: "₹", name: "Indian Rupee" },
     UAE: { symbol: "د.إ", name: "UAE Dirham" },
   };
-  // India's financial year starts 1-April - defaults Financial Year From/
-  // Books Beginning From to that (this FY if today's on/after 1-Apr,
-  // otherwise last FY, same "current FY" convention ticket-entry.html's
+  // India's financial year is fixed at 1-April by statute; every other
+  // country here has no single fixed convention, so the user is asked
+  // explicitly (askFyConvention below) rather than always silently
+  // defaulting to the plain calendar year - some overseas branches still
+  // want to align with an Apr-Mar parent/group reporting calendar.
+  // Defaults to this FY/year if today's already past its start,
+  // otherwise last one (same "current FY" convention ticket-entry.html's
   // own date pickers use). Still just a starting value, not locked -
   // editable like everything else once Edit is on.
-  function currentFyStartISO() {
+  function fyStartISO(convention) {
     const today = new Date();
+    if (convention !== "apr-mar") return `${today.getFullYear()}-01-01`;
     const fyYear = today.getMonth() >= 3 ? today.getFullYear() : today.getFullYear() - 1;
     return `${fyYear}-04-01`;
   }
-  function applyCountryCurrencyDefaults() {
+  // fyConvention ("jan-dec"/"apr-mar") is only passed explicitly when the
+  // user just picked one via askFyConvention() - otherwise defaults to
+  // the one fixed convention for the country (India always Apr-Mar,
+  // everything else Jan-Dec) same as before this popup existed.
+  function applyCountryCurrencyDefaults(fyConvention) {
     const country = document.getElementById("cm-country").value;
     const d = COUNTRY_CURRENCY_DEFAULTS[country];
     if (!d) return;
     document.getElementById("cm-currency-symbol").value = d.symbol;
     document.getElementById("cm-currency-name").value = d.name;
-    if (country === "India") {
-      const fyStart = currentFyStartISO();
-      document.getElementById("cm-fy-from").value = fyStart;
-      document.getElementById("cm-books-from").value = fyStart;
-    }
+    const fyStart = fyStartISO(fyConvention || (country === "India" ? "apr-mar" : "jan-dec"));
+    document.getElementById("cm-fy-from").value = fyStart;
+    document.getElementById("cm-books-from").value = fyStart;
   }
-  document.getElementById("cm-country").addEventListener("change", applyCountryCurrencyDefaults);
+
+  // Small choice popup (built the same way shell.js's own voyagerConfirm
+  // builds its modal, just with two meaningfully-labelled primary
+  // buttons instead of Cancel/Delete, since this isn't a yes/no
+  // question) - asked once, right when the user picks a non-India
+  // Country, so the Monthly Ledger/Ledger Book reports built on
+  // financial_year_from reflect whichever convention this company
+  // actually follows instead of a silent guess.
+  let fyConventionModalEl = null;
+  function ensureFyConventionModal() {
+    if (fyConventionModalEl) return fyConventionModalEl;
+    const modal = document.createElement("div");
+    modal.className = "dom-modal-backdrop";
+    modal.id = "cm-fy-convention-modal";
+    modal.innerHTML = `
+      <div class="dom-modal-window" style="max-width:440px;">
+        <div class="dom-modal-titlebar">
+          <div>Select Financial Year</div>
+        </div>
+        <div class="voyager-alert-actions" style="flex-direction:column; padding:20px 18px;">
+          <button type="button" class="dom-nav-btn btn-primary" id="cm-fy-jan-dec" style="width:100%; padding:14px; font-size:1rem;">January to December</button>
+          <button type="button" class="dom-nav-btn btn-primary" id="cm-fy-apr-mar" style="width:100%; padding:14px; font-size:1rem;">April to March</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+    fyConventionModalEl = modal;
+    return modal;
+  }
+  function askFyConvention() {
+    const modal = ensureFyConventionModal();
+    modal.classList.add("open");
+    return new Promise((resolve) => {
+      const settle = (choice) => { modal.classList.remove("open"); resolve(choice); };
+      modal.querySelector("#cm-fy-jan-dec").onclick = () => settle("jan-dec");
+      modal.querySelector("#cm-fy-apr-mar").onclick = () => settle("apr-mar");
+    });
+  }
+  document.getElementById("cm-country").addEventListener("change", async () => {
+    const country = document.getElementById("cm-country").value;
+    if (country !== "India") {
+      const choice = await askFyConvention();
+      applyCountryCurrencyDefaults(choice);
+    } else {
+      applyCountryCurrencyDefaults();
+    }
+  });
 
   function clearForm() {
     ["cm-company-name", "cm-mailing-name", "cm-address", "cm-state", "cm-pincode", "cm-telephone",
@@ -331,8 +384,15 @@
       const data = await res.json().catch(() => null);
       if (!res.ok) throw new Error((data && data.error) || `Save failed: ${res.status}`);
       await voyagerAlert("Company details saved.", { icon: "success" });
-      fillForm(data);
-      setViewMode(true);
+      // Full reload, not just fillForm()/setViewMode() - the topnav's
+      // company/flag switcher and Financial Year label are built once by
+      // shell.js and persist across SPA navigations (navigateTo() only
+      // swaps .app-main), so a Country change made here (which can flip
+      // the flag shown and the Apr-Mar/Jan-Dec FY convention everywhere)
+      // would otherwise sit stale until some unrelated full page load
+      // happened to refresh it.
+      window.location.reload();
+      return;
     } catch (err) {
       voyagerAlert(err.message || "Could not save. Is the Django backend running?", { icon: "error" });
     }

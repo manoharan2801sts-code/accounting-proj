@@ -9,7 +9,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
 <link href="assets/css/design-system.css" rel="stylesheet" />
-<link href="assets/css/app.css" rel="stylesheet" />
+<link href="assets/css/app.css?v=2" rel="stylesheet" />
 <link href="assets/css/loader.css" rel="stylesheet" />
 <style>
   /* Scoped to this page only — locks the outer page to the viewport so
@@ -90,7 +90,33 @@
   <aside class="app-sidebar" id="shell-sidebar"></aside>
   <main class="app-main" style="max-width:100%; padding:6px 40px; display:flex; flex-direction:column; height:calc(100vh - var(--topnav-height) - var(--menubar-height, 0px)); overflow:hidden;">
 
-    <div class="dom-window">
+    <div class="dom-window" style="position:relative;">
+      <!-- Covers the whole window the instant an existing ticket/reschedule
+           is being loaded (?id= or ?reschedule_saved_id=), so a slow
+           backend response never leaves a blank "New Airline Ticket" form
+           flashing on screen first - this check runs synchronously, well
+           before page-ticket-entry.js (loaded later, at the bottom of the
+           page) ever gets a chance to execute. Removed by page-ticket-
+           entry.js once the real data has loaded (or on error). -->
+      <div id="ticket-loading-overlay" style="display:none; position:absolute; inset:0; z-index:50; background:#ECEFF3; align-items:center; justify-content:center; font-size:12.5px; font-weight:700; color:#334155;">Loading…</div>
+      <script>
+        (function () {
+          var params = new URLSearchParams(window.location.search);
+          if (params.get("id") || params.get("reschedule_saved_id") || params.get("reschedule_ticket_id")) {
+            document.getElementById("ticket-loading-overlay").style.display = "flex";
+          }
+          // Reschedule's own blank "awaiting a pick" shell (reschedule_new=1,
+          // see enterBlankRescheduleShell in page-ticket-entry.js) has no
+          // slow data fetch to cover with the overlay above, but the title
+          // bar's static HTML still says "New Airline Ticket" until that
+          // function runs later - set it right here, synchronously, so it
+          // never flashes the wrong title first.
+          if (params.get("reschedule_new") === "1") {
+            var titleEl = document.getElementById("page-title");
+            if (titleEl) titleEl.textContent = "Reschedule";
+          }
+        })();
+      </script>
       <!-- 1. Window Title Bar (Our Project Title) -->
       <div class="dom-titlebar">
         <div class="dom-titlebar-title"><span id="page-title" style="font-weight:700; font-size:12.5px;">New Airline Ticket</span></div>
@@ -311,6 +337,11 @@
       <!-- 7. Bottom Action Toolbar (Desktop ERP Buttons with Our Project's Real Actions) -->
       <div class="dom-bottom-toolbar">
         <button type="button" class="dom-nav-btn" id="add-line-btn-bot" style="display:none;">+ Add Passenger</button>
+        <!-- Reschedule's own blank "awaiting a pick" shell only (see
+             enterBlankRescheduleShell) - opens the lookup popup that
+             replaces the old separate trans-airline-reschedule.html
+             search page. -->
+        <button type="button" class="dom-nav-btn btn-primary" id="reschedule-new-btn" style="display:none; font-weight:700;" title="Find the ticket/passenger to reschedule">New</button>
         <button type="button" class="dom-nav-btn" id="find-btn" title="Find an existing ticket">Find</button>
         <button type="submit" form="ticket-form" class="dom-nav-btn btn-primary" id="submit-btn" style="font-weight:700;">Save Ticket</button>
         <a href="ticket-entry.html" class="dom-nav-btn" id="cancel-link">Discard</a>
@@ -337,8 +368,8 @@
          non-editable, purely for reference; Reschedule shows this brand
          new ticket's own data, blank and fully editable. -->
     <div class="reschedule-tab-bar" id="reschedule-tab-bar" style="display:none;">
-      <button type="button" class="reschedule-tab-btn active" data-tab="parent">Parent PNR Details</button>
       <button type="button" class="reschedule-tab-btn" data-tab="reschedule">Reschedule PNR Details</button>
+      <button type="button" class="reschedule-tab-btn active" data-tab="parent">Parent PNR Details</button>
       <button type="button" class="reschedule-tab-close-btn" id="reschedule-tab-close-btn" title="Close">&times;</button>
     </div>
 
@@ -351,7 +382,11 @@
           <select class="dom-select" id="modal-airline-category"></select>
 
           <label>Ticket No<span class="dom-req">*</span></label>
-          <input class="dom-input" id="modal-ticket-no" placeholder="e.g. F4KHTD-1" required />
+          <!-- No flat maxlength - the 10-digit cap applies to the base
+               ticket number only (readModalPassenger/Save validates this),
+               an optional trailing "-1"/"-2" passenger suffix isn't
+               counted against it (e.g. "2204849820-1" is valid). -->
+          <input class="dom-input" id="modal-ticket-no" placeholder="e.g. 2204849820-1" maxlength="20" required />
 
           <label>Pax Name<span class="dom-req">*</span></label>
           <input class="dom-input" id="modal-pax-name" maxlength="50" placeholder="e.g. Mr. Murugan" required />
@@ -430,9 +465,10 @@
               <label>Other SSR</label>
               <input class="dom-input modal-calc dom-amount" type="text" inputmode="decimal" id="modal-other-ssr" min="0" step="0.01" value="0.00" />
             </div>
-            <!-- Reschedule PNR Details tab ONLY - hidden on Parent PNR
-                 Details and every normal, non-reschedule ticket (neither
-                 has this column) - toggled in applyRescheduleTab(). -->
+            <!-- Reschedule mode ONLY (both Parent and Reschedule PNR
+                 Details tabs) - hidden only for a normal, non-reschedule
+                 ticket (which never has this column) - shown/hidden in
+                 applyRescheduleTab(). -->
             <div class="fare-item" id="modal-fare-supplier-penalty-field" style="display:none;">
               <label>Supplier Penalty</label>
               <input class="dom-input modal-calc dom-amount" type="text" inputmode="decimal" id="modal-fare-supplier-penalty" min="0" step="0.01" value="0.00" />
@@ -463,8 +499,8 @@
                    elements out of the default rows further down (see
                    layoutAcctFieldsForReschedule() in page-ticket-entry.js). -->
               <div id="acct-resched-disc-row" style="display:none;">
-                <div class="dom-acct-field dom-acct-field-dual" style="grid-template-columns: 50px 1fr 50px 1fr;">
-                  <label style="white-space:normal; line-height:1.1; font-size:10px;">Discount Amount</label>
+                <div class="dom-acct-field dom-acct-field-dual" style="grid-template-columns: 62px 1fr 50px 1fr;">
+                  <label style="white-space:normal; line-height:1.1; font-size:10px; overflow-wrap:break-word;">Discount Amount</label>
                   <span id="resched-disc-box" style="display:flex; align-items:center; gap:4px;">
                     <span class="acct-pct-box"><span id="resched-disc-pct-slot"></span><span class="acct-pct-suffix">%</span></span>
                     <span id="resched-disc-amt-slot" style="flex:1; min-width:0;"></span>
@@ -619,8 +655,8 @@
                    SAME real elements out of the default rows below (see
                    layoutAcctFieldsForReschedule() in page-ticket-entry.js). -->
               <div id="acct-resched-supp-row" style="display:none;">
-                <div class="dom-acct-field dom-acct-field-dual" style="grid-template-columns: 50px 1fr 50px 1fr;">
-                  <label style="white-space:normal; line-height:1.1; font-size:10px;">Commission Amount</label>
+                <div class="dom-acct-field dom-acct-field-dual" style="grid-template-columns: 62px 1fr 50px 1fr;">
+                  <label style="white-space:normal; line-height:1.1; font-size:10px; overflow-wrap:break-word;">Commission Amount</label>
                   <span id="resched-supp-comm-box" style="display:flex; align-items:center; gap:4px;">
                     <span class="acct-pct-box"><span id="resched-supp-comm-pct-slot"></span><span class="acct-pct-suffix">%</span></span>
                     <span id="resched-supp-comm-amt-slot" style="flex:1; min-width:0;"></span>
@@ -1022,11 +1058,86 @@
   </div>
 </div>
 
+<!-- Reschedule "New" Lookup Modal - replaces the old separate
+     trans-airline-reschedule.html search page. Opened via the "New"
+     button shown only on Reschedule's own blank "awaiting a pick" shell
+     (see enterBlankRescheduleShell/openRescheduleLookupModal in
+     page-ticket-entry.js). Finds the real ticket/reschedule to build this
+     new reschedule from, by S PNR / Airline PNR / Ticket No - same lookup
+     endpoint and Passengers/Sectors picker the old page used. -->
+<div class="dom-modal-backdrop spa-extra-content" id="reschedule-lookup-modal">
+  <div class="dom-modal-window" style="max-width: 900px; width: 95%; max-height: 90vh;">
+    <div class="dom-modal-titlebar">
+      <div>Find Ticket to Reschedule</div>
+      <button type="button" class="dom-titlebar-btn btn-close" id="rs-lookup-close-x-btn" title="Close">&times;</button>
+    </div>
+    <div class="dom-modal-body dom-modal-body-scroll" style="display:block; padding:12px; max-height:76vh;">
+      <div style="display:flex; align-items:flex-end; gap:1rem; flex-wrap:wrap; margin-bottom:12px;">
+        <div style="display:flex; flex-direction:column; gap:2px; font-size:11px;">
+          <label style="font-weight:600; color:#334155;">S PNR</label>
+          <input class="dom-input" type="text" id="rs-search-spnr" placeholder="Booking Reference" autocomplete="off" />
+        </div>
+        <div style="display:flex; flex-direction:column; gap:2px; font-size:11px;">
+          <label style="font-weight:600; color:#334155;">Airline PNR</label>
+          <input class="dom-input" type="text" id="rs-search-airline-pnr" placeholder="Airline PNR" autocomplete="off" />
+        </div>
+        <div style="display:flex; flex-direction:column; gap:2px; font-size:11px;">
+          <label style="font-weight:600; color:#334155;">Ticket No</label>
+          <input class="dom-input" type="text" id="rs-search-ticket-no" placeholder="Ticket No" autocomplete="off" />
+        </div>
+        <button type="button" class="dom-nav-btn btn-primary" id="rs-get-btn" style="font-weight:700;">Get</button>
+      </div>
+
+      <div id="rs-selection-row" style="display:none; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
+        <div style="border:1px solid var(--color-border, #CBD5E1); border-radius:3px; overflow:hidden; display:flex; flex-direction:column; max-height:320px;">
+          <div style="padding:8px 10px; font-weight:700; font-size:12px; background:#FAFBFD; border-bottom:1px solid var(--color-border, #CBD5E1);">Passengers</div>
+          <div style="overflow-y:auto; flex:1; min-height:0;">
+            <table style="width:100%; border-collapse:collapse; font-size:11.5px;">
+              <thead>
+                <tr style="background:#3B6DB5; color:#FFFFFF; font-weight:700; text-align:left; height:26px;">
+                  <th style="width:30px; position:sticky; top:0; background:#3B6DB5;"></th>
+                  <th style="padding:4px 8px; position:sticky; top:0; background:#3B6DB5;">Pax Type</th>
+                  <th style="padding:4px 8px; position:sticky; top:0; background:#3B6DB5;">Pax Name</th>
+                </tr>
+              </thead>
+              <tbody id="rs-pax-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+        <div style="border:1px solid var(--color-border, #CBD5E1); border-radius:3px; overflow:hidden; display:flex; flex-direction:column; max-height:320px;">
+          <div style="padding:8px 10px; font-weight:700; font-size:12px; background:#FAFBFD; border-bottom:1px solid var(--color-border, #CBD5E1);">Sectors</div>
+          <div style="overflow-y:auto; flex:1; min-height:0;">
+            <table style="width:100%; border-collapse:collapse; font-size:11.5px;">
+              <thead>
+                <tr style="background:#3B6DB5; color:#FFFFFF; font-weight:700; text-align:left; height:26px;">
+                  <th style="width:30px; position:sticky; top:0; background:#3B6DB5;"></th>
+                  <th style="padding:4px 8px; position:sticky; top:0; background:#3B6DB5;">Sector</th>
+                  <th style="padding:4px 8px; position:sticky; top:0; background:#3B6DB5;">Flight No</th>
+                  <th style="padding:4px 8px; position:sticky; top:0; background:#3B6DB5;">Class</th>
+                  <th style="padding:4px 8px; position:sticky; top:0; background:#3B6DB5;">Date</th>
+                </tr>
+              </thead>
+              <tbody id="rs-sector-tbody">
+                <tr><td colspan="5" style="text-align:center; padding:1rem; color:#64748B;">Select a passenger to see their sectors.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div id="rs-reschedule-row" style="display:none; flex-direction:column; align-items:center; gap:6px;">
+        <button type="button" class="dom-nav-btn btn-primary" id="rs-reschedule-btn" style="height:36px; padding:0 28px; font-weight:700;" disabled>Reschedule</button>
+        <span style="font-size:11px; color:#64748B;">Reschedule with Selected Passenger(s)</span>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script src="assets/js/hardcode.js"></script>
 <script src="assets/js/mock-data.js"></script>
 <script src="assets/js/api.js"></script>
 <script src="assets/js/util.js"></script>
-<script src="assets/js/shell.js?v=8"></script>
+<script src="assets/js/shell.js?v=10"></script>
 <script src="assets/js/entry-common.js"></script>
-<script src="assets/js/page-ticket-entry.js?v=5"></script>
+<script src="assets/js/page-ticket-entry.js?v=22"></script>
 </body></html>

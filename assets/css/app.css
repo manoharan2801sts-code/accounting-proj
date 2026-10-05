@@ -2214,9 +2214,9 @@ input.dom-input[type="number"], input.dom-input.dom-amount {
   flex-shrink: 0;
 }
 .reschedule-tab-btn {
-  flex: 1;
-  padding: 8px 8px;
-  font-size: 12px;
+  flex: 0 0 auto;
+  padding: 7px 14px;
+  font-size: 11px;
   font-weight: 700;
   border: none;
   border-right: 1px solid #CBD5E1;
@@ -2230,6 +2230,10 @@ input.dom-input[type="number"], input.dom-input.dom-amount {
 }
 .reschedule-tab-close-btn {
   flex: 0 0 32px;
+  /* Tabs no longer stretch to fill the bar (flex: 0 0 auto above) - this
+     keeps the close button pinned to the far right regardless of how
+     narrow they are, instead of sitting right next to them. */
+  margin-left: auto;
   border: none;
   background: var(--color-primary);
   color: #FFFFFF;

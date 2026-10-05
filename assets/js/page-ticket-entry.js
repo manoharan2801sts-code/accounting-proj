@@ -11,6 +11,21 @@
   let rescheduleLineId = params.get("reschedule_line_id");
   const rescheduleSavedId = params.get("reschedule_saved_id");
   let editingRescheduleId = null; // set once a SAVED reschedule ticket is loaded - routes Save Ticket to reschedule-tickets/<id>/update/ instead of create
+  // Chaining - this "New" reschedule was found via a PREVIOUS reschedule
+  // (rescheduling an already-rescheduled ticket again), not the original
+  // ticket. parentRescheduleId says which reschedule to build "Parent PNR
+  // Details" from instead of the original; basedOnRescheduleLineId is the
+  // chain link reschedule_ticket_create needs (which reschedule line to
+  // flip ineligible on save) - sent as each line's own reschedule_line_id
+  // in buildTicketPayload().
+  const parentRescheduleId = params.get("parent_reschedule_id");
+  const basedOnRescheduleLineId = params.get("parent_reschedule_line_id");
+  // Reschedule's own menu item now lands here directly (no more separate
+  // trans-airline-reschedule.html search page) - this flags that blank
+  // "awaiting a pick" shell (see enterBlankRescheduleShell), reached
+  // before any original ticket/passenger has been chosen yet.
+  const rescheduleNew = params.get("reschedule_new") === "1";
+  const rescheduleActiveKey = (rescheduleTicketId || rescheduleSavedId || rescheduleNew) ? "trans-airline-reschedule" : "tickets";
   let activeCompanyId, activeCountry, allCustomers = [], allSuppliers = [], existingTickets = [];
   let voucherTypes = []; // active Voucher Types for the active company - drives the Invoice Type dropdown + Invoice Number auto-numbering
   const VOUCHER_TYPE_API = `${API_BASE}/voucher-type/`;
@@ -29,8 +44,19 @@
   // new ticket's own data - starts completely blank/0.00, fully editable,
   // and IS what actually gets saved).
   let modalRescheduleTab = "parent";
-  let rescheduleParentPassenger = null; // frozen clone of the original ticket line - never touched again
-  let rescheduleEditPassenger = null; // this new ticket's own passenger data - mirrors passengers[0], updated whenever Save & Apply commits
+  // One entry per picked passenger, same index as `passengers` - each
+  // passenger rescheduled together can have its own Parent (e.g. two
+  // different original lines, or two different points in a chain), so
+  // this can no longer be a single shared object.
+  let rescheduleParentPassengers = [];
+  // One array PER picked passenger (same index as `passengers`), each
+  // holding that passenger's own chain_levels from the backend - one
+  // entry per ancestor PNR (nearest first), each a modal-ready passenger
+  // object (via buildParentPassengerFromLine) showing THAT level's own
+  // standalone data, never summed. Sits alongside rescheduleParentPassengers
+  // (the cumulative total) rather than replacing it - extra tab buttons
+  // are built from this in renderAncestorTabs.
+  let rescheduleAncestorLevels = [];
   let modalSectors = []; // current passenger's multi-city sectors - {from,to,travelDate,flightNo,cabin,cls,fareType}
   let editingSectorIndex = null;
 
@@ -466,8 +492,14 @@
       }
       if (rule.comm_on) document.getElementById("modal-supp-comm-on").value = rule.comm_on;
       document.getElementById("modal-supp-comm-type").value = rule.calc_type;
-      document.getElementById("modal-supp-comm-value").value = rule.calc_type === "Flat"
-        ? fmtN(rule.flat_amt) : Number(rule.calc_pct).toFixed(2);
+      if (rule.calc_type === "Flat") {
+        // % field stays at 0 (set by updateSuppDiscValueLabel below) - the
+        // flat amount itself goes straight into Commission Amount, same
+        // split as everywhere else Flat is handled.
+        document.getElementById("modal-supp-comm-computed").value = fmtN(rule.flat_amt);
+      } else {
+        document.getElementById("modal-supp-comm-value").value = Number(rule.calc_pct).toFixed(2);
+      }
       updateSuppDiscValueLabel();
       recalcSuppTotal();
     } catch (err) {
@@ -541,20 +573,37 @@
   function toISODate(d) {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   }
-  // Clamp the Invoice Date / Booking Ref Date calendar pickers to the current
-  // financial year (Apr-Mar) and never later than today, so an out-of-range
-  // date can't be picked in the first place (checkNotFutureAndInFY still
-  // guards submit for older browsers / typed-in values).
-  (function clampFYDatePickers() {
+  // Clamp the Invoice Date / Booking Ref Date calendar pickers to the
+  // active company's current financial year (Apr-Mar for India, Jan-Dec
+  // for everywhere else, e.g. UAE - see activeCountry) and never later
+  // than today, so an out-of-range date can't be picked in the first
+  // place (checkNotFutureAndInFY still guards submit for older browsers /
+  // typed-in values). Runs once immediately (activeCountry isn't known
+  // yet at this point, so it assumes India - corrected below the moment
+  // the real company/country resolves) and again on every company switch.
+  function isCalendarYearCountry() {
+    return !!activeCountry && activeCountry !== "IN";
+  }
+  // Jan-Dec countries: the FY "year" is just the date's own year. Apr-Mar
+  // (India, default): a date in Jan-Mar belongs to the FY that started
+  // the PREVIOUS calendar year.
+  function fyYearFor(d) {
+    if (isCalendarYearCountry()) return d.getFullYear();
+    return d.getMonth() >= 3 ? d.getFullYear() : d.getFullYear() - 1;
+  }
+  function fyStartForYear(fyYear) {
+    return isCalendarYearCountry() ? new Date(fyYear, 0, 1) : new Date(fyYear, 3, 1);
+  }
+  function applyFYDatePickerLimits() {
     const today = new Date(); today.setHours(0, 0, 0, 0);
-    const fyYear = today.getMonth() >= 3 ? today.getFullYear() : today.getFullYear() - 1;
-    const fyStart = new Date(fyYear, 3, 1);
+    const fyStart = fyStartForYear(fyYearFor(today));
     const min = toISODate(fyStart), max = toISODate(today);
     ["invoice_date", "booking_ref_date"].forEach((id) => {
       const native = document.querySelector(`#${id} .dg-native`);
       if (native) { native.min = min; native.max = max; }
     });
-  })();
+  }
+  applyFYDatePickerLimits();
   function isoToDDMMYYYY(iso) {
     if (!iso) return "";
     const [y, m, d] = iso.split("-");
@@ -566,9 +615,12 @@
     if (!d) return `${label} must be a valid date.`;
     const today = new Date(); today.setHours(0, 0, 0, 0);
     if (d > today) return `${label} cannot be later than today.`;
-    const fyYear = d.getMonth() >= 3 ? d.getFullYear() : d.getFullYear() - 1;
-    const fyStart = new Date(fyYear, 3, 1), fyEnd = new Date(fyYear + 1, 2, 31);
-    if (d < fyStart || d > fyEnd) return `${label} must be within the current financial year (Apr-Mar).`;
+    const fyYear = fyYearFor(d);
+    const fyStart = fyStartForYear(fyYear);
+    const fyEnd = isCalendarYearCountry() ? new Date(fyYear, 11, 31) : new Date(fyYear + 1, 2, 31);
+    if (d < fyStart || d > fyEnd) {
+      return `${label} must be within the current financial year (${isCalendarYearCountry() ? "Jan-Dec" : "Apr-Mar"}).`;
+    }
     return null;
   }
   function setHint(id, msg, ok) {
@@ -675,7 +727,16 @@
   function updateDiscValueLabel() {
     const type = document.getElementById("modal-disc-type").value;
     const isPct = type === "Percentage";
-    const inReschedLayout = rescheduleMode && modalRescheduleTab === "reschedule";
+    // Both tabs now use the same merged/compact DOM layout (see
+    // applyRescheduleTab/layoutAcctFieldsForReschedule, always called with
+    // true in reschedule mode) - this used to only be true for the
+    // Reschedule tab specifically, back when Parent PNR Details still used
+    // the separate "default" layout. Leaving this gated on the active tab
+    // left Parent PNR Details showing its redundant "Discount %"/
+    // "Commission %" label crammed into the tiny %-box meant for just a
+    // number, overflowing and squeezing the real Amount/TDS/Taxable/GST
+    // boxes next to it out of view.
+    const inReschedLayout = rescheduleMode;
     // Discount % and Cust Discount On stay visible always now - only
     // Percentage makes them editable (Discount % is meaningless for Flat,
     // Cust Discount On is the base % is calculated against).
@@ -719,10 +780,16 @@
     // only Percentage makes them editable. In the Reschedule tab's merged
     // Commission Amount box, the % side has no visible label (just the
     // .acct-pct-box's "%" suffix) - same treatment as Discount's own box.
-    const inReschedLayout = rescheduleMode && modalRescheduleTab === "reschedule";
+    // Both tabs share this merged layout now - see the same note in
+    // updateDiscValueLabel() above.
+    const inReschedLayout = rescheduleMode;
     document.getElementById("modal-supp-comm-value-field").style.display = "contents";
     document.getElementById("modal-supp-comm-val-label").style.display = inReschedLayout ? "none" : "";
     document.getElementById("modal-supp-comm-value").disabled = !isPct || viewMode;
+    // Flat has no meaningful percentage - show 0 rather than echoing the
+    // flat Commission Amount into a field labeled "Commission %" (same
+    // reasoning as Discount's own equivalent reset above).
+    if (!isPct) document.getElementById("modal-supp-comm-value").value = "0.00";
     document.getElementById("modal-supp-comm-on-field").style.display = "";
     document.getElementById("modal-supp-comm-on").disabled = !isPct || viewMode;
   }
@@ -789,18 +856,28 @@
       card_number: document.getElementById("modal-fop").value === "Cash" ? "" : document.getElementById("modal-card-number").value,
       supp_comm_on: document.getElementById("modal-supp-comm-on").value,
       supp_comm_type: document.getElementById("modal-supp-comm-type").value,
-      supp_comm_value: num("modal-supp-comm-value"),
+      // Flat has no % field of its own (it's shown as 0, same as
+      // Discount) - the flat amount is read straight from Commission
+      // Amount instead.
+      supp_comm_value: document.getElementById("modal-supp-comm-type").value === "Flat"
+        ? num("modal-supp-comm-computed") : num("modal-supp-comm-value"),
       supp_tds_per: num("modal-supp-tds-per"),
       supp_markup: num("modal-supp-markup"), supp_addl_markup: num("modal-supp-addl-markup"),
       supp_service_fee: num("modal-supp-service-fee"), supp_addl_service_fee: num("modal-supp-addl-service-fee"),
       supp_gst_pct: num("modal-supp-gst-pct"),
       agent_penalty: num("modal-agent-penalty"), reschedule_penalty: num("modal-reschedule-penalty"),
-      // original_ticket_line_id has no modal field of its own - carry it
-      // forward from whatever this passenger already had (set by
+      // original_ticket_line_id/reschedule_line_id have no modal field of
+      // their own - carry them forward from whatever THIS passenger
+      // (passengers[editingIndex]) already had (set by
       // enterRescheduleMode/enterSavedRescheduleMode when the modal first
       // opened), so editing a passenger's fare via Save & Apply never
-      // drops the link back to its original ticket line.
-      ...(rescheduleMode && rescheduleEditPassenger ? { original_ticket_line_id: rescheduleEditPassenger.original_ticket_line_id } : {}),
+      // drops its link back to its own original ticket line / chain
+      // position - each passenger can point at a different line, so this
+      // must read the ONE being edited, not a single shared value.
+      ...(rescheduleMode && passengers[editingIndex] ? {
+        original_ticket_line_id: passengers[editingIndex].original_ticket_line_id,
+        reschedule_line_id: passengers[editingIndex].reschedule_line_id,
+      } : {}),
     };
   }
   function recalcModalTotal(opts) {
@@ -814,7 +891,11 @@
     // Taxable Amount - display-only, not used in any calculation.
     document.getElementById("modal-taxable-amount").textContent =
       fmtN(p.service_fee + p.addl_service_fee + p.ssr_service_fee);
-    document.getElementById("modal-total-computed").textContent = fmtN(r.total);
+    // Same 3 penalties the pax table's own row Total already folds in
+    // (see renderPaxTable's lineTotal) - only ever non-zero in reschedule
+    // mode, so this is a no-op for a normal, non-reschedule ticket.
+    const penalties = (p.supplier_penalty || 0) + (p.reschedule_penalty || 0) + (p.agent_penalty || 0);
+    document.getElementById("modal-total-computed").textContent = fmtN(r.total + penalties);
     updatePgCharges();
     return r;
   }
@@ -893,7 +974,11 @@
     updateCardNumberField(p.card_number || "");
     document.getElementById("modal-supp-comm-on").value = p.supp_comm_on || "";
     document.getElementById("modal-supp-comm-type").value = p.supp_comm_type || "";
-    document.getElementById("modal-supp-comm-value").value = Number(p.supp_comm_value || 0).toFixed(2);
+    document.getElementById("modal-supp-comm-value").value = p.supp_comm_type === "Flat" ? "0.00" : Number(p.supp_comm_value || 0).toFixed(2);
+    // Flat's real amount lives in Commission Amount (same reasoning as
+    // Discount's own Flat handling above) - seed it here so recalcSuppTotal()
+    // below doesn't derive the commission from a still-blank Amount field.
+    if (p.supp_comm_type === "Flat") document.getElementById("modal-supp-comm-computed").value = fmtN(p.supp_comm_value || 0);
     document.getElementById("modal-supp-tds-per").value = Number(p.supp_tds_per || 0).toFixed(2);
     document.getElementById("modal-supp-markup").value = fmtN(p.supp_markup || 0);
     document.getElementById("modal-supp-addl-markup").value = fmtN(p.supp_addl_markup || 0);
@@ -911,6 +996,51 @@
     recalcModalTotal();
     recalcSuppTotal();
   }
+  // Auto-fills a brand-new passenger's FARE fields only (Base Fare & Tax
+  // Components + Customer/Supplier accounting cards) from the FIRST
+  // existing passenger of the same Pax Type already in the register -
+  // e.g. the 2nd Adult copies the 1st Adult's fares, the 2nd Child copies
+  // the 1st Child's (not the Adult's). Deliberately leaves every non-fare
+  // field alone (Pax Name, Ticket No, Sector, Office ID, Supplier, FOP,
+  // Card Number, Airline Category) - those still need entering by hand
+  // for every passenger. Only runs for a brand-new passenger (never while
+  // editing an already-saved one) and never in Reschedule mode (that
+  // flow's register is capped at one passenger anyway).
+  function applyFareTemplate(t) {
+    document.getElementById("modal-basic-fare").value = fmtN(t.basic_fare);
+    document.getElementById("modal-yq").value = fmtN(t.yq); document.getElementById("modal-yr").value = fmtN(t.yr);
+    document.getElementById("modal-k3").value = fmtN(t.k3_tax); document.getElementById("modal-tax-others").value = fmtN(t.tax_others);
+    document.getElementById("modal-seat").value = fmtN(t.seat); document.getElementById("modal-meal").value = fmtN(t.meal);
+    document.getElementById("modal-baggage").value = fmtN(t.baggage); document.getElementById("modal-other-ssr").value = fmtN(t.other_ssr);
+    document.getElementById("modal-disc-on").value = t.disc_on; document.getElementById("modal-disc-type").value = t.disc_type;
+    document.getElementById("modal-disc-value").value = t.disc_type === "Flat" ? "0.00" : Number(t.disc_value).toFixed(2);
+    if (t.disc_type === "Flat") document.getElementById("modal-disc-computed").value = fmtN(t.disc_value);
+    document.getElementById("modal-tds-per").value = Number(t.tds_per).toFixed(2);
+    document.getElementById("modal-markup").value = fmtN(t.markup); document.getElementById("modal-addl-markup").value = fmtN(t.addl_markup);
+    document.getElementById("modal-ssr-markup").value = fmtN(t.ssr_markup || 0);
+    document.getElementById("modal-service-fee").value = fmtN(t.service_fee); document.getElementById("modal-addl-service-fee").value = fmtN(t.addl_service_fee);
+    document.getElementById("modal-ssr-service-fee").value = fmtN(t.ssr_service_fee || 0);
+    document.getElementById("modal-supp-comm-on").value = t.supp_comm_on || "";
+    document.getElementById("modal-supp-comm-type").value = t.supp_comm_type || "";
+    document.getElementById("modal-supp-comm-value").value = t.supp_comm_type === "Flat" ? "0.00" : Number(t.supp_comm_value || 0).toFixed(2);
+    if (t.supp_comm_type === "Flat") document.getElementById("modal-supp-comm-computed").value = fmtN(t.supp_comm_value || 0);
+    document.getElementById("modal-supp-tds-per").value = Number(t.supp_tds_per || 0).toFixed(2);
+    document.getElementById("modal-supp-markup").value = fmtN(t.supp_markup || 0);
+    document.getElementById("modal-supp-addl-markup").value = fmtN(t.supp_addl_markup || 0);
+    document.getElementById("modal-supp-service-fee").value = fmtN(t.supp_service_fee || 0);
+    document.getElementById("modal-supp-addl-service-fee").value = fmtN(t.supp_addl_service_fee || 0);
+    document.getElementById("modal-supp-gst-pct").value = Number(t.supp_gst_pct || 0).toFixed(2);
+    suppCommOverridden = !!(t.supp_comm_on || t.supp_comm_type || t.supp_comm_value);
+    updateDiscValueLabel();
+    updateSuppDiscValueLabel();
+    recalcModalTotal();
+    recalcSuppTotal();
+  }
+  document.getElementById("modal-pax-type").addEventListener("change", (e) => {
+    if (rescheduleMode || editingIndex !== null || !e.target.value) return;
+    const template = passengers.find((p) => p.pax_type === e.target.value);
+    if (template) applyFareTemplate(template);
+  });
   // Supplier Commission defaults to mirroring whatever's picked in Client
   // Accounting (On/Type/Value/TDS %) - but the moment the user touches a
   // Supplier Commission field directly, that link breaks for the rest of
@@ -922,6 +1052,13 @@
     document.getElementById("modal-supp-comm-on").value = document.getElementById("modal-disc-on").value;
     document.getElementById("modal-supp-comm-type").value = document.getElementById("modal-disc-type").value;
     document.getElementById("modal-supp-comm-value").value = document.getElementById("modal-disc-value").value;
+    // Flat's real amount lives in the Amount field now, not the % field
+    // (see updateSuppDiscValueLabel/readModalPassenger) - without this,
+    // syncing Flat from Client Accounting would leave Commission Amount
+    // pointing at whatever stale value it had before, not Discount's.
+    if (document.getElementById("modal-disc-type").value === "Flat") {
+      document.getElementById("modal-supp-comm-computed").value = document.getElementById("modal-disc-computed").value;
+    }
     document.getElementById("modal-supp-tds-per").value = document.getElementById("modal-tds-per").value;
     updateSuppDiscValueLabel();
     recalcSuppTotal();
@@ -971,9 +1108,10 @@
     suppCommOverridden = true;
     const type = document.getElementById("modal-supp-comm-type").value;
     const amount = parseFloat(e.target.value) || 0;
-    if (type === "Flat") {
-      document.getElementById("modal-supp-comm-value").value = e.target.value;
-    } else if (type === "Percentage") {
+    // Flat reads straight from this Amount field (see readModalPassenger)
+    // - the % field just stays at 0, same as Discount's own equivalent
+    // listener never echoes the flat amount back into its % field either.
+    if (type === "Percentage") {
       const discBase = computeDiscBase({ ...readModalPassenger(), disc_on: document.getElementById("modal-supp-comm-on").value });
       document.getElementById("modal-supp-comm-value").value = discBase > 0 ? ((amount / discBase) * 100).toFixed(4) : "0";
     }
@@ -989,6 +1127,25 @@
   // fare_type the same, one value per sector in the same order).
   // travel_date collapses to a single value when every sector shares the
   // same date, comma-joined only when they actually differ.
+  // Keeps the Reschedule fare modal's right column (Base Fare + Customer/
+  // Supplier cards) the SAME overall height on both the Parent and
+  // Reschedule tabs, so switching tabs never visibly shrinks/grows the
+  // popup - measured live off the actual rendered content instead of a
+  // hand-picked spacer height (which drifts out of sync every time a
+  // field gets added/removed from either tab's layout). Tracks the
+  // tallest height seen so far for THIS modal session (reset in
+  // openFareModal) and clamps both tabs to it.
+  let modalMinColHeight = 0;
+  function syncModalHeight() {
+    if (!rescheduleMode) return;
+    const col = document.querySelector("#fare-breakdown-modal .dom-modal-col-right");
+    if (!col) return;
+    col.style.minHeight = "";
+    const h = col.scrollHeight;
+    if (h > modalMinColHeight) modalMinColHeight = h;
+    col.style.minHeight = `${modalMinColHeight}px`;
+  }
+
   // ============================================================
   // Read-only sector detail rows shown under Card Number - ALL sectors
   // share one card (not one card per sector), each sector as its own row
@@ -1021,6 +1178,7 @@
     box.querySelectorAll(".dom-sector-detail-row").forEach((row) => {
       row.addEventListener("click", () => { openSectorModal(Number(row.dataset.idx)); });
     });
+    syncModalHeight();
   }
   function renderSectorChips() {
     const box = document.getElementById("modal-sector-chips");
@@ -1059,6 +1217,13 @@
     document.getElementById("sector-airline-code").value = s.airlineCode || "";
     document.getElementById("sector-airline-name").value = s.airlineName || "";
     setDateGroupValue(document.getElementById("sector-travel-date"), s.travelDate);
+    // Travel Date can never be earlier than Booking Ref Date - the ticket
+    // is issued against that booking reference, so travel can't predate
+    // it. Blocks picking an earlier date in the calendar itself (checked
+    // again at Save for a typed-in value - see sector-save-btn below).
+    const travelDateNative = document.getElementById("sector-travel-date").querySelector(".dg-native");
+    const bookingRefIso = toISOFromDDMMYYYY(getDateGroupValue(document.getElementById("booking_ref_date")));
+    if (travelDateNative) travelDateNative.min = bookingRefIso || "";
     document.getElementById("sector-flight-no").value = s.flightNo;
     document.getElementById("sector-cabin").value = s.cabin;
     document.getElementById("sector-class").value = s.cls;
@@ -1090,11 +1255,21 @@
     const from = document.getElementById("sector-from").value.trim().toUpperCase();
     const to = document.getElementById("sector-to").value.trim().toUpperCase();
     if (!from || !to) { voyagerAlert("Sector From and To are both required."); return; }
+    const travelDate = getDateGroupValue(document.getElementById("sector-travel-date"));
+    // Backstop for a typed-in value - the calendar's own min (set in
+    // openSectorModal) already blocks picking an earlier date, but a
+    // native date input still lets someone type past that.
+    const bookingRefDate = getDateGroupValue(document.getElementById("booking_ref_date"));
+    const travelD = parseDDMMYYYY(travelDate), refD = parseDDMMYYYY(bookingRefDate);
+    if (travelD && refD && travelD < refD) {
+      voyagerAlert("Travel Date cannot be earlier than Booking Ref Date.");
+      return;
+    }
     const entry = {
       from, to,
       airlineCode: document.getElementById("sector-airline-code").value.trim().toUpperCase(),
       airlineName: document.getElementById("sector-airline-name").value.trim(),
-      travelDate: getDateGroupValue(document.getElementById("sector-travel-date")),
+      travelDate,
       flightNo: document.getElementById("sector-flight-no").value.trim(),
       cabin: document.getElementById("sector-cabin").value,
       cls: document.getElementById("sector-class").value.trim(),
@@ -1139,6 +1314,10 @@
   function openFareModal(index) {
     editingIndex = index;
     const isNew = index === null;
+    // Fresh per passenger - a short passenger's Reschedule tab shouldn't be
+    // forced to match a DIFFERENT, longer passenger's height from earlier
+    // in this same session.
+    modalMinColHeight = 0;
     document.getElementById("modal-pax-display").textContent = isNew ? `New Passenger #${passengers.length + 1}` : `Passenger #${index + 1}`;
     // Blanket enable/disable runs BEFORE writeModalPassenger, not after -
     // writeModalPassenger's own updateDiscValueLabel/updateSuppDiscValueLabel/
@@ -1154,7 +1333,10 @@
     // its own close X) rather than sitting awkwardly under it.
     document.querySelector("#fare-breakdown-modal .dom-modal-titlebar").style.display = rescheduleMode ? "none" : "";
     document.getElementById("reschedule-tab-bar").style.display = rescheduleMode ? "" : "none";
-    if (rescheduleMode) applyRescheduleTab("reschedule");
+    if (rescheduleMode) {
+      renderAncestorTabs(index);
+      applyRescheduleTab("reschedule");
+    }
     fareModal.classList.add("open");
   }
   // Moves the REAL Discount %/Discount Amount/TDS %/TDS Amount/Taxable
@@ -1252,30 +1434,95 @@
   // Switches the fare modal between the frozen original ticket line
   // (Parent) and this brand new ticket's own blank/editable data
   // (Reschedule) - covers the whole modal, both columns.
+  // Builds the extra per-ancestor-PNR tab buttons (one per entry in
+  // rescheduleAncestorLevels[index], alongside the fixed Reschedule/Parent
+  // ones already in the HTML) - rebuilt every time the modal opens since
+  // a different passenger can have a different chain depth. Marked with
+  // .reschedule-ancestor-tab-btn so old ones are easy to find and remove
+  // before adding this passenger's own set.
+  function renderAncestorTabs(index) {
+    const bar = document.getElementById("reschedule-tab-bar");
+    bar.querySelectorAll(".reschedule-ancestor-tab-btn").forEach((btn) => btn.remove());
+    const levels = rescheduleAncestorLevels[index] || [];
+    const closeBtn = document.getElementById("reschedule-tab-close-btn");
+    levels.forEach((lvl, i) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "reschedule-tab-btn reschedule-ancestor-tab-btn";
+      btn.dataset.tab = `ancestor-${i}`;
+      btn.textContent = lvl.pnr || `Ancestor ${i + 1}`;
+      bar.insertBefore(btn, closeBtn);
+    });
+  }
   function applyRescheduleTab(tab) {
     modalRescheduleTab = tab;
-    layoutAcctFieldsForReschedule(tab === "reschedule");
+    // Both tabs now use the same "resched" layout (Supplier Penalty/Agent
+    // Penalty/Reschedule Penalty rows included) - Parent PNR Details on a
+    // chained (2nd+) reschedule carries real cumulative penalty totals
+    // too (see _resolve_parent_chain_line on the backend), so it needs
+    // the same fields visible as Reschedule PNR Details, not the plain
+    // "default" layout a normal, non-reschedule ticket still uses.
+    layoutAcctFieldsForReschedule(true);
     const isParent = tab === "parent";
+    const ancestorMatch = /^ancestor-(\d+)$/.exec(tab);
+    const ancestorLevel = ancestorMatch ? (rescheduleAncestorLevels[editingIndex] || [])[Number(ancestorMatch[1])] : null;
+    const isAncestor = !!ancestorLevel;
     // Reschedule PNR Details is only actually editable when viewMode is
     // off (a saved reschedule ticket opens read-only first, same as any
-    // other saved ticket, until Edit is clicked) - Parent PNR Details
-    // stays frozen/read-only regardless, same as always.
-    const readOnly = isParent || viewMode;
+    // other saved ticket, until Edit is clicked) - Parent PNR Details and
+    // every per-ancestor-PNR tab stay frozen/read-only regardless, same
+    // as always (both are a frozen reference, never what gets saved).
+    const readOnly = isParent || isAncestor || viewMode;
     document.querySelectorAll("#fare-breakdown-modal input, #fare-breakdown-modal select").forEach((el) => (el.disabled = readOnly));
-    writeModalPassenger(isParent ? rescheduleParentPassenger : rescheduleEditPassenger);
-    // Supplier Penalty (Base Fare & Tax Components card) is a
-    // RescheduleAirlineTicketLines-only column - TicketLines has no such
-    // field, so it never shows on Parent PNR Details.
-    document.getElementById("modal-fare-supplier-penalty-field").style.display = isParent ? "none" : "";
+    // Whichever passenger row is currently open in the modal
+    // (editingIndex, set by openFareModal) - each one can have its own
+    // Parent/ancestor levels (see rescheduleParentPassengers/
+    // rescheduleAncestorLevels).
+    writeModalPassenger(isAncestor ? ancestorLevel.passenger : (isParent ? rescheduleParentPassengers[editingIndex] : passengers[editingIndex]));
+    // Chained (2nd+) reschedule only - writeModalPassenger's own
+    // recalcModalTotal/recalcSuppTotal above just derived TDS Amount from
+    // Amount x tds_per (0 here, no single rate produced the true sum), so
+    // it needs overriding with the real cumulative TDS the backend sent
+    // instead (see buildParentPassengerFromLine/_resolve_parent_chain_line).
+    // Never applies to an ancestor tab - each one's own standalone data
+    // already carries its own real tds_per/tds_amount: null, so the
+    // normal live Amount x Rate derivation above is already correct.
+    if (isParent) {
+      const pp = rescheduleParentPassengers[editingIndex];
+      if (pp && pp.tds_amount != null) {
+        document.getElementById("modal-tds-computed").textContent = fmtN(pp.tds_amount);
+        // Bottom Total was computed with Customer TDS = 0 (tds_per is 0
+        // here) - add back the real amount just applied above so Total
+        // stays correct instead of understating it by this same amount.
+        const totalEl = document.getElementById("modal-total-computed");
+        totalEl.textContent = fmtN((parseFloat(totalEl.textContent) || 0) + pp.tds_amount);
+      }
+      if (pp && pp.supp_tds_amount != null) document.getElementById("modal-supp-tds-computed").textContent = fmtN(pp.supp_tds_amount);
+    }
+    // Supplier Penalty (Base Fare & Tax Components card) now shows on
+    // every tab - on a first-ever reschedule, Parent PNR Details simply
+    // shows 0.00 (the true original TicketLine has no such column), same
+    // as Agent/Reschedule Penalty below.
+    document.getElementById("modal-fare-supplier-penalty-field").style.display = "";
     document.getElementById("modal-sector-add-btn").style.display = readOnly ? "none" : "";
     // visibility (not display) - keeps their row's height reserved on the
     // Parent tab too, so switching tabs doesn't shrink/jump the modal.
     document.getElementById("modal-cancel-btn").style.visibility = readOnly ? "hidden" : "";
     document.getElementById("modal-save-btn").style.visibility = readOnly ? "hidden" : "";
     document.querySelectorAll(".reschedule-tab-btn").forEach((btn) => btn.classList.toggle("active", btn.dataset.tab === tab));
+    // Re-measure AFTER every visibility toggle above (Supplier Penalty
+    // field, Add Sector/Cancel/Save buttons) - writeModalPassenger's own
+    // syncModalHeight call (via renderSectorDetails) runs before these,
+    // so it can't account for them.
+    syncModalHeight();
   }
-  document.querySelectorAll(".reschedule-tab-btn").forEach((btn) => {
-    btn.addEventListener("click", () => applyRescheduleTab(btn.dataset.tab));
+  // Event delegation (not a per-button listener) - the ancestor PNR
+  // buttons are created fresh by renderAncestorTabs every time the modal
+  // opens, so a one-time querySelectorAll+addEventListener pass at page
+  // load would never see them.
+  document.getElementById("reschedule-tab-bar").addEventListener("click", (e) => {
+    const btn = e.target.closest(".reschedule-tab-btn");
+    if (btn) applyRescheduleTab(btn.dataset.tab);
   });
   function closeFareModal() { fareModal.classList.remove("open"); }
   document.getElementById("modal-close-x-btn").addEventListener("click", closeFareModal);
@@ -1325,7 +1572,12 @@
   document.getElementById("modal-save-btn").addEventListener("click", () => {
     const p = readModalPassenger();
     if (!p.ticket_no) { voyagerAlert("Ticket No. is required."); return; }
-    if (p.ticket_no.length < 10) { voyagerAlert("Ticket No. must be at least 10 characters."); return; }
+    // A real airline ticket number is exactly 10 digits - the BASE
+    // number only, before any "-1"/"-2" passenger suffix this app
+    // appends (e.g. "2204849820-1" is valid: base "2204849820" is 10,
+    // the "-1" isn't counted against that limit).
+    const ticketNoBase = p.ticket_no.includes("-") ? p.ticket_no.slice(0, p.ticket_no.lastIndexOf("-")) : p.ticket_no;
+    if (ticketNoBase.length !== 10) { voyagerAlert("Ticket No. must be exactly 10 characters (not counting any -1/-2 passenger suffix)."); return; }
     if (!p.passenger_name) { voyagerAlert("Pax Name is required."); return; }
     const dupInList = passengers.some((x, i) => x.ticket_no === p.ticket_no && i !== editingIndex);
     const dupExisting = existingTickets.some((t) => t.ticket_no === p.ticket_no && String(t.id) !== String(editId));
@@ -1337,10 +1589,6 @@
     } else {
       passengers[editingIndex] = p;
     }
-    // Remembers what was just applied so the Reschedule tab shows these
-    // same values (not reset back to blank) next time this modal reopens -
-    // Save & Apply is only reachable from that tab anyway (Parent hides it).
-    if (rescheduleMode) rescheduleEditPassenger = p;
     closeFareModal();
     renderPaxTable();
   });
@@ -1413,7 +1661,14 @@
         </td>
       </tr>` : "";
 
-    linesBody.innerHTML = rowsHtml + addRowHtml || `<tr id="no-pax-row"><td colspan="12" style="text-align:center; padding:18px; color:#64748B; font-size:11.5px;">No passengers to show.</td></tr>`;
+    // Reschedule's own blank "awaiting a pick" shell (see
+    // enterBlankRescheduleShell) - nothing to show yet since no ticket has
+    // been picked, points at the "New" button instead of the generic
+    // fallback message below.
+    const blankRescheduleHtml = (rescheduleMode && !passengers.length)
+      ? `<tr id="no-pax-row"><td colspan="11" style="text-align:center; padding:18px; color:#64748B; font-size:11.5px;">Click <strong style="color:#3B6DB5;">New</strong> below to find the ticket/passenger to reschedule.</td></tr>`
+      : "";
+    linesBody.innerHTML = rowsHtml + addRowHtml || blankRescheduleHtml || `<tr id="no-pax-row"><td colspan="12" style="text-align:center; padding:18px; color:#64748B; font-size:11.5px;">No passengers to show.</td></tr>`;
 
     // Double-click to view/edit a row's passenger & fare details works in
     // both view mode (read-only) and edit mode.
@@ -1525,9 +1780,18 @@
     // saved reschedule's passenger already carries its own
     // original_ticket_line_id (from enterSavedRescheduleMode); a
     // brand-new one falls back to the URL's reschedule_line_id.
+    // reschedule_line_id (chaining - this reschedule is itself based on a
+    // PREVIOUS reschedule, not the original ticket) follows the same
+    // pattern: a saved chained reschedule already carries its own from
+    // reschedule_ticket_detail, a brand-new one falls back to the URL's
+    // parent_reschedule_line_id (basedOnRescheduleLineId) - null/undefined
+    // for an ordinary (non-chained) reschedule either way.
     const lines = passengers.map((p) => ({
       ...p,
-      ...(rescheduleMode ? { original_ticket_line_id: p.original_ticket_line_id || Number(rescheduleLineId) } : {}),
+      ...(rescheduleMode ? {
+        original_ticket_line_id: p.original_ticket_line_id || Number(rescheduleLineId),
+        reschedule_line_id: p.reschedule_line_id || (basedOnRescheduleLineId ? Number(basedOnRescheduleLineId) : null),
+      } : {}),
     }));
     return {
       company_id: activeCompanyId,
@@ -1837,8 +2101,9 @@
     return null;
   }
 
-  // Main JV - unlike renderJvPreview, never filters out zero-amount rows
-  // ("Do not remove any field") and never shows the Booking JV's own
+  // Main JV - now filters out zero-amount rows the same way renderJvPreview
+  // (Booking's own) does, rather than always showing all 26 Main JV
+  // fields even at zero. Still never shows the Booking JV's own
   // Balanced/Posted badge wording (a Reschedule JV is never "posted" -
   // no JournalVoucher is created for a reschedule ticket yet).
   async function renderRescheduleJvPreview(jv) {
@@ -1846,12 +2111,14 @@
     document.getElementById("jv-meta-vno").textContent = displayVno;
     document.getElementById("jv-meta-date").textContent = jv.voucher_date ? isoToDDMMYYYY(jv.voucher_date) : "-";
     document.getElementById("jv-meta-currency").textContent = jv.currency || document.getElementById("currency").textContent;
-    document.getElementById("jv-table-body").innerHTML = jv.accounts.map((a, i) => `
+    document.getElementById("jv-table-body").innerHTML = jv.accounts
+      .filter((a) => a.debit || a.credit)
+      .map((a, i) => `
       <tr style="border-bottom:1px solid #E2E8F0;">
         <td style="padding:5px 8px; text-align:center;">${i + 1}</td>
         <td style="padding:5px 8px;">${a.ledger_name || "-"}</td>
-        <td style="padding:5px 8px; text-align:right; font-family:var(--font-mono,monospace);">${fmtN(a.debit || 0)}</td>
-        <td style="padding:5px 8px; text-align:right; font-family:var(--font-mono,monospace);">${fmtN(a.credit || 0)}</td>
+        <td style="padding:5px 8px; text-align:right; font-family:var(--font-mono,monospace);">${a.debit ? fmtN(a.debit) : ""}</td>
+        <td style="padding:5px 8px; text-align:right; font-family:var(--font-mono,monospace);">${a.credit ? fmtN(a.credit) : ""}</td>
       </tr>`).join("");
     document.getElementById("jv-total-debit").textContent = fmtN(jv.total_debit);
     document.getElementById("jv-total-credit").textContent = fmtN(jv.total_credit);
@@ -1859,9 +2126,13 @@
     const verifyBox = jvModal.querySelector(".dom-modal-footer div[style*='color:#16A34A']");
     if (verifyBox) {
       const balanced = Math.abs(jv.total_debit - jv.total_credit) < 0.01;
-      verifyBox.innerHTML = balanced
-        ? `<span style="color:#D97706;">Computed - not yet posted (live preview)</span>`
-        : `<span style="color:#DC2626;">X Unbalanced - Debit ${fmtN(jv.total_debit)} != Credit ${fmtN(jv.total_credit)}</span>`;
+      if (!balanced) {
+        verifyBox.innerHTML = `<span style="color:#DC2626;">X Unbalanced - Debit ${fmtN(jv.total_debit)} != Credit ${fmtN(jv.total_credit)}</span>`;
+      } else if (jv.posted) {
+        verifyBox.innerHTML = `<span>OK Double-Entry Verification: Balanced (Posted ${jv.voucher_no})</span>`;
+      } else {
+        verifyBox.innerHTML = `<span style="color:#D97706;">Computed - not yet posted (live preview)</span>`;
+      }
     }
 
     const paymentMode = document.getElementById("payment_mode").value;
@@ -2012,9 +2283,17 @@
     const dateTo = document.getElementById("find-date-to").value;
 
     resultsBody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:14px; color:#64748B;">Searching...</td></tr>`;
+    // Reschedule's own Find (opened from rescheduleMode, whether the
+    // blank "awaiting a pick" shell or an already-loaded reschedule)
+    // searches saved RescheduleAirlineTickets instead of plain Tickets -
+    // same filter fields, different backend list, so picking a result
+    // opens that reschedule, not the original booking it came from.
+    const findApi = rescheduleMode
+      ? `${API_BASE}/reschedule-tickets/list/?company_id=${activeCompanyId}`
+      : `${API_BASE}/tickets/?company_id=${activeCompanyId}`;
     let rows = [];
     try {
-      const res = await fetch(`${API_BASE}/tickets/?company_id=${activeCompanyId}`);
+      const res = await fetch(findApi);
       rows = res.ok ? await res.json() : [];
     } catch (_) { rows = []; }
 
@@ -2029,23 +2308,27 @@
       rowMatchesDateFilter(r, dateType, dateFrom, dateTo)
     );
 
-    // One row per TICKET, not per passenger line - show the first passenger
-    // added (lowest TicketLine id) as the representative row, so a ticket
-    // with several passengers doesn't repeat its Invoice No/Booking Ref/
-    // PNR/Ticket No for every one of them.
+    // One row per TICKET (or per reschedule ticket, in rescheduleMode),
+    // not per passenger line - show the first passenger added (lowest
+    // line id) as the representative row, so a ticket with several
+    // passengers doesn't repeat its Invoice No/Booking Ref/PNR/Ticket No
+    // for every one of them. reschedule_tickets_list rows all carry
+    // ticket_id: null, so grouping by that alone would collapse every
+    // reschedule into one row - reschedule_ticket_id is the real key here.
     const byTicket = new Map();
     filtered.forEach((r) => {
-      const existing = byTicket.get(r.ticket_id);
-      if (!existing || r.id < existing.id) byTicket.set(r.ticket_id, r);
+      const key = rescheduleMode ? r.reschedule_ticket_id : r.ticket_id;
+      const existing = byTicket.get(key);
+      if (!existing || r.id < existing.id) byTicket.set(key, r);
     });
     const deduped = Array.from(byTicket.values());
 
     if (deduped.length === 0) {
-      resultsBody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:14px; color:#64748B;">No matching tickets found.</td></tr>`;
+      resultsBody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:14px; color:#64748B;">No matching ${rescheduleMode ? "reschedules" : "tickets"} found.</td></tr>`;
       return;
     }
     resultsBody.innerHTML = deduped.map((r) => `
-      <tr class="find-result-row" data-id="${r.ticket_id}" style="cursor:pointer;">
+      <tr class="find-result-row" data-id="${rescheduleMode ? r.reschedule_ticket_id : r.ticket_id}" style="cursor:pointer;">
         <td style="padding:4px 8px;">${r.invoice_number || "-"}</td>
         <td style="padding:4px 8px;">${r.booking_reference || "-"}</td>
         <td style="padding:4px 8px;">${r.airline_pnr || "-"}</td>
@@ -2056,11 +2339,14 @@
       </tr>`).join("");
     document.querySelectorAll(".find-result-row").forEach((row) => {
       row.addEventListener("click", () => {
-        window.location.href = `ticket-entry.html?id=${row.dataset.id}`;
+        window.location.href = rescheduleMode
+          ? `ticket-entry.html?reschedule_saved_id=${row.dataset.id}`
+          : `ticket-entry.html?id=${row.dataset.id}`;
       });
     });
   }
   document.getElementById("find-btn").addEventListener("click", () => {
+    findModal.querySelector(".dom-modal-titlebar > div").textContent = rescheduleMode ? "Find Reschedule" : "Find Ticket";
     findModal.classList.add("open");
     document.getElementById("find-results-body").innerHTML = `<tr><td colspan="7" style="text-align:center; padding:14px; color:#64748B;">Enter a filter above and click Search.</td></tr>`;
   });
@@ -2129,21 +2415,187 @@
     // Book, Ledger, DSR), send "Back" to that report instead of always
     // reloading a blank ticket-entry.html - document.referrer holds
     // wherever the browser actually navigated here from.
-    const REPORT_BACK_TARGETS = [
-      { match: "report-day-book.html", label: "Day Book" },
-      { match: "report-ledger-book.html", label: "Ledger" },
-      { match: "report-dsr-airline-booking.html", label: "DSR" },
-    ];
+    applyReportBackLink("Tickets");
+    document.getElementById("edit-ticket-btn").style.display = "";
+  }
+
+  // Wherever a saved ticket/reschedule was opened FROM (a report row, the
+  // Reschedule lookup screen, or nowhere in particular) is where "Discard"
+  // should go back TO, rather than always landing on the same hardcoded
+  // place regardless of entry point. document.referrer is whatever page
+  // actually navigated here - checked against every report this can be
+  // opened from; falls back to defaultLabel/defaultHref when it doesn't
+  // match any of them (e.g. opened fresh from a bookmark, or via the
+  // Reschedule lookup screen's own "Saved" radio).
+  const REPORT_BACK_TARGETS = [
+    { match: "report-day-book.html", label: "Day Book" },
+    { match: "report-ledger-book.html", label: "Ledger" },
+    { match: "report-dsr-airline-booking.html", label: "DSR" },
+  ];
+  function applyReportBackLink(defaultLabel, defaultHref) {
     const backTarget = REPORT_BACK_TARGETS.find((r) => document.referrer.includes(r.match));
     const cancelLink = document.getElementById("cancel-link");
     if (backTarget) {
       cancelLink.textContent = `<- Back to ${backTarget.label}`;
       cancelLink.setAttribute("href", document.referrer);
     } else {
-      cancelLink.textContent = "<- Back to Tickets";
+      cancelLink.textContent = `<- Back to ${defaultLabel}`;
+      if (defaultHref) cancelLink.setAttribute("href", defaultHref);
     }
-    document.getElementById("edit-ticket-btn").style.display = "";
   }
+
+  // Reschedule's own menu item lands here directly now (reschedule_new=1),
+  // not on a separate search page - this is that blank "awaiting a pick"
+  // shell: Booking Status frozen at Re-Scheduled, nothing else fillable
+  // until "New" below is used to actually find a ticket/passenger.
+  function enterBlankRescheduleShell() {
+    rescheduleMode = true;
+    document.getElementById("page-title").textContent = "Reschedule";
+    document.getElementById("booking_status").value = "Re-Scheduled";
+    document.getElementById("booking_status").disabled = true;
+    document.getElementById("proceed-btn").style.display = "none";
+    document.getElementById("submit-btn").style.display = "none";
+    document.getElementById("reschedule-new-btn").style.display = "";
+    renderPaxTable();
+  }
+
+  // ============================================================
+  // Reschedule "New" Lookup Modal - replaces the old separate
+  // trans-airline-reschedule.html search page, opened via the "New"
+  // button on enterBlankRescheduleShell's empty form above. Finds the
+  // real ticket to reschedule by S PNR / Airline PNR / Ticket No (same
+  // lookup endpoint/picker the old page used), then reloads this same
+  // page with the right reschedule_ticket_id/reschedule_line_id params -
+  // the exact URL the old page's own "Reschedule" button used to build,
+  // so it lands on the same already-proven enterRescheduleMode flow.
+  // ============================================================
+  let rsLookupPassengers = [];
+  let rsLookupMatchedLineId = null;
+  let rsLookupTicketId = null;
+  let rsLookupSourceRescheduleId = null;
+  const rescheduleLookupModal = document.getElementById("reschedule-lookup-modal");
+
+  function openRescheduleLookupModal() {
+    ["rs-search-spnr", "rs-search-airline-pnr", "rs-search-ticket-no"].forEach((id) => { document.getElementById(id).value = ""; });
+    rsLookupPassengers = []; rsLookupMatchedLineId = null; rsLookupTicketId = null; rsLookupSourceRescheduleId = null;
+    document.getElementById("rs-selection-row").style.display = "none";
+    document.getElementById("rs-reschedule-row").style.display = "none";
+    rescheduleLookupModal.classList.add("open");
+  }
+  function closeRescheduleLookupModal() { rescheduleLookupModal.classList.remove("open"); }
+  document.getElementById("reschedule-new-btn").addEventListener("click", openRescheduleLookupModal);
+  document.getElementById("rs-lookup-close-x-btn").addEventListener("click", closeRescheduleLookupModal);
+
+  async function rsLookupTicketForReschedule() {
+    if (!activeCompanyId) {
+      voyagerAlert("Could not determine the active company. Check your connection and try Get again.");
+      return;
+    }
+    const sPnr = document.getElementById("rs-search-spnr").value.trim();
+    const airlinePnr = document.getElementById("rs-search-airline-pnr").value.trim();
+    const ticketNo = document.getElementById("rs-search-ticket-no").value.trim();
+    if (!sPnr && !airlinePnr && !ticketNo) {
+      voyagerAlert("Enter S PNR, Airline PNR or Ticket No to search.");
+      return;
+    }
+    try {
+      const params = new URLSearchParams({ company_id: activeCompanyId, s_pnr: sPnr, airline_pnr: airlinePnr, ticket_no: ticketNo });
+      const res = await fetch(`${API_BASE}/tickets/lookup-for-reschedule/?${params}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Ticket not found.");
+      rsLookupTicketId = data.ticket_id || null;
+      rsLookupMatchedLineId = data.matched_line_id || null;
+      rsLookupSourceRescheduleId = data.source_reschedule_ticket_id || null;
+      // A Ticket No search identifies exactly ONE passenger, not the
+      // whole booking - only show that one, not every passenger on the
+      // same ticket (S PNR/Airline PNR searches have no single matched
+      // passenger, so those still show everyone).
+      rsLookupPassengers = rsLookupMatchedLineId
+        ? (data.passengers || []).filter((p) => p.line_id === rsLookupMatchedLineId)
+        : (data.passengers || []);
+      renderRsPassengers();
+      document.getElementById("rs-selection-row").style.display = "grid";
+      document.getElementById("rs-reschedule-row").style.display = "flex";
+    } catch (err) {
+      voyagerAlert(err.message || "Could not search for this ticket. Is the Django backend running?", { icon: "error" });
+    }
+  }
+  document.getElementById("rs-get-btn").addEventListener("click", rsLookupTicketForReschedule);
+  ["rs-search-spnr", "rs-search-airline-pnr", "rs-search-ticket-no"].forEach((id) => {
+    document.getElementById(id).addEventListener("keydown", (e) => { if (e.key === "Enter") rsLookupTicketForReschedule(); });
+  });
+
+  function renderRsPassengers() {
+    const tbody = document.getElementById("rs-pax-tbody");
+    if (!rsLookupPassengers.length) {
+      tbody.innerHTML = `<tr><td colspan="3" style="text-align:center; padding:1rem; color:#64748B;">No passengers on this ticket.</td></tr>`;
+      renderRsSectors();
+      return;
+    }
+    // Pax checkboxes start unchecked - they're purely for marking who's
+    // actually being rescheduled, not for controlling whether sectors are
+    // shown (see renderRsSectors below, which always shows every
+    // passenger's sectors regardless of checkbox state).
+    tbody.innerHTML = rsLookupPassengers.map((p, i) => `
+      <tr>
+        <td style="padding:4px 8px;"><input type="checkbox" class="rs-pax-check" data-idx="${i}" /></td>
+        <td style="padding:4px 8px;">${p.pax_type || "-"}</td>
+        <td style="padding:4px 8px;">${p.passenger_name || "-"}</td>
+      </tr>
+    `).join("");
+    tbody.querySelectorAll(".rs-pax-check").forEach((cb) => cb.addEventListener("change", updateRsRescheduleButtonState));
+    renderRsSectors();
+  }
+  // Shows every passenger's sectors right away, independent of the Pax
+  // checkboxes - those only mark who's selected for the Reschedule
+  // action, they don't gate what's visible here.
+  function renderRsSectors() {
+    const tbody = document.getElementById("rs-sector-tbody");
+    const rows = [];
+    rsLookupPassengers.forEach((p) => {
+      (p.sectors || []).forEach((s) => {
+        rows.push(`
+          <tr>
+            <td style="padding:4px 8px;"><input type="checkbox" class="rs-sector-check" /></td>
+            <td style="padding:4px 8px;">${s.sector || "-"}</td>
+            <td style="padding:4px 8px;">${s.flight_no || "-"}</td>
+            <td style="padding:4px 8px;">${s.travel_class || "-"}</td>
+            <td style="padding:4px 8px;">${s.travel_date || "-"}</td>
+          </tr>
+        `);
+      });
+    });
+    tbody.innerHTML = rows.length
+      ? rows.join("")
+      : `<tr><td colspan="5" style="text-align:center; padding:1rem; color:#64748B;">Select a passenger to see their sectors.</td></tr>`;
+    tbody.querySelectorAll(".rs-sector-check").forEach((cb) => cb.addEventListener("change", updateRsRescheduleButtonState));
+    updateRsRescheduleButtonState();
+  }
+  // Reschedule only makes sense once at least one passenger AND one of
+  // their sectors is actually picked.
+  function updateRsRescheduleButtonState() {
+    const anyPax = document.querySelectorAll(".rs-pax-check:checked").length > 0;
+    const anySector = document.querySelectorAll(".rs-sector-check:checked").length > 0;
+    document.getElementById("rs-reschedule-btn").disabled = !(anyPax && anySector);
+  }
+  document.getElementById("rs-reschedule-btn").addEventListener("click", () => {
+    const checkedPax = Array.from(document.querySelectorAll(".rs-pax-check:checked"))
+      .map((cb) => rsLookupPassengers[Number(cb.dataset.idx)]);
+    if (!rsLookupTicketId || !checkedPax.length) return;
+    // One new reschedule ticket, carrying EVERY checked passenger -
+    // passed via sessionStorage (not the URL) same as the old page did,
+    // since enterRescheduleMode's own init-flow reader already expects it
+    // there.
+    sessionStorage.setItem("reschedule_picked_lines", JSON.stringify(
+      checkedPax.map((p) => ({ line_id: p.line_id, reschedule_line_id: p.reschedule_line_id || null }))
+    ));
+    let url = `ticket-entry.html?reschedule_ticket_id=${rsLookupTicketId}&reschedule_line_id=${checkedPax[0].line_id}`;
+    if (rsLookupSourceRescheduleId) {
+      url += `&parent_reschedule_id=${rsLookupSourceRescheduleId}`;
+      if (checkedPax[0].reschedule_line_id) url += `&parent_reschedule_line_id=${checkedPax[0].reschedule_line_id}`;
+    }
+    window.location.href = url;
+  });
 
   // Builds the frozen "Parent PNR Details" passenger object from an
   // original TicketLine (as returned by tickets/<id>/) - shared by both
@@ -2166,6 +2618,19 @@
       supp_markup: l.supp_markup || 0, supp_addl_markup: l.supp_addl_markup || 0,
       supp_service_fee: l.supp_service_fee || 0, supp_addl_service_fee: l.supp_addl_service_fee || 0,
       supp_gst_pct: l.supp_gst_pct || 0,
+      // Only ever non-zero once the cumulative chain fetch in
+      // enterRescheduleMode/enterSavedRescheduleMode below has replaced
+      // the single-line fallback - a plain TicketLine (the very first
+      // reschedule's own Parent PNR Details) has no such fields at all.
+      agent_penalty: l.agent_penalty || 0, reschedule_penalty: l.reschedule_penalty || 0,
+      supplier_penalty: l.supplier_penalty || 0,
+      // Set only by the parent-chain-line endpoint for a CHAINED (2nd+)
+      // reschedule - the true cumulative TDS Amount (sum of each chain
+      // level's own TDS, not "summed Amount x one rate"), applied as a
+      // direct display override in applyRescheduleTab since tds_per is 0
+      // here (no single real rate produced that sum).
+      tds_amount: l.tds_amount != null ? l.tds_amount : null,
+      supp_tds_amount: l.supp_tds_amount != null ? l.supp_tds_amount : null,
     };
   }
 
@@ -2173,9 +2638,24 @@
   // Reschedule flow (trans-airline-reschedule.html) - unlike enterViewMode,
   // this leaves Invoice Number blank and defaults both dates to today (this
   // is a new ticket being created, not the original being reopened), keeps
-  // every field editable, and only carries over the ONE passenger line the
-  // user picked on the reschedule screen rather than the whole ticket.
-  async function enterRescheduleMode(t, lineId) {
+  // every field editable, and carries over every passenger line the user
+  // checked on the reschedule screen (pickedLines - an array of
+  // {line_id, reschedule_line_id}, one per checked passenger) rather than
+  // the whole ticket.
+  //
+  // parentSource (optional) - set only when CHAINING: this reschedule was
+  // found via a PREVIOUS reschedule (trans-airline-reschedule.html matched
+  // the search against an already-rescheduled ticket, not the original),
+  // so "Parent PNR Details" and the header defaults below should reflect
+  // that reschedule's own (most recent) state instead of the several-
+  // steps-back original. It's the JSON from reschedule-tickets/<id>/,
+  // same booking_reference/lines[] shape as `t` itself, so it's used as a
+  // drop-in substitute wherever `t` would otherwise be read from. All
+  // checked passengers come from the SAME lookup result, so they always
+  // share this one parentSource (and one lookupSourceRescheduleId) -
+  // trans-airline-reschedule.html never mixes original-ticket and
+  // reschedule-matched passengers in a single lookup.
+  async function enterRescheduleMode(t, pickedLines, parentSource) {
     rescheduleMode = true;
     document.getElementById("page-title").textContent = "Reschedule";
     // These two fields now track the reschedule's own reference/date, not
@@ -2183,45 +2663,107 @@
     document.getElementById("booking_reference_label").innerHTML = 'Rescheduled Ref<span class="dom-req">*</span>';
     document.getElementById("booking_ref_date_label").innerHTML = 'Rescheduled Ref Date<span class="dom-req">*</span>';
     document.getElementById("booking_reference").style.flex = "0 0 120px";
-    // Parent PNR carries the ORIGINAL ticket's Booking Reference forward
-    // for a visible trail back to it - Booking Reference itself is left
-    // blank so the user enters this reschedule's own new reference.
+    // Parent PNR carries the PARENT's (original ticket, or the previous
+    // reschedule when chaining) Booking Reference forward for a visible
+    // trail back to it - Booking Reference itself is left blank so the
+    // user enters this reschedule's own new reference.
+    const parentHeader = parentSource || t;
     document.getElementById("parent-pnr-field").style.display = "";
-    document.getElementById("parent_pnr").textContent = t.booking_reference || "—";
-    document.getElementById("invoice_type").value = t.invoice_type || "";
-    document.getElementById("booking_mode").value = t.booking_mode || "";
-    document.getElementById("customer").value = t.customer_name || "";
+    document.getElementById("parent_pnr").textContent = parentHeader.booking_reference || "—";
+    document.getElementById("invoice_type").value = parentHeader.invoice_type || "";
+    // Setting .value directly doesn't fire a "change" event, so the
+    // auto-numbering this Invoice Type triggers on a real user pick (see
+    // applyInvoiceNumbering) never ran - Invoice Number stayed blank even
+    // though Invoice Type showed correctly pre-selected.
+    applyInvoiceNumbering();
+    document.getElementById("booking_mode").value = parentHeader.booking_mode || "";
+    document.getElementById("customer").value = parentHeader.customer_name || "";
     document.getElementById("booking_reference").value = "";
-    document.getElementById("booking_given_by").value = t.booking_given_by || "";
-    document.getElementById("booking_type").value = t.booking_type || "";
+    document.getElementById("booking_given_by").value = parentHeader.booking_given_by || "";
+    document.getElementById("booking_type").value = parentHeader.booking_type || "";
     // Frozen to Re-Scheduled regardless of the original ticket's own
     // status - this new ticket only exists because of the reschedule.
     document.getElementById("booking_status").value = "Re-Scheduled";
     document.getElementById("booking_status").disabled = true;
-    document.getElementById("travel_type").value = t.travel_type || "";
-    document.getElementById("user_name").value = t.user_name || "";
+    document.getElementById("travel_type").value = parentHeader.travel_type || "";
+    document.getElementById("user_name").value = parentHeader.user_name || "";
     // Payment Mode is left unset ("Select...") rather than copied from the
     // original ticket - the reschedule may be settled through a different
     // mode, so the user picks it fresh.
     document.getElementById("payment_mode").value = "";
     document.getElementById("payment_gateway_ref").value = "";
     updateGatewayRefField();
-    document.getElementById("roe").value = t.roe;
-    document.getElementById("airline_pnr_header").value = t.airline_pnr || "";
-    document.getElementById("gds_pnr_header").value = t.gds_pnr || "";
+    document.getElementById("roe").value = parentHeader.roe;
+    document.getElementById("airline_pnr_header").value = parentHeader.airline_pnr || "";
+    document.getElementById("gds_pnr_header").value = parentHeader.gds_pnr || "";
     document.getElementById("customer").dispatchEvent(new Event("input"));
 
-    const l = t.lines.find((ln) => String(ln.id) === String(lineId)) || t.lines[0];
-    if (l) {
-      // Parent PNR Details tab - the ORIGINAL ticket line, untouched, shown
-      // purely as a frozen reference (including its real FOP/Card Number,
-      // unlike the old behaviour that used to default FOP to Cash here).
-      rescheduleParentPassenger = buildParentPassengerFromLine(l);
+    passengers = [];
+    rescheduleParentPassengers = [];
+    rescheduleAncestorLevels = [];
+    for (const picked of pickedLines) {
+      const pickedLineId = picked.line_id;
+      const pickedBasedOnId = picked.reschedule_line_id || null;
+      // Resolved per-passenger, by THIS passenger's own reschedule_line_id
+      // - parentSource can itself carry several lines (a previous
+      // reschedule that also rescheduled multiple passengers at once), so
+      // always matching parentSource.lines[0] regardless of which
+      // passenger this is would silently mix up whose Parent is whose.
+      const l = (parentSource && pickedBasedOnId)
+        ? (parentSource.lines.find((ln) => String(ln.id) === String(pickedBasedOnId)) || parentSource.lines[0])
+        : (t.lines.find((ln) => String(ln.id) === String(pickedLineId)) || t.lines[0]);
+      if (!l) continue;
+
+      // Parent PNR Details tab - starts from this single line as a
+      // fallback, then (below) is replaced with the CUMULATIVE total
+      // across the whole chain (original + every intermediate reschedule)
+      // once that's fetched, since a chained reschedule's own standalone
+      // fare figures alone understate what's actually owed so far.
+      let parentPassenger = buildParentPassengerFromLine(l);
+      let ancestorLevels = [];
+      try {
+        const chainUrl =
+          `${API_BASE}/reschedule-tickets/parent-chain-line/?company_id=${activeCompanyId}&original_ticket_line_id=${pickedLineId}` +
+          (pickedBasedOnId ? `&based_on_reschedule_line_id=${pickedBasedOnId}` : "");
+        const chainRes = await fetch(chainUrl);
+        if (chainRes.ok) {
+          const chainData = await chainRes.json();
+          parentPassenger = buildParentPassengerFromLine(chainData);
+          // One extra tab per ancestor PNR (nearest first), each its own
+          // standalone (never summed) fare data - alongside the combined
+          // Parent PNR Details tab above, not instead of it.
+          ancestorLevels = (chainData.chain_levels || []).map((lvl) => ({
+            pnr: lvl.pnr,
+            passenger: buildParentPassengerFromLine(lvl),
+          }));
+        }
+      } catch (_) { /* keep the single-line fallback above */ }
+      rescheduleParentPassengers.push(parentPassenger);
+      rescheduleAncestorLevels.push(ancestorLevels);
+
       // Reschedule PNR Details tab - this brand new ticket's own data,
-      // starts fully blank/0.00 (like any other new passenger) and IS what
-      // the register/Summary/save payload actually reflect until filled in.
-      passengers = [blankPassenger()];
-      rescheduleEditPassenger = passengers[0];
+      // starts blank/0.00 for every fare figure (like any other new
+      // passenger), but a handful of Passenger & Segment Details fields
+      // are pre-filled from the Parent line as a starting point the user
+      // can freely overwrite: Airline Category, Pax Name, Pax Type, and
+      // (inside the Sector popup) Origin/Destination, Airline Code/Name -
+      // Flight No/Travel Date/Cabin/Class/Fare Type stay blank since
+      // those genuinely change on a reschedule. Office ID/Supplier are
+      // also carried over - auto-filling Office ID re-triggers the same
+      // Supplier lookup a manual Office ID entry would.
+      passengers.push({
+        ...blankPassenger(),
+        airline_category: l.airline_category || "",
+        passenger_name: l.passenger_name || "",
+        pax_type: l.pax_type || "",
+        sector: l.sector || "", airline_code: l.airline_code || "", airline_name: l.airline_name || "",
+        office_id: l.office_id || "", supplier_name: l.supplier_name || "",
+        // Set directly on each passenger (rather than relying on a single
+        // shared URL param) since every checked passenger can point at a
+        // DIFFERENT original/chain line.
+        original_ticket_line_id: pickedLineId,
+        reschedule_line_id: pickedBasedOnId,
+      });
     }
     renderPaxTable();
   }
@@ -2240,13 +2782,20 @@
     // editable form the way a brand-new reschedule (enterRescheduleMode)
     // does.
     viewMode = true;
+    const extraPaxSuffix = rt.lines.length > 1 ? ` +${rt.lines.length - 1} more` : "";
     document.getElementById("page-title").textContent =
-      `View Reschedule - ${rt.lines[0]?.ticket_no || rt.invoice_number} (${rt.lines[0]?.passenger_name || ""})`;
+      `View Reschedule - ${rt.lines[0]?.ticket_no || rt.invoice_number} (${rt.lines[0]?.passenger_name || ""})${extraPaxSuffix}`;
     document.getElementById("booking_reference_label").innerHTML = 'Rescheduled Ref<span class="dom-req">*</span>';
     document.getElementById("booking_ref_date_label").innerHTML = 'Rescheduled Ref Date<span class="dom-req">*</span>';
     document.getElementById("booking_reference").style.flex = "0 0 120px";
     document.getElementById("parent-pnr-field").style.display = "";
-    document.getElementById("parent_pnr").textContent = originalTicket.booking_reference || "—";
+    // Stored on the saved line itself (parent_pnr - set once at creation,
+    // never recomputed), not re-derived from originalTicket every time -
+    // this was ALWAYS wrong for a chained reschedule (rescheduling an
+    // already-rescheduled ticket again), since it unconditionally showed
+    // the true original's own Booking Reference instead of whichever
+    // reschedule this one was actually made from.
+    document.getElementById("parent_pnr").textContent = (rt.lines[0] && rt.lines[0].parent_pnr) || originalTicket.booking_reference || "—";
     document.getElementById("invoice_number").value = rt.invoice_number || "";
     setDateGroupValue(document.getElementById("invoice_date"), rt.invoice_date ? isoToDDMMYYYY(rt.invoice_date) : todayDDMMYYYY());
     document.getElementById("invoice_type").value = rt.invoice_type || "";
@@ -2268,20 +2817,48 @@
     setDateGroupValue(document.getElementById("booking_ref_date"), rt.booking_ref_date ? isoToDDMMYYYY(rt.booking_ref_date) : todayDDMMYYYY());
     document.getElementById("customer").dispatchEvent(new Event("input"));
 
-    const savedLine = rt.lines[0];
-    const parentLine = savedLine
-      ? originalTicket.lines.find((ln) => String(ln.id) === String(savedLine.original_ticket_line_id))
-      : null;
-    if (parentLine) rescheduleParentPassenger = buildParentPassengerFromLine(parentLine);
-    passengers = savedLine ? [{ ...blankPassenger(), ...savedLine }] : [blankPassenger()];
-    rescheduleEditPassenger = passengers[0];
+    // Every saved line belongs to this one reschedule ticket - loop over
+    // ALL of them (not just rt.lines[0]) so a reschedule that carried
+    // several passengers at once re-opens showing every one of them, each
+    // with its own correctly-matched Parent PNR Details.
+    passengers = [];
+    rescheduleParentPassengers = [];
+    rescheduleAncestorLevels = [];
+    for (const savedLine of rt.lines) {
+      const parentLine = originalTicket.lines.find((ln) => String(ln.id) === String(savedLine.original_ticket_line_id));
+      let parentPassenger = parentLine ? buildParentPassengerFromLine(parentLine) : null;
+      let ancestorLevels = [];
+      // Same cumulative-chain total as enterRescheduleMode, but reading
+      // back THIS saved line's own stored chain pointers
+      // (original_ticket_line_id/reschedule_line_id) instead of fresh
+      // lookup-screen params, so re-opening a chained reschedule later
+      // still shows the correct running total, not just the single-line
+      // fallback above.
+      try {
+        const chainUrl =
+          `${API_BASE}/reschedule-tickets/parent-chain-line/?company_id=${activeCompanyId}&original_ticket_line_id=${savedLine.original_ticket_line_id}` +
+          (savedLine.reschedule_line_id ? `&based_on_reschedule_line_id=${savedLine.reschedule_line_id}` : "");
+        const chainRes = await fetch(chainUrl);
+        if (chainRes.ok) {
+          const chainData = await chainRes.json();
+          parentPassenger = buildParentPassengerFromLine(chainData);
+          ancestorLevels = (chainData.chain_levels || []).map((lvl) => ({
+            pnr: lvl.pnr,
+            passenger: buildParentPassengerFromLine(lvl),
+          }));
+        }
+      } catch (_) { /* keep the single-line fallback above */ }
+      rescheduleParentPassengers.push(parentPassenger);
+      rescheduleAncestorLevels.push(ancestorLevels);
+      passengers.push({ ...blankPassenger(), ...savedLine });
+    }
+    if (!passengers.length) passengers = [blankPassenger()];
     renderPaxTable();
 
     document.querySelectorAll(".dom-form-grid input, .dom-form-grid select").forEach((el) => (el.disabled = true));
     document.getElementById("proceed-btn").style.display = "none";
     document.getElementById("submit-btn").style.display = "none";
-    document.getElementById("cancel-link").textContent = "<- Back to Reschedule";
-    document.getElementById("cancel-link").setAttribute("href", "trans-airline-reschedule.html");
+    applyReportBackLink("Reschedule", "trans-airline-reschedule.html");
     document.getElementById("edit-ticket-btn").style.display = "";
   }
 
@@ -2390,12 +2967,13 @@
   }
   let active = null;
   try {
-    active = await VoyagerShell.init({ activeKey: "tickets", onCompanyChange: (id, country) => { activeCompanyId = Number(id); activeCountry = country; VoyagerUtil.loadDecimalPlaces(activeCompanyId); populateRefs(activeCompanyId); } });
+    active = await VoyagerShell.init({ activeKey: rescheduleActiveKey, onCompanyChange: (id, country) => { activeCompanyId = Number(id); activeCountry = country; applyFYDatePickerLimits(); VoyagerUtil.loadDecimalPlaces(activeCompanyId); populateRefs(activeCompanyId); } });
   } catch (err) {
     console.error("Shell init failed", err);
   }
   if (active) {
     activeCompanyId = Number(active.id); activeCountry = active.country;
+    applyFYDatePickerLimits();
     // Company Master's "No. of Decimals" - every fmtN() call below reads
     // this, so it must resolve before the first render (blank register/
     // Summary/modal) rather than racing it.
@@ -2437,19 +3015,62 @@
         }
       } else if (rescheduleTicketId) {
         try {
-          const res = await fetch(`${API_BASE}/tickets/${rescheduleTicketId}/?company_id=${activeCompanyId}`);
+          const [res, parentRes] = await Promise.all([
+            fetch(`${API_BASE}/tickets/${rescheduleTicketId}/?company_id=${activeCompanyId}`),
+            // Chaining - also fetch the PREVIOUS reschedule this one was
+            // found via, so "Parent PNR Details" reflects its data instead
+            // of the several-steps-back original ticket's.
+            parentRescheduleId
+              ? fetch(`${API_BASE}/reschedule-tickets/${parentRescheduleId}/?company_id=${activeCompanyId}`)
+              : Promise.resolve(null),
+          ]);
           const ticket = await res.json();
           if (!res.ok) throw new Error(ticket.error || "Ticket not found.");
-          await enterRescheduleMode(ticket, rescheduleLineId);
+          let parentSource = null;
+          if (parentRes) {
+            const parentData = await parentRes.json();
+            if (parentRes.ok) parentSource = parentData;
+            // Tolerates a failed parent fetch (e.g. it was deleted between
+            // the lookup and now) by just falling back to the plain
+            // original-ticket Parent PNR Details instead of failing the
+            // whole page load.
+          }
+          // Every passenger checked on the lookup screen - stashed there
+          // (not the URL) as a JSON array of {line_id, reschedule_line_id}
+          // since it can be more than one. Falls back to a single-entry
+          // array built from the old singular URL params if that storage
+          // is somehow missing (e.g. a stale bookmark), so a direct link
+          // still works for the one-passenger case.
+          let pickedLines = null;
+          try {
+            const raw = sessionStorage.getItem("reschedule_picked_lines");
+            if (raw) pickedLines = JSON.parse(raw);
+          } catch (_) { pickedLines = null; }
+          sessionStorage.removeItem("reschedule_picked_lines");
+          if (!Array.isArray(pickedLines) || !pickedLines.length) {
+            pickedLines = [{
+              line_id: Number(rescheduleLineId),
+              reschedule_line_id: basedOnRescheduleLineId ? Number(basedOnRescheduleLineId) : null,
+            }];
+          }
+          await enterRescheduleMode(ticket, pickedLines, parentSource);
         } catch (err) {
           voyagerAlert(err.message || "Could not load the original ticket for reschedule. Is the Django backend running?", { icon: "error" });
           renderPaxTable();
         }
+      } else if (rescheduleNew) {
+        enterBlankRescheduleShell();
       } else {
         renderPaxTable();
       }
     }
+    // Whatever branch above just ran (success or caught error), the real
+    // data load this overlay was covering for is now finished.
+    const loadingOverlay = document.getElementById("ticket-loading-overlay");
+    if (loadingOverlay) loadingOverlay.style.display = "none";
   } else {
+    const loadingOverlay = document.getElementById("ticket-loading-overlay");
+    if (loadingOverlay) loadingOverlay.style.display = "none";
     voyagerAlert("Could not load the active company. Check your connection and reload the page.", { icon: "error" });
   }
 })();

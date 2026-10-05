@@ -408,6 +408,19 @@ class TicketLine(models.Model):
     # historical record of which card number was charged at the time.
     card_number = models.CharField(max_length=40, null=True, blank=True)
 
+    # Reschedule eligibility flag (added 2026-10-03) - True (DB value 1) =
+    # this passenger/line has NOT been rescheduled yet and is still
+    # eligible to be; False (DB value 0) = it already has a
+    # RescheduleAirlineTicketLine against it (see original_ticket_line)
+    # and can never be rescheduled again. Deliberately a plain extra
+    # column on TicketLine itself, not a derived/computed value - nothing
+    # else on this table changes. Flipped to False the moment a reschedule
+    # is created against this line (reschedule_ticket_create), flipped
+    # back to True if that reschedule is ever deleted (not currently
+    # possible from the UI, but kept correct for when it is) - see
+    # views.py's reschedule_ticket_create/ticket_lookup_for_reschedule.
+    is_reschedule_eligible = models.BooleanField(default=True)
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -620,10 +633,41 @@ class RescheduleAirlineTicketLine(models.Model):
         RescheduleAirlineTicket, on_delete=models.CASCADE, related_name="lines", db_column="reschedule_ticket_id"
     )
     # The exact original passenger line this reschedule was raised for -
-    # "Parent PNR Details" is reconstructed entirely from here.
+    # ALWAYS the true original TicketLine, even when this reschedule is
+    # itself chained off a PREVIOUS reschedule (based_on_reschedule_line
+    # below) - FKs never point reschedule-to-reschedule, so this is the
+    # one stable anchor back to the real booking regardless of chain depth.
     original_ticket_line = models.ForeignKey(
         TicketLine, on_delete=models.PROTECT, related_name="reschedule_lines", db_column="original_ticket_line_id"
     )
+    # Set only when this reschedule was created by rescheduling an
+    # ALREADY-RESCHEDULED ticket again (chaining) - e.g. original ticket ->
+    # Reschedule 1 -> Reschedule 2, this field on Reschedule 2's line
+    # points at Reschedule 1's line. "Parent PNR Details" for THIS
+    # reschedule is reconstructed from here when set, instead of from
+    # original_ticket_line (which would show the stale, several-steps-back
+    # original data instead of the most recent state).
+    based_on_reschedule_line = models.ForeignKey(
+        "self", on_delete=models.PROTECT, null=True, blank=True,
+        related_name="chained_reschedule_lines", db_column="based_on_reschedule_line_id"
+    )
+    # Reschedule eligibility flag (added 2026-10-03, same convention as
+    # TicketLine.is_reschedule_eligible) - True (1) = this reschedule's own
+    # line hasn't itself been rescheduled again yet; False (0) = it has
+    # (see chained_reschedule_lines) and can't be rescheduled a second
+    # time. Independent of original_ticket_line's own flag, which only
+    # tracks whether THAT original line has ever been rescheduled at all.
+    is_reschedule_eligible = models.BooleanField(default=True)
+    # Stored (not dynamically re-derived) Parent PNR - the Booking
+    # Reference of whichever ticket/reschedule this line was actually
+    # rescheduled FROM, captured once at creation (reschedule_ticket_
+    # create/update): original_ticket_line.ticket.booking_reference when
+    # not chained, or based_on_reschedule_line.reschedule_ticket.
+    # booking_reference when it is. Never recomputed afterwards - "Parent
+    # PNR Details" always shows exactly what it was at the moment this
+    # reschedule was made, immune to any later changes further up the
+    # chain and to any bug in walking that chain live on every page load.
+    parent_pnr = models.CharField(max_length=30, null=True, blank=True)
 
     airline_code = models.CharField(max_length=200, null=True, blank=True)
     airline_name = models.CharField(max_length=200, null=True, blank=True)
@@ -803,17 +847,25 @@ class JournalVoucher(models.Model):
     """
     The auto-posted GL entry for a Ticket's JV (Airline/Hotel/Visa/
     Insurance/Tour) — one row per Ticket, created/updated by
-    ticket_create/ticket_update alongside the ticket itself. Ticket-driven
-    ONLY (source_ticket is always set); manual double-entry vouchers
-    (Journal/Contra/Payment/Receipt/Debit Note/Credit Note via
-    voucher-entry.html) live in their own separate `Voucher` table/model
-    instead - this table was originally named "Vouchers" and shared both
-    purposes, split apart (2026-09-22) once real double-entry postings
-    started coming from voucher-entry.html too, so ticket JV rows and
-    manual voucher rows don't sit in the same table doing two different jobs.
+    ticket_create/ticket_update alongside the ticket itself. Also covers
+    the Reschedule flow (source_reschedule_ticket, added 2026-10-01) -
+    one row per RescheduleAirlineTicket, posted/updated by
+    reschedule_ticket_create/reschedule_ticket_update using its own
+    "AIRLINE_RESCHEDULE" category (ALR-1, ALR-2, ...) and the separate
+    _compute_reschedule_jv_lines formula - entirely additive, never
+    touches or adjusts the original ticket's own JournalVoucher row.
+    Exactly one of source_ticket/source_reschedule_ticket is set per row.
+    Manual double-entry vouchers (Journal/Contra/Payment/Receipt/Debit
+    Note/Credit Note via voucher-entry.html) live in their own separate
+    `Voucher` table/model instead - this table was originally named
+    "Vouchers" and shared both purposes, split apart (2026-09-22) once
+    real double-entry postings started coming from voucher-entry.html
+    too, so ticket JV rows and manual voucher rows don't sit in the same
+    table doing two different jobs.
     """
     CATEGORY_PREFIX = {
         "AIRLINE": "AL", "HOTEL": "HTL", "VISA": "VSA", "INSURANCE": "INS", "TOUR": "TUR",
+        "AIRLINE_RESCHEDULE": "ALR",
     }
 
     id = models.AutoField(primary_key=True)
@@ -824,13 +876,18 @@ class JournalVoucher(models.Model):
     narration = models.CharField(max_length=250, null=True, blank=True)
 
     # Category-prefixed sequential number — AL-1, AL-2 for Airline,
-    # HTL-1 for Hotel, etc. Unique per company+category, assigned once
-    # at creation and never reused, even if an earlier voucher is deleted.
+    # HTL-1 for Hotel, ALR-1 for Airline Reschedule, etc. Unique per
+    # company+category, assigned once at creation and never reused, even
+    # if an earlier voucher is deleted.
     category = models.CharField(max_length=20, default="AIRLINE")
     voucher_no = models.CharField(max_length=20, null=True, blank=True)
 
     source_ticket = models.ForeignKey(
         Ticket, on_delete=models.SET_NULL, null=True, blank=True, related_name="vouchers", db_column="source_ticket_id"
+    )
+    source_reschedule_ticket = models.ForeignKey(
+        RescheduleAirlineTicket, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="vouchers", db_column="source_reschedule_ticket_id"
     )
 
     total_debit = models.DecimalField(max_digits=16, decimal_places=2, default=0)
@@ -851,6 +908,7 @@ class JournalVoucher(models.Model):
         indexes = [
             models.Index(fields=["company_id"], name="journal_voucher_company_idx"),
             models.Index(fields=["source_ticket"], name="journal_voucher_ticket_idx"),
+            models.Index(fields=["source_reschedule_ticket"], name="journal_voucher_rtid_idx"),
         ]
 
     def __str__(self):

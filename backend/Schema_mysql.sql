@@ -172,7 +172,6 @@ CREATE TABLE `Tickets` (
     CONSTRAINT `ck_tickets_booking_mode` CHECK (`booking_mode` IN ('Manual', 'Auto Push')),
     CONSTRAINT `ck_tickets_booking_status` CHECK (`booking_status` IS NULL OR `booking_status` IN ('Confirmed', 'Re-Scheduled')),
     CONSTRAINT `ck_tickets_travel_type` CHECK (`travel_type` IS NULL OR `travel_type` IN ('Domestic', 'International')),
-    CONSTRAINT `ck_tickets_airline_category` CHECK (`airline_category` IS NULL OR `airline_category` IN ('LCC', 'FSC', 'OSC')),
     KEY `ix_tickets_company_id` (`company_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 

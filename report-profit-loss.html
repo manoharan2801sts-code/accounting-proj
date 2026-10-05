@@ -12,60 +12,51 @@
 <link href="assets/css/loader.css" rel="stylesheet" />
   <link rel="icon" type="image/png" href="assets/img/favicon.png" />
   <style>
-    .page-header-row { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 1.25rem; flex-wrap: wrap; }
-    .page-title-group h1 { font-size: 1.25rem; font-weight: 700; margin: 0; display: flex; align-items: center; gap: 0.5rem; }
-    .page-title-group .breadcrumb { font-size: 0.8rem; color: var(--color-text-muted); margin-bottom: 0.25rem; display: flex; gap: 0.4rem; align-items: center; }
-    
+    /* Flat - no card background/border, sits directly on the page like
+       the reference screenshot, not boxed in its own white card. */
     .filter-card {
-      background: var(--color-white); border: 1px solid var(--color-border);
-      border-radius: var(--radius-md); padding: 1rem 1.25rem; margin-bottom: 1.25rem;
-      display: flex; align-items: flex-end; gap: 1rem; flex-wrap: wrap;
+      padding: 0.6rem 0; margin-bottom: 1.25rem;
+      display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;
     }
-    .filter-group { display: flex; flex-direction: column; gap: 0.35rem; }
-    .filter-group label { font-size: 11px; font-weight: 700; color: var(--color-text-muted); letter-spacing: 0.03em; }
-    
-    .kpi-grid {
-      display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-      gap: 1rem; margin-bottom: 1.25rem;
-    }
-    .kpi-card {
-      background: var(--color-white); border: 1px solid var(--color-border);
-      border-radius: var(--radius-md); padding: 1rem 1.25rem;
-    }
-    .kpi-card .kpi-label { font-size: 12px; font-weight: 600; color: var(--color-text-muted); margin-bottom: 0.35rem; }
-    .kpi-card .kpi-val { font-size: 1.4rem; font-weight: 800; font-family: var(--font-display); color: var(--color-text-dark); }
-    .kpi-card.highlight { border-left: 4px solid var(--color-primary); }
-    .kpi-card.accent-success { border-left: 4px solid var(--color-success); }
-    .kpi-card.accent-warning { border-left: 4px solid var(--color-warning); }
-    
-    .table-container {
+    .pl-toolbar-label { font-size: 11px; font-weight: 700; color: var(--color-text-muted); letter-spacing: 0.03em; }
+    .pl-toolbar-date { height: 26px; width: 116px; padding: 0 6px; font-size: 12px; box-sizing: border-box; }
+
+    /* Classic two-column Trading & Profit and Loss Account (Tally-style) -
+       a single bordered box split by one vertical divider, Dr (Debit) on
+       the left, Cr (Credit) on the right - NOT a modern vertical income
+       statement. Each side is its own independent table (different row
+       counts are normal and don't need to line up 1:1 across the
+       divider), both using the exact same column widths/styling for
+       visual symmetry. */
+    .pl-box {
       background: var(--color-white); border: 1px solid var(--color-border);
       border-radius: var(--radius-md); overflow: hidden;
+      display: grid; grid-template-columns: 1fr 1fr;
     }
-    .table-toolbar {
-      padding: 0.85rem 1.25rem; display: flex; align-items: center; justify-content: space-between;
-      border-bottom: 1px solid var(--color-border); gap: 1rem; flex-wrap: wrap; background: #FAFBFD;
+    .pl-col { min-width: 0; }
+    .pl-col.pl-col-left { border-right: 2px solid var(--color-border); }
+    .pl-table { width: 100%; border-collapse: collapse; }
+    .pl-table th {
+      padding: 0.5rem 0.9rem; background: #F8FAFC; border-bottom: 1px solid var(--color-border);
+      font-size: 11px; font-weight: 700; color: var(--color-text-muted); letter-spacing: 0.03em; text-align: left;
     }
-    .table-search { max-width: 300px; width: 100%; }
-    .table-custom { width: 100%; border-collapse: collapse; text-align: left; }
-    .table-custom th { padding: 0.75rem 1rem; background: #F8FAFC; border-bottom: 1px solid var(--color-border);
-      font-size: 11.5px; font-weight: 700; color: var(--color-text-muted); letter-spacing: 0.03em; }
-    .table-custom td {
-      padding: 0.75rem 1rem; border-bottom: 1px solid var(--color-border-subtle);
-      font-size: 13px; color: var(--color-text); vertical-align: middle;
+    .pl-table th.pl-amt-head { text-align: right; }
+    .pl-table td {
+      padding: 0.4rem 0.9rem; font-size: 12.5px; color: var(--color-text); vertical-align: middle;
     }
-    .table-custom tbody tr.pl-data-row.pl-row-selected td { background: var(--color-primary); color: #FFFFFF; }
-    .table-custom tbody tr.pl-data-row { cursor: pointer; }
-    .table-custom tbody tr:last-child td { border-bottom: none; }
-    .status-badge { display: inline-flex; align-items: center; padding: 0.2rem 0.55rem;
-      border-radius: 4px; font-size: 11.5px; font-weight: 700; }
-    .badge-issued, .badge-success { background: #DCFCE7; color: #166534; }
-    .badge-pending, .badge-warning { background: #FEF3C7; color: #92400E; }
-    .badge-cancelled, .badge-danger { background: #FEE2E2; color: #991B1B; }
-    .badge-rescheduled, .badge-info { background: #E0E7FF; color: #3730A3; }
-    
-    .amt { font-family: var(--font-mono); font-weight: 600; text-align: right; }
-    th.amt-header { text-align: right; }
+    .pl-table td.pl-amt { font-family: var(--font-mono); text-align: right; white-space: nowrap; }
+    /* Orange group-header bar - "Purchase Accounts"/"Sales Accounts", the
+       Trading Account's own two main lines, same look as the reference
+       screenshot. */
+    .pl-group-row td { background: #F5A623; color: #1E293B; font-weight: 700; }
+    .pl-item-row td { padding-left: 1.6rem; color: var(--color-text-muted); }
+    .pl-carry-row td { font-weight: 700; font-style: italic; }
+    .pl-divider-row td { padding: 0; height: 2px; background: var(--color-text-dark); }
+    .pl-total-row td {
+      font-weight: 800; border-top: 2px solid var(--color-text-dark);
+      padding-top: 0.55rem; padding-bottom: 0.55rem;
+    }
+    .pl-empty-row td { padding: 1.25rem 0.9rem; text-align: center; color: var(--color-text-muted); font-size: 12px; }
   </style>
 </head>
 <body>
@@ -73,141 +64,42 @@
   <header class="app-topnav" id="shell-topnav"></header>
   <div class="app-body">
     <main class="app-main" style="max-width: 1440px; margin: 0 auto; padding: 1.5rem 2rem;">
-      <div class="page-header-row">
-        <div class="page-title-group">
-          <div class="breadcrumb">Reports &rsaquo; Other Reports &rsaquo; Profit and Loss</div>
-          <h1><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--color-primary)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg> Profit and Loss Statement</h1>
-        </div>
-        <div style="display:flex; gap:0.5rem;">
-          <button type="button" class="dom-nav-btn" onclick="window.print()">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9V2h12v7M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2m-12 0v4h12v-4"/></svg>
-            Print
-          </button>
-          <button type="button" class="dom-nav-btn btn-primary" onclick="exportCSV()">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4m14-7l-5 5-5-5m5 5V3"/></svg>
-            Export CSV
-          </button>
-        </div>
-      </div>
-
+      <!-- Single compact toolbar row (From/To/Apply on the left, Print/
+           Export CSV pushed to the far right via the margin-left:auto
+           spacer) - same structure as report-dsr-airline-booking.html's
+           own filter-card, minus Advanced Filter (not needed here). -->
       <div class="filter-card">
-        <div class="filter-group">
-          <label>From Date</label>
-          <input type="date" class="form-control-custom" id="filter-from" style="height:34px; padding:0.25rem 0.6rem;" />
-        </div>
-        <div class="filter-group">
-          <label>To Date</label>
-          <input type="date" class="form-control-custom" id="filter-to" style="height:34px; padding:0.25rem 0.6rem;" />
-        </div>
-        <div class="filter-group">
-          <label>Branch / Office</label>
-          <select class="form-control-custom" style="height:34px; min-width:140px;">
-            <option value="">All Branches</option>
-            <option value="DEL">Delhi HQ</option>
-            <option value="BOM">Mumbai Branch</option>
-            <option value="DXB">Dubai Branch</option>
-          </select>
-        </div>
-        <div class="filter-group">
-          <label>Status</label>
-          <select class="form-control-custom" style="height:34px; min-width:120px;">
-            <option value="">All Statuses</option>
-            <option value="ISSUED">Confirmed / Issued</option>
-            <option value="PENDING">Pending</option>
-            <option value="CANCELLED">Cancelled</option>
-          </select>
-        </div>
-        <button type="button" class="dom-nav-btn btn-primary" style="height:34px;" onclick="voyagerAlert('Filters applied successfully.')">Apply</button>
+        <span class="pl-toolbar-label">From</span>
+        <input type="date" class="form-control-custom pl-toolbar-date" id="filter-from" />
+        <span class="pl-toolbar-label">To</span>
+        <input type="date" class="form-control-custom pl-toolbar-date" id="filter-to" />
+        <button type="button" class="dom-nav-btn btn-primary" onclick="loadReport()">Apply</button>
+        <span style="margin-left:auto;"></span>
+        <button type="button" class="dom-nav-btn" onclick="window.print()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9V2h12v7M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2m-12 0v4h12v-4"/></svg>
+          Print
+        </button>
+        <button type="button" class="dom-nav-btn btn-primary" onclick="exportCSV()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4m14-7l-5 5-5-5m5 5V3"/></svg>
+          Export CSV
+        </button>
       </div>
 
-      <div class="kpi-grid">
-  <div class="kpi-card highlight">
-    <div class="kpi-label">Total Revenue</div>
-    <div class="kpi-val">₹44,04,000</div>
-  </div>
-  <div class="kpi-card standard">
-    <div class="kpi-label">Direct Cost of Sales</div>
-    <div class="kpi-val">₹32,48,450</div>
-  </div>
-  <div class="kpi-card accent-success">
-    <div class="kpi-label">Gross Operating Profit</div>
-    <div class="kpi-val">₹11,55,550</div>
-  </div>
-  <div class="kpi-card accent-warning">
-    <div class="kpi-label">Net Profit Margin</div>
-    <div class="kpi-val">18.4%</div>
-  </div>
-</div>
-
-      <div class="table-container">
-        <div class="table-toolbar">
-          <div style="font-weight:700; font-size:0.92rem; color:var(--color-text-dark);">Income Statement (Profit & Loss)</div>
-          <input type="text" class="form-control-custom table-search" placeholder="Search records..." oninput="filterTable(this.value)" />
-        </div>
-        <div style="overflow-x:auto;">
-          <table class="table-custom" id="main-data-table">
+      <div class="pl-box" id="pl-box">
+        <div class="pl-col pl-col-left">
+          <table class="pl-table">
             <thead>
-              <tr>
-                  <th class="">Account Category</th>
-  <th class="">Particulars / Line Item</th>
-  <th class="">Current Period</th>
-  <th class="">Previous Period</th>
-  <th class="">% Growth</th>
-
-              </tr>
+              <tr><th>Particulars</th><th class="pl-amt-head" id="pl-left-period">FY</th></tr>
             </thead>
-            <tbody id="main-data-tbody">
-              <tr class="pl-data-row">
-  <td class="">Revenue</td>
-  <td class="">Ticket Sales Revenue</td>
-  <td class="">₹38,20,000</td>
-  <td class="">₹34,50,000</td>
-  <td class="">+10.7%</td>
-</tr>
-<tr class="pl-data-row">
-  <td class="">Revenue</td>
-  <td class="">Commission from Suppliers</td>
-  <td class="">₹3,42,000</td>
-  <td class="">₹3,10,000</td>
-  <td class="">+10.3%</td>
-</tr>
-<tr class="pl-data-row">
-  <td class="">Revenue</td>
-  <td class="">Service Charges & Markup</td>
-  <td class="">₹2,42,000</td>
-  <td class="">₹2,15,000</td>
-  <td class="">+12.5%</td>
-</tr>
-<tr class="pl-data-row">
-  <td class="">Direct Cost</td>
-  <td class="">Airline Base Fares & Charges</td>
-  <td class="">₹32,48,450</td>
-  <td class="">₹29,80,000</td>
-  <td class="">+9.0%</td>
-</tr>
-<tr class="pl-data-row">
-  <td class="">Gross Profit</td>
-  <td class="">Gross Trading Margin</td>
-  <td class="">₹11,55,550</td>
-  <td class="">₹9,95,000</td>
-  <td class="">+16.1%</td>
-</tr>
-<tr class="pl-data-row">
-  <td class="">Operating Expenses</td>
-  <td class="">Staff Salaries & Admin</td>
-  <td class="">₹3,45,000</td>
-  <td class="">₹3,20,000</td>
-  <td class="">+7.8%</td>
-</tr>
-<tr class="pl-data-row">
-  <td class="">Net Profit</td>
-  <td class="">Net Profit Before Tax</td>
-  <td class="">₹8,10,550</td>
-  <td class="">₹6,75,000</td>
-  <td class="">+20.0%</td>
-</tr>
-
-            </tbody>
+            <tbody id="pl-left-body"></tbody>
+          </table>
+        </div>
+        <div class="pl-col pl-col-right">
+          <table class="pl-table">
+            <thead>
+              <tr><th>Particulars</th><th class="pl-amt-head" id="pl-right-period">FY</th></tr>
+            </thead>
+            <tbody id="pl-right-body"></tbody>
           </table>
         </div>
       </div>
@@ -217,82 +109,146 @@
   <script src="assets/js/mock-data.js"></script>
   <script src="assets/js/api.js"></script>
   <script src="assets/js/hardcode.js"></script>
-  <script src="assets/js/shell.js"></script>
+  <script src="assets/js/shell.js?v=10"></script>
   <script>
     // Not gated on DOMContentLoaded - this page's <script> can be injected
     // by the app's SPA navigation (shell.js's navigateTo) into a document
     // that already finished loading, so DOMContentLoaded never fires again
     // and this would silently never run except on a hard refresh.
-    VoyagerShell.init({ activeKey: "rep-profit-loss" });
+    (function () {
+    let activeCompanyId = null;
 
-    // Defaults to today, not a wide static range - this project posts a
-    // lot of data per day, so a multi-week default window would be
-    // slow/overwhelming to load on first open.
-    document.getElementById("filter-from").value = document.getElementById("filter-to").value = new Date().toISOString().slice(0, 10);
-
-    // Keyboard row navigation - Up/Down moves a highlighted "current row"
-    // (same look as mouse hover), same convention as the DSR report. This
-    // table is a static statement with no per-row drill-down, so Enter
-    // just keeps the row selected/highlighted.
-    var selectedRowIndex = -1;
-    function visibleDataRows() {
-      return Array.from(document.querySelectorAll("#main-data-tbody tr.pl-data-row")).filter((r) => r.style.display !== "none");
-    }
-    function selectRow(index) {
-      const rows = visibleDataRows();
-      rows.forEach((r) => r.classList.remove("pl-row-selected"));
-      if (!rows.length) { selectedRowIndex = -1; return; }
-      selectedRowIndex = Math.max(0, Math.min(index, rows.length - 1));
-      const row = rows[selectedRowIndex];
-      row.classList.add("pl-row-selected");
-      row.scrollIntoView({ block: "nearest" });
-    }
-    // Keeps the keyboard-selected row in sync with whatever the mouse is
-    // actually over - without this, moving the mouse to hover a different
-    // row while an old keyboard selection is still stuck elsewhere made it
-    // look like hover had stopped working (two rows lit up at once).
-    document.getElementById("main-data-tbody").addEventListener("mouseover", function (e) {
-      var row = e.target.closest("tr.pl-data-row");
-      if (!row) return;
-      var idx = visibleDataRows().indexOf(row);
-      if (idx !== -1) selectRow(idx);
-    });
-    document.addEventListener("keydown", (e) => {
-      if (!["ArrowDown", "ArrowUp", "Enter"].includes(e.key)) return;
-      const tag = document.activeElement && document.activeElement.tagName;
-      if (["INPUT", "SELECT", "TEXTAREA"].includes(tag)) return;
-      const rows = visibleDataRows();
-      if (!rows.length) return;
-      if (e.key === "ArrowDown") {
-        e.preventDefault();
-        selectRow(selectedRowIndex < rows.length - 1 ? selectedRowIndex + 1 : 0);
-      } else if (e.key === "ArrowUp") {
-        e.preventDefault();
-        selectRow(selectedRowIndex > 0 ? selectedRowIndex - 1 : rows.length - 1);
+    (async function init() {
+      try {
+        const active = await VoyagerShell.init({ activeKey: "rep-profit-loss" });
+        if (active) activeCompanyId = Number(active.id);
+      } catch (err) {
+        console.error("Shell init failed", err);
       }
-    });
+      // Defaults to today only, not a wide static range - same reasoning
+      // as every other report page here (this project posts a lot of
+      // data per day).
+      const today = new Date().toISOString().slice(0, 10);
+      document.getElementById("filter-from").value = document.getElementById("filter-from").value || today;
+      document.getElementById("filter-to").value = document.getElementById("filter-to").value || today;
+      loadReport();
+    })();
 
-    function filterTable(query) {
-      const q = query.toLowerCase();
-      const rows = document.querySelectorAll("#main-data-table tbody tr");
-      rows.forEach(r => {
-        r.style.display = r.textContent.toLowerCase().includes(q) ? "" : "none";
-      });
+    function fmtN(v) {
+      return (Number(v) || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     }
+    function ddmmyyyy(iso) {
+      if (!iso) return "";
+      const [y, m, d] = iso.split("-");
+      return `${d}/${m}/${y}`;
+    }
+
+    // Builds one side's <tbody> rows - group (orange header) + its own
+    // itemised ledgers, for however many groups this side has (Trading
+    // section groups first, then - after the divider - the P&L section's
+    // one group), plus whichever "carry" lines apply (Gross Profit/Loss
+    // c/o or b/f, Net Profit/Loss) and the final Total row.
+    function sectionRows(groups) {
+      let html = "";
+      groups.forEach((g) => {
+        if (!g.items.length) return;
+        html += `<tr class="pl-group-row"><td colspan="2">${g.name}</td></tr>`;
+        g.items.forEach((it) => {
+          html += `<tr class="pl-item-row"><td>${it.name}</td><td class="pl-amt">${fmtN(it.amount)}</td></tr>`;
+        });
+      });
+      return html;
+    }
+    function carryRow(label, amount) {
+      return `<tr class="pl-carry-row"><td>${label}</td><td class="pl-amt">${amount != null ? fmtN(amount) : ""}</td></tr>`;
+    }
+    function totalRow(amount) {
+      return `<tr class="pl-total-row"><td>Total</td><td class="pl-amt">${fmtN(amount)}</td></tr>`;
+    }
+
+    function render(data) {
+      const period = `FY ${ddmmyyyy(data.from_date)} - ${ddmmyyyy(data.to_date)}`;
+      document.getElementById("pl-left-period").textContent = period;
+      document.getElementById("pl-right-period").textContent = period;
+
+      const t = data.trading, p = data.pl;
+      const grossProfit = t.gross_profit;   // > 0 profit, < 0 loss
+      const netProfit = p.net_profit;       // > 0 profit, < 0 loss
+
+      // LEFT (Debit) side: Purchase Accounts + Direct Expenses, Gross
+      // Profit c/o if the Trading Account made a profit (balances this
+      // side up to match Credit), divider, Indirect Expenses, Gross Loss
+      // b/f if it made a loss instead, Net Profit if the P&L Account made
+      // one (balances this side up to match Credit).
+      let left = sectionRows([t.debit.purchase, t.debit.direct_expense]);
+      if (grossProfit > 0) left += carryRow("Gross Profit c/o", grossProfit);
+      left += `<tr class="pl-divider-row"><td colspan="2"></td></tr>`;
+      left += sectionRows([p.debit.indirect_expense]);
+      if (grossProfit < 0) left += carryRow("Gross Loss b/f", -grossProfit);
+      if (netProfit > 0) left += carryRow("Net Profit", netProfit);
+      // The P&L Account's own balanced total already equals indirect
+      // items + whichever carry-forward/Net Profit figure was just added
+      // above (see profit_loss_report's own total_debit = max(pl_dr,
+      // pl_cr)) - the one Total shown at the bottom of the whole combined
+      // account, same as the reference screenshot (no separate sub-total
+      // for the Trading Account section above the divider).
+      left += totalRow(p.total_debit);
+
+      // RIGHT (Credit) side: Sales Accounts + Direct Income, Gross Loss
+      // c/o if the Trading Account made a loss, divider, Indirect Income,
+      // Gross Profit b/f if it made a profit instead, Net Loss if the
+      // P&L Account made one.
+      let right = sectionRows([t.credit.sales, t.credit.direct_income]);
+      if (grossProfit < 0) right += carryRow("Gross Loss c/o", -grossProfit);
+      right += `<tr class="pl-divider-row"><td colspan="2"></td></tr>`;
+      right += sectionRows([p.credit.indirect_income]);
+      if (grossProfit > 0) right += carryRow("Gross Profit b/f", grossProfit);
+      if (netProfit < 0) right += carryRow("Net Loss", -netProfit);
+      right += totalRow(p.total_credit);
+
+      const noActivity = !t.debit.purchase.items.length && !t.debit.direct_expense.items.length
+        && !t.credit.sales.items.length && !t.credit.direct_income.items.length
+        && !p.debit.indirect_expense.items.length && !p.credit.indirect_income.items.length;
+      document.getElementById("pl-left-body").innerHTML = noActivity
+        ? `<tr class="pl-empty-row"><td colspan="2">No activity in this period.</td></tr>` : left;
+      document.getElementById("pl-right-body").innerHTML = noActivity
+        ? `<tr class="pl-empty-row"><td colspan="2">No activity in this period.</td></tr>` : right;
+    }
+
+    async function loadReport() {
+      if (!activeCompanyId) return;
+      const fromDate = document.getElementById("filter-from").value;
+      const toDate = document.getElementById("filter-to").value;
+      try {
+        const params = new URLSearchParams({ company_id: activeCompanyId, from_date: fromDate, to_date: toDate });
+        const res = await fetch(`${API_BASE}/profit-loss/?${params}`);
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Could not load the Profit and Loss Account.");
+        render(data);
+      } catch (err) {
+        voyagerAlert(err.message || "Could not load the Profit and Loss Account. Is the Django backend running?", { icon: "error" });
+      }
+    }
+    window.loadReport = loadReport;
 
     function exportCSV() {
       let csv = [];
-      const rows = document.querySelectorAll("#main-data-table tr");
-      rows.forEach(row => {
-        let cols = Array.from(row.querySelectorAll("th, td")).map(td => `"${td.innerText.replace(/"/g, '""')}"`);
-        csv.push(cols.join(","));
+      document.querySelectorAll("#pl-box table").forEach((table, i) => {
+        csv.push(i === 0 ? "Debit (Dr)" : "Credit (Cr)");
+        table.querySelectorAll("tr").forEach((row) => {
+          const cols = Array.from(row.querySelectorAll("th, td")).map((td) => `"${td.innerText.replace(/"/g, '""')}"`);
+          if (cols.length) csv.push(cols.join(","));
+        });
       });
       const blob = new Blob([csv.join("\n")], { type: "text/csv;charset=utf-8;" });
       const link = document.createElement("a");
       link.href = URL.createObjectURL(blob);
-      link.download = "rep-profit-loss.csv";
+      link.download = "profit-and-loss.csv";
       link.click();
     }
+    window.exportCSV = exportCSV;
+
+    })();
   </script>
 </body>
 </html>

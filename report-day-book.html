@@ -474,7 +474,9 @@
     });
 
     function navigateToTicket(row) {
-      window.location.href = `ticket-entry.html?id=${row.dataset.ticketId}`;
+      window.location.href = row.dataset.rescheduleTicketId
+        ? `ticket-entry.html?reschedule_saved_id=${row.dataset.rescheduleTicketId}`
+        : `ticket-entry.html?id=${row.dataset.ticketId}`;
     }
 
     function renderTable(txns) {
@@ -489,7 +491,7 @@
       const totalCredit = txns.reduce((sum, t) => sum + (Number(t.credit) || 0), 0);
 
       let rows = txns.map((t, idx) => `
-        <tr class="${t.ticket_id ? "txn-row" : ""}" data-ticket-id="${t.ticket_id || ""}" title="${t.ticket_id ? "Click to open this ticket" : ""}">
+        <tr class="${(t.ticket_id || t.reschedule_ticket_id) ? "txn-row" : ""}" data-ticket-id="${t.ticket_id || ""}" data-reschedule-ticket-id="${t.reschedule_ticket_id || ""}" title="${(t.ticket_id || t.reschedule_ticket_id) ? "Click to open this ticket" : ""}">
           <td class="rownum">${idx + 1}</td>
           <td>${fmtDateDisplay(t.date)}</td>
           <td class="particulars">${t.particulars || "-"}</td>

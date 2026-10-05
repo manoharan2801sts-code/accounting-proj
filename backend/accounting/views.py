@@ -682,11 +682,18 @@ def _airline_mapping_cache(company_id):
     }
 
 
-def _ledger_balance_deltas(company_id, as_of_date=None):
+def _ledger_balance_deltas(company_id, as_of_date=None, from_date=None):
     """
     Net Debit-minus-Credit per ledger_id, accumulated from every posted
     transaction for this company — used to turn each Ledger's static
     opening_balance into its real, current running balance.
+
+    from_date (optional, "YYYY-MM-DD"): only include transactions dated
+    on or after it too — together with as_of_date this gives the net
+    MOVEMENT strictly within one period (Profit and Loss Account), as
+    opposed to the all-time-to-date running balance every other caller
+    of this function wants (opening_balance is meaningless for a P&L
+    period and is deliberately never added on top of this elsewhere).
     """
     deltas = {}
 
@@ -698,6 +705,8 @@ def _ledger_balance_deltas(company_id, as_of_date=None):
     vouchers = Voucher.objects.filter(company_id=company_id)
     if as_of_date:
         vouchers = vouchers.filter(voucher_date__lte=as_of_date)
+    if from_date:
+        vouchers = vouchers.filter(voucher_date__gte=from_date)
     for v in vouchers:
         for line in (v.lines_json or []):
             add(line.get("ledger_id"), line.get("debit"), line.get("credit"))
@@ -714,6 +723,8 @@ def _ledger_balance_deltas(company_id, as_of_date=None):
     tickets = Ticket.objects.filter(company_id=company_id).select_related("customer", "supplier").prefetch_related("lines__supplier")
     if as_of_date:
         tickets = tickets.filter(invoice_date__lte=as_of_date)
+    if from_date:
+        tickets = tickets.filter(invoice_date__gte=from_date)
     for t in tickets:
         lines = list(t.lines.all())
         if not lines:
@@ -724,6 +735,30 @@ def _ledger_balance_deltas(company_id, as_of_date=None):
         for ledger_id, debit, credit in _fop_payment_lines(t, lines, fop_cache=fop_cache):
             add(ledger_id, debit, credit)
         for ledger_id, debit, credit in _pg_receipt_lines(t, lines, pg_cache=pg_cache):
+            add(ledger_id, debit, credit)
+
+    # Reschedule tickets - entirely separate/additive from the Booking
+    # tickets above (see _compute_reschedule_jv_lines' own docstring) -
+    # same live-recompute convention, just against RescheduleAirlineTicket/
+    # RescheduleAirlineTicketLine and its own JV formula + FOP/PG tabs.
+    resched_tickets = RescheduleAirlineTicket.objects.filter(company_id=company_id).select_related("customer", "supplier").prefetch_related(
+        Prefetch("lines", queryset=RescheduleAirlineTicketLine.objects.select_related("supplier"))
+    )
+    if as_of_date:
+        resched_tickets = resched_tickets.filter(invoice_date__lte=as_of_date)
+    if from_date:
+        resched_tickets = resched_tickets.filter(invoice_date__gte=from_date)
+    resched_mapping_cache = {}  # keyed (company, category, field) - not the booking cache's shape
+    for rt in resched_tickets:
+        lines = list(rt.lines.all())
+        if not lines:
+            continue
+        accounts, _narration, _total_debit, _total_credit = _compute_reschedule_jv_lines(rt, lines, mapping_cache=resched_mapping_cache, company_state=company_state)
+        for a in accounts:
+            add(a.get("ledger_id"), a.get("debit"), a.get("credit"))
+        for ledger_id, debit, credit in _reschedule_fop_payment_lines(rt, lines):
+            add(ledger_id, debit, credit)
+        for ledger_id, debit, credit in _reschedule_pg_receipt_lines(rt, lines):
             add(ledger_id, debit, credit)
 
     return deltas
@@ -751,6 +786,9 @@ def accounts_list(request):
         })
     used_ids = set(Ticket.objects.filter(company_id=company_id).values_list("customer_id", flat=True)) | \
                set(Ticket.objects.filter(company_id=company_id).values_list("supplier_id", flat=True))
+    # Reschedule tickets use ledgers too - a ledger used ONLY by a
+    # reschedule (never by a plain Ticket) must still count as in-use.
+    used_ids |= set(RescheduleAirlineTicket.objects.filter(company_id=company_id).values_list("customer_id", flat=True)) |                 set(RescheduleAirlineTicket.objects.filter(company_id=company_id).values_list("supplier_id", flat=True))
 
     # Balance = opening balance + every posted transaction (tickets' JV/FOP/
     # PG postings + manual vouchers), same as the local build's Chart of
@@ -770,8 +808,6 @@ def accounts_list(request):
             "is_in_use": in_use,
         })
     return JsonResponse(rows, safe=False)
-
-
 
 
 def _ledger_transactions(company_id, ledger, from_date=None, to_date=None):
@@ -821,7 +857,7 @@ def _ledger_transactions(company_id, ledger, from_date=None, to_date=None):
             "particulars": v.narration or ", ".join(others) or "-",
             "s_pnr": "-", "air_pnr": "-", "ticket_no": "-",
             "opposite": ", ".join(others) or "-", "debit": debit, "credit": credit,
-            "ticket_id": None,
+            "ticket_id": None, "reschedule_ticket_id": None,
         })
 
     tickets = Ticket.objects.filter(company_id=company_id).select_related("customer", "supplier").prefetch_related(
@@ -861,7 +897,51 @@ def _ledger_transactions(company_id, ledger, from_date=None, to_date=None):
             "s_pnr": t.booking_reference or "-", "air_pnr": t.airline_pnr or "-",
             "ticket_no": ", ".join(ticket_nos) or "-",
             "opposite": ", ".join(others) or "-", "debit": debit, "credit": credit,
-            "ticket_id": t.id,
+            "ticket_id": t.id, "reschedule_ticket_id": None,
+        })
+
+    # Reschedule tickets - same recompute convention as above, against
+    # RescheduleAirlineTicket/RescheduleAirlineTicketLine and the separate
+    # _compute_reschedule_jv_lines formula + its own FOP/PG tabs. Rows
+    # carry reschedule_ticket_id (not ticket_id) so the frontend can link
+    # to ticket-entry.html?reschedule_saved_id=... instead.
+    resched_tickets = RescheduleAirlineTicket.objects.filter(company_id=company_id).select_related("customer", "supplier").prefetch_related("lines")
+    if from_date:
+        resched_tickets = resched_tickets.filter(invoice_date__gte=from_date)
+    if to_date:
+        resched_tickets = resched_tickets.filter(invoice_date__lte=to_date)
+    resched_mapping_cache = {}
+    for rt in resched_tickets:
+        lines = list(rt.lines.select_related("supplier").all())
+        if not lines:
+            continue
+        accounts, _narration, _td, _tc = _compute_reschedule_jv_lines(rt, lines, mapping_cache=resched_mapping_cache, company_state=company_state)
+        combined = list(accounts)
+        for lid, debit, credit in _reschedule_fop_payment_lines(rt, lines):
+            combined.append({"ledger_id": lid, "ledger_name": ledger_names.get(lid, "-"), "debit": debit, "credit": credit})
+        for lid, debit, credit in _reschedule_pg_receipt_lines(rt, lines):
+            combined.append({"ledger_id": lid, "ledger_name": ledger_names.get(lid, "-"), "debit": debit, "credit": credit})
+
+        mine = [a for a in combined if a.get("ledger_id") == ledger_id]
+        if not mine:
+            continue
+        debit = round(sum(float(a.get("debit") or 0) for a in mine), 2)
+        credit = round(sum(float(a.get("credit") or 0) for a in mine), 2)
+        if debit == 0 and credit == 0:
+            continue
+        others = sorted({a.get("ledger_name") for a in combined if a.get("ledger_id") != ledger_id and a.get("ledger_name")})
+        voucher = JournalVoucher.objects.filter(source_reschedule_ticket=rt).first()
+        airline_names = sorted({n.strip() for l in lines for n in (l.airline_name or "").split(",") if n.strip()})
+        ticket_nos = sorted({l.ticket_no for l in lines if l.ticket_no})
+        particulars = " - ".join(x for x in [", ".join(airline_names), rt.office_id] if x) or "-"
+        txns.append({
+            "date": rt.invoice_date.isoformat() if rt.invoice_date else None,
+            "voucher_type": "Tax Invoice (Reschedule)", "voucher_no": voucher.voucher_no if voucher else rt.invoice_number,
+            "particulars": particulars,
+            "s_pnr": rt.booking_reference or "-", "air_pnr": rt.airline_pnr or "-",
+            "ticket_no": ", ".join(ticket_nos) or "-",
+            "opposite": ", ".join(others) or "-", "debit": debit, "credit": credit,
+            "ticket_id": None, "reschedule_ticket_id": rt.id,
         })
 
     txns.sort(key=lambda x: x["date"] or "")
@@ -952,9 +1032,16 @@ def ledger_monthly_summary(request):
     company = CompanyMaster.objects.filter(id=company_id).first()
     fy_start = company.financial_year_from if company and company.financial_year_from else None
     if not fy_start:
+        # No explicit Financial Year From set on this company yet - default
+        # by country instead of always assuming India's Apr-Mar year:
+        # UAE (and any other country whose books run on the calendar year)
+        # defaults to Jan-Dec instead.
         today = date.today()
-        fy_year = today.year if today.month >= 4 else today.year - 1
-        fy_start = date(fy_year, 4, 1)
+        if _company_uses_calendar_year(company):
+            fy_start = date(today.year, 1, 1)
+        else:
+            fy_year = today.year if today.month >= 4 else today.year - 1
+            fy_start = date(fy_year, 4, 1)
     fy_end = date(fy_start.year + 1, fy_start.month, fy_start.day) - timedelta(days=1)
 
     req_from = request.GET.get("from_date")
@@ -1030,15 +1117,24 @@ def day_book_report(request):
     """
     GET /api/day-book/?company_id=1[&from_date&to_date]
     Tally-style Day Book: one row per posted voucher (every manual
-    Voucher + every ticket-driven JournalVoucher) within the date range,
-    each already carrying its own resolved total_debit/total_credit —
-    unlike the Ledger report this does not re-explode a voucher into its
-    individual ledger lines, it lists the voucher itself. Ticket-driven
-    rows also surface S PNR / Air-PNR / Ticket No and are clickable
-    through to that ticket (ticket_id), same convention as the Ledger
-    report. Manual Vouchers and ticket-driven JournalVoucher rows now
-    live in two separate tables (split 2026-09-22), so this merges both
-    querysets into one chronological list rather than filtering one table.
+    Voucher + every ticket-driven JournalVoucher, Booking and Reschedule
+    alike) within the date range - unlike the Ledger report this does not
+    re-explode a voucher into its individual ledger lines, it lists the
+    voucher itself. Manual Vouchers show their own real total_debit/
+    total_credit (a true, balanced double-entry total). Ticket-driven
+    rows show the Customer ledger's own posted amount instead of the
+    voucher's stored total_debit/total_credit - that stored total is
+    inflated well past the real invoice value by JV_LINE_MAP's
+    intentional duplicate Consolidator/Markup Credit lines (see
+    jv_hardcode.py), so it doesn't represent "the value of this
+    transaction" the way this column should; the Customer amount is
+    recomputed live via _compute_jv_lines/_compute_reschedule_jv_lines
+    for that reason. Ticket-driven rows also surface S PNR / Air-PNR /
+    Ticket No and are clickable through to that ticket (ticket_id) or
+    reschedule ticket (reschedule_ticket_id), same convention as the
+    Ledger report. Manual Vouchers and ticket-driven JournalVoucher rows
+    live in separate tables, so this merges all three querysets into one
+    chronological list rather than filtering one table.
     """
     if request.method != "GET":
         return HttpResponseNotAllowed(["GET"])
@@ -1080,10 +1176,10 @@ def day_book_report(request):
             "s_pnr": "-", "air_pnr": "-", "ticket_no": "-",
             "voucher_no": v.voucher_no or "-",
             "debit": float(v.total_debit), "credit": float(v.total_credit),
-            "ticket_id": None,
+            "ticket_id": None, "reschedule_ticket_id": None,
         })
 
-    journal_vouchers = JournalVoucher.objects.filter(company_id=company_id).select_related(
+    journal_vouchers = JournalVoucher.objects.filter(company_id=company_id, source_ticket__isnull=False).select_related(
         "source_ticket", "source_ticket__customer"
     )
     if from_date:
@@ -1094,6 +1190,20 @@ def day_book_report(request):
         t = v.source_ticket
         lines = list(t.lines.all()) if t else []
         ticket_nos = sorted({l.ticket_no for l in lines if l.ticket_no})
+        # The Customer ledger's OWN posted amount, not the voucher's
+        # total_debit/total_credit - that total is inflated well past the
+        # real invoice value by JV_LINE_MAP's intentional duplicate
+        # Consolidator/Markup Credit lines (see jv_hardcode.py), so it
+        # doesn't mean "the value of this transaction" the way Day Book's
+        # Amount column should. Shown under both Debit and Credit (the
+        # ticket is always a Debit-the-customer Tax Invoice), same
+        # same-value-both-columns convention this table already uses.
+        customer_amount = 0.0
+        if lines:
+            accounts, _n, _td, _tc = _compute_jv_lines(t, lines)
+            customer_row = next((a for a in accounts if a.get("role") == "customer"), None)
+            if customer_row:
+                customer_amount = customer_row.get("debit") or customer_row.get("credit") or 0.0
         txns.append({
             "date": v.voucher_date.isoformat() if v.voucher_date else None,
             "particulars": t.customer.name if t and t.customer else "-",
@@ -1101,8 +1211,43 @@ def day_book_report(request):
             "s_pnr": (t.booking_reference if t else "") or "-", "air_pnr": (t.airline_pnr if t else "") or "-",
             "ticket_no": ", ".join(ticket_nos) or "-",
             "voucher_no": v.voucher_no or "-",
-            "debit": float(v.total_debit), "credit": float(v.total_credit),
-            "ticket_id": t.id if t else None,
+            "debit": customer_amount, "credit": customer_amount,
+            "ticket_id": t.id if t else None, "reschedule_ticket_id": None,
+        })
+
+    # Reschedule tickets' own JournalVoucher rows - entirely separate from
+    # the Booking rows above (filtered out there via source_ticket__isnull
+    # =False), linked instead via source_reschedule_ticket. Clickable
+    # through to ticket-entry.html?reschedule_saved_id=... (reschedule_
+    # ticket_id), not the plain ticket_id the Booking rows use.
+    resched_journal_vouchers = JournalVoucher.objects.filter(
+        company_id=company_id, source_reschedule_ticket__isnull=False
+    ).select_related("source_reschedule_ticket", "source_reschedule_ticket__customer")
+    if from_date:
+        resched_journal_vouchers = resched_journal_vouchers.filter(voucher_date__gte=from_date)
+    if to_date:
+        resched_journal_vouchers = resched_journal_vouchers.filter(voucher_date__lte=to_date)
+    for v in resched_journal_vouchers:
+        rt = v.source_reschedule_ticket
+        lines = list(rt.lines.all()) if rt else []
+        ticket_nos = sorted({l.ticket_no for l in lines if l.ticket_no})
+        # Same reasoning as the Booking loop above - the Customer ledger's
+        # own amount, not the voucher's inflated total_debit/total_credit.
+        customer_amount = 0.0
+        if lines:
+            accounts, _n, _td, _tc = _compute_reschedule_jv_lines(rt, lines)
+            customer_row = next((a for a in accounts if a.get("role") == "customer"), None)
+            if customer_row:
+                customer_amount = customer_row.get("debit") or customer_row.get("credit") or 0.0
+        txns.append({
+            "date": v.voucher_date.isoformat() if v.voucher_date else None,
+            "particulars": rt.customer.name if rt and rt.customer else "-",
+            "voucher_type": v.voucher_type,
+            "s_pnr": (rt.booking_reference if rt else "") or "-", "air_pnr": (rt.airline_pnr if rt else "") or "-",
+            "ticket_no": ", ".join(ticket_nos) or "-",
+            "voucher_no": v.voucher_no or "-",
+            "debit": customer_amount, "credit": customer_amount,
+            "ticket_id": None, "reschedule_ticket_id": rt.id if rt else None,
         })
 
     txns.sort(key=lambda x: x["date"] or "")
@@ -1504,6 +1649,132 @@ def trial_balance_report(request):
     })
 
 
+# Real Ledger Group names this company's seed data always creates (see
+# groups.html's own seeding) - a Trading & Profit and Loss Account is
+# built from exactly these 6, same convention real Tally uses: Purchase
+# Accounts/Direct Expenses/Sales Accounts/Direct Income form the Trading
+# section (top), Indirect Expenses/Indirect Income form the P&L section
+# (bottom). Matched by NAME (not id) since every company's own copy of
+# these groups has a different id.
+PROFIT_LOSS_GROUP_NAMES = {
+    "purchase": "Purchase Accounts", "direct_expense": "Direct Expenses",
+    "sales": "Sales Accounts", "direct_income": "Direct Income",
+    "indirect_expense": "Indirect Expenses", "indirect_income": "Indirect Income",
+}
+
+
+def profit_loss_report(request):
+    """
+    GET /api/profit-loss/?company_id=1&from_date=...&to_date=...
+    Classic two-column Trading & Profit and Loss Account (Tally-style,
+    not a modern vertical income statement):
+
+    Trading Account (top) - Dr: Purchase Accounts + Direct Expenses,
+    Cr: Sales Accounts + Direct Income. Nets to Gross Profit (Cr > Dr,
+    shown as "Gross Profit c/o" on the Dr side to balance it, then
+    carried down as "Gross Profit b/f" on the Cr side of the P&L section
+    below) or Gross Loss (the mirror image - "Gross Loss c/o" on Cr,
+    "Gross Loss b/f" on Dr below).
+
+    Profit and Loss Account (bottom) - Dr: Indirect Expenses (+ Gross
+    Loss b/f if the Trading Account made a loss), Cr: Indirect Income
+    (+ Gross Profit b/f if it made a profit). Nets to Net Profit (shown
+    on the Dr side to balance, since Cr > Dr) or Net Loss (shown on the
+    Cr side, since Dr > Cr) - matches the screenshot's own "Net Loss"
+    placement exactly.
+
+    Every one of the 6 named groups (PROFIT_LOSS_GROUP_NAMES) is rolled
+    up and itemised by its own Ledgers, however deeply nested underneath
+    it (sub-groups included) - a group with nothing posted under it in
+    this period is left out entirely, same as Tally.
+
+    Uses PERIOD movement only (_ledger_balance_deltas' own from_date
+    param), never opening_balance - that's a Balance Sheet concept, not
+    meaningful for a Profit and Loss Account covering just this period.
+    """
+    if request.method != "GET":
+        return HttpResponseNotAllowed(["GET"])
+
+    company_id = request.GET.get("company_id")
+    if not company_id:
+        return JsonResponse({"error": "company_id is required"}, status=400)
+
+    from_date = request.GET.get("from_date")
+    to_date = request.GET.get("to_date")
+    deltas = _ledger_balance_deltas(company_id, as_of_date=to_date, from_date=from_date)
+
+    all_groups = list(LedgerGroup.objects.filter(company_id=company_id))
+    groups_by_name = {g.name: g for g in all_groups}
+    children_by_parent = {}
+    for g in all_groups:
+        children_by_parent.setdefault(g.parent_id, []).append(g)
+    all_ledgers = list(Ledger.objects.filter(company_id=company_id))
+    ledgers_by_group = {}
+    for l in all_ledgers:
+        ledgers_by_group.setdefault(l.group_id, []).append(l)
+
+    def ledgers_under(gid):
+        """Every Ledger under this group, however deeply nested."""
+        out = list(ledgers_by_group.get(gid, []))
+        for child in children_by_parent.get(gid, []):
+            out.extend(ledgers_under(child.id))
+        return out
+
+    # side="debit" (Purchase/Direct Expense/Indirect Expense) - a normal
+    # expense posts as a Debit, so its own delta (debit - credit) IS the
+    # amount directly. side="credit" (Sales/Direct Income/Indirect
+    # Income) - income posts as a Credit, so the amount is the delta
+    # flipped (credit - debit).
+    def group_section(name, side):
+        group = groups_by_name.get(name)
+        if not group:
+            return {"name": name, "items": [], "total": 0.0}
+        items = []
+        total = 0.0
+        for l in sorted(ledgers_under(group.id), key=lambda l: l.name):
+            d = deltas.get(l.id, 0.0)
+            amount = d if side == "debit" else -d
+            amount = round(amount, 2)
+            if amount == 0:
+                continue
+            items.append({"ledger_id": l.id, "name": l.name, "amount": amount})
+            total += amount
+        return {"name": group.name, "items": items, "total": round(total, 2)}
+
+    purchase = group_section(PROFIT_LOSS_GROUP_NAMES["purchase"], "debit")
+    direct_expense = group_section(PROFIT_LOSS_GROUP_NAMES["direct_expense"], "debit")
+    sales = group_section(PROFIT_LOSS_GROUP_NAMES["sales"], "credit")
+    direct_income = group_section(PROFIT_LOSS_GROUP_NAMES["direct_income"], "credit")
+    indirect_expense = group_section(PROFIT_LOSS_GROUP_NAMES["indirect_expense"], "debit")
+    indirect_income = group_section(PROFIT_LOSS_GROUP_NAMES["indirect_income"], "credit")
+
+    trading_dr = round(purchase["total"] + direct_expense["total"], 2)
+    trading_cr = round(sales["total"] + direct_income["total"], 2)
+    gross_profit = round(trading_cr - trading_dr, 2)  # positive = profit, negative = loss
+
+    pl_dr = round(indirect_expense["total"] + (-gross_profit if gross_profit < 0 else 0), 2)
+    pl_cr = round(indirect_income["total"] + (gross_profit if gross_profit > 0 else 0), 2)
+    net_profit = round(pl_cr - pl_dr, 2)  # positive = profit, negative = loss
+
+    return JsonResponse({
+        "from_date": from_date, "to_date": to_date,
+        "trading": {
+            "debit": {"purchase": purchase, "direct_expense": direct_expense},
+            "credit": {"sales": sales, "direct_income": direct_income},
+            "gross_profit": gross_profit,  # negative means Gross Loss
+            "total_debit": round(max(trading_dr, trading_cr), 2),
+            "total_credit": round(max(trading_dr, trading_cr), 2),
+        },
+        "pl": {
+            "debit": {"indirect_expense": indirect_expense},
+            "credit": {"indirect_income": indirect_income},
+            "net_profit": net_profit,  # negative means Net Loss
+            "total_debit": round(max(pl_dr, pl_cr), 2),
+            "total_credit": round(max(pl_dr, pl_cr), 2),
+        },
+    })
+
+
 def _safe_decimal(value, default=0):
     """
     Coerces whatever the client sent for a decimal field into a real,
@@ -1531,6 +1802,22 @@ def _parse_date(val):
     if not val:
         return None
     return datetime.strptime(val, "%Y-%m-%d").date() if isinstance(val, str) else val
+
+
+def _company_uses_calendar_year(company):
+    """
+    True for a company whose books run Jan-Dec (UAE and most countries
+    outside India) rather than India's own Apr-Mar financial year - used
+    only as a FALLBACK when that company has no explicit Financial Year
+    From date set on CompanyMaster yet (once set, that explicit date
+    always wins regardless of country - see ledger_monthly_summary).
+    Matched loosely against CompanyMaster's free-text Country field
+    rather than a fixed country list, so "UAE", "U.A.E", "United Arab
+    Emirates" etc. all resolve the same way.
+    """
+    country = (company.country if company else "") or ""
+    country = country.strip().lower()
+    return bool(country) and country not in ("india", "in", "bharat")
 
 
 def _next_voucher_no(model, company_id, category):
@@ -1754,7 +2041,12 @@ def ticket_create(request):
         except Ledger.DoesNotExist:
             return JsonResponse({"error": f"\"{body['supplier_name']}\" is not a real supplier ledger (Sundry Creditors)."}, status=400)
 
-    if Ticket.objects.filter(company_id=company_id, invoice_number=body["invoice_number"]).exists():
+    # Reschedule tickets share the SAME Invoice Number sequence as a plain
+    # booking (same Invoice Type), so a new booking must also be checked
+    # against RescheduleAirlineTicket's own invoice numbers, not just
+    # Ticket's - reschedule_ticket_create/update already check both ways.
+    if Ticket.objects.filter(company_id=company_id, invoice_number=body["invoice_number"]).exists() \
+            or RescheduleAirlineTicket.objects.filter(company_id=company_id, invoice_number=body["invoice_number"]).exists():
         return JsonResponse({"error": f"Invoice Number \"{body['invoice_number']}\" already exists."}, status=409)
     if body.get("booking_reference") and Ticket.objects.filter(company_id=company_id, booking_reference=body["booking_reference"]).exists():
         return JsonResponse({"error": f"Booking Reference \"{body['booking_reference']}\" already exists."}, status=409)
@@ -1836,12 +2128,14 @@ def ticket_update(request, ticket_id):
     Body: same shape as tickets/create/. Used by the New Ticket form's
     "Edit" button on an already-saved ticket — same validation as create,
     except uniqueness checks (Invoice Number/Booking Reference/Ticket No)
-    exclude this ticket's own existing rows. Replaces this ticket's
-    TicketLines wholesale (delete + recreate) rather than diffing them,
-    same as how the JV is always recomputed fresh rather than patched —
-    simpler and just as correct since the whole line set is resubmitted
-    every time. Updates the existing Voucher in place instead of posting
-    a second one for the same ticket.
+    exclude this ticket's own existing rows. Lines are matched to what's
+    already saved by ticket_no and updated in place (not deleted and
+    recreated wholesale) - a line that's already been rescheduled is
+    PROTECTed from deletion (RescheduleAirlineTicketLine.original_ticket_
+    line), so a blind delete-all would crash every time this ticket is
+    edited again after that. The JV is still always recomputed fresh
+    rather than patched. Updates the existing Voucher in place instead of
+    posting a second one for the same ticket.
     """
     if request.method != "POST":
         return HttpResponseNotAllowed(["POST"])
@@ -1882,7 +2176,8 @@ def ticket_update(request, ticket_id):
         except Ledger.DoesNotExist:
             return JsonResponse({"error": f"\"{body['supplier_name']}\" is not a real supplier ledger (Sundry Creditors)."}, status=400)
 
-    if Ticket.objects.filter(company_id=company_id, invoice_number=body["invoice_number"]).exclude(id=ticket.id).exists():
+    if Ticket.objects.filter(company_id=company_id, invoice_number=body["invoice_number"]).exclude(id=ticket.id).exists() \
+            or RescheduleAirlineTicket.objects.filter(company_id=company_id, invoice_number=body["invoice_number"]).exists():
         return JsonResponse({"error": f"Invoice Number \"{body['invoice_number']}\" already exists."}, status=409)
     if body.get("booking_reference") and Ticket.objects.filter(company_id=company_id, booking_reference=body["booking_reference"]).exclude(id=ticket.id).exists():
         return JsonResponse({"error": f"Booking Reference \"{body['booking_reference']}\" already exists."}, status=409)
@@ -1906,7 +2201,28 @@ def ticket_update(request, ticket_id):
         setattr(ticket, f, v)
     ticket.save()
 
-    ticket.lines.all().delete()
+    # Lines are matched to what's already saved by ticket_no (the one
+    # stable, unique key the frontend always sends) and UPDATED in place
+    # rather than deleted-and-recreated wholesale - a line that's already
+    # been rescheduled is referenced by RescheduleAirlineTicketLine.
+    # original_ticket_line (on_delete=PROTECT), so deleting it crashes
+    # with an uncaught ProtectedError (500) the instant this ticket is
+    # edited and saved again, even when that specific line's own fields
+    # never changed. A line actually being REMOVED from the submission
+    # still gets deleted as before, but only after confirming it isn't
+    # protected - rejected with a clear 409 instead of a 500 if it is.
+    existing_by_ticket_no = {l.ticket_no: l for l in ticket.lines.all()}
+    incoming_ticket_nos = set(ticket_nos)
+    dropped = [l for tno, l in existing_by_ticket_no.items() if tno not in incoming_ticket_nos]
+    protected_dropped = [l for l in dropped if not l.is_reschedule_eligible]
+    if protected_dropped:
+        names = ", ".join(sorted(l.ticket_no for l in protected_dropped))
+        return JsonResponse({
+            "error": f"Ticket No. {names} has already been rescheduled and cannot be removed from this ticket."
+        }, status=409)
+    for l in dropped:
+        l.delete()
+
     updated_lines = []
     line_objs = []
     for line_in in lines_in:
@@ -1925,9 +2241,18 @@ def ticket_update(request, ticket_id):
                     "error": f"\"{line_in['supplier_name']}\" (Ticket No. {line_in.get('ticket_no', '?')}) is not a real supplier ledger (Sundry Creditors)."
                 }, status=400)
 
-        line = TicketLine(ticket=ticket, supplier=line_supplier, **line_kwargs)
-        line.total_billed = _safe_decimal(line.compute_total())
-        line.save()
+        existing = existing_by_ticket_no.get(line_in.get("ticket_no"))
+        if existing:
+            for f, v in line_kwargs.items():
+                setattr(existing, f, v)
+            existing.supplier = line_supplier
+            existing.total_billed = _safe_decimal(existing.compute_total())
+            existing.save()
+            line = existing
+        else:
+            line = TicketLine(ticket=ticket, supplier=line_supplier, **line_kwargs)
+            line.total_billed = _safe_decimal(line.compute_total())
+            line.save()
         updated_lines.append(line.id)
         line_objs.append(line)
 
@@ -2019,6 +2344,67 @@ def ticket_detail(request, ticket_id):
     })
 
 
+def reschedule_tickets_list(request):
+    """
+    GET /api/reschedule-tickets/list/?company_id=1
+    One row per RescheduleAirlineTicketLine, same flat shape as
+    tickets_list() (reused by report-dsr-airline-booking.html, which
+    merges this in alongside the normal tickets_list() rows so Reschedule
+    bookings show up in DSR too) - "ticket_id" is always null here (there
+    is no Ticket backing these rows) and "reschedule_ticket_id" is set
+    instead, so callers that group/link by ticket can tell the two apart.
+    booking_status is always "Re-Scheduled" (frozen at creation - see
+    enterRescheduleMode()/enterSavedRescheduleMode() in page-ticket-
+    entry.js), which DSR's own Status filter already expects.
+    """
+    if request.method != "GET":
+        return HttpResponseNotAllowed(["GET"])
+
+    company_id = request.GET.get("company_id")
+    if not company_id:
+        return JsonResponse({"error": "company_id is required"}, status=400)
+
+    rows = []
+    lines = RescheduleAirlineTicketLine.objects.filter(reschedule_ticket__company_id=company_id).select_related(
+        "reschedule_ticket", "reschedule_ticket__customer", "reschedule_ticket__supplier", "supplier"
+    ).order_by("-id")
+    for l in lines:
+        rt = l.reschedule_ticket
+        rows.append({
+            "id": l.id, "ticket_id": None, "reschedule_ticket_id": rt.id,
+            "pnr": rt.airline_pnr or rt.gds_pnr or rt.booking_reference,
+            "ticket_no": l.ticket_no, "airline_name": l.airline_name, "airline_code": l.airline_code,
+            "flight_no": l.flight_no, "passenger_name": l.passenger_name, "pax_type": l.pax_type,
+            "sector": l.sector, "issue_date": rt.invoice_date.isoformat() if rt.invoice_date else None,
+            "travel_date": l.travel_date,
+            "basic_fare": float(l.basic_fare), "markup": float(l.markup), "total_billed": float(l.total_billed),
+            "status": l.status,
+            "invoice_number": rt.invoice_number, "invoice_date": rt.invoice_date.isoformat() if rt.invoice_date else None,
+            "invoice_type": rt.invoice_type, "booking_mode": rt.booking_mode, "booking_type": rt.booking_type,
+            "booking_status": rt.booking_status, "customer_name": rt.customer.name,
+            "travel_type": rt.travel_type, "user_name": rt.user_name, "currency": rt.currency, "roe": float(rt.roe),
+            "booking_given_by": rt.booking_given_by, "payment_mode": rt.payment_mode, "airline_category": l.airline_category,
+            "booking_reference": rt.booking_reference, "booking_ref_date": rt.booking_ref_date.isoformat() if rt.booking_ref_date else None,
+            "airline_pnr": rt.airline_pnr, "gds_pnr": rt.gds_pnr, "supplier_name": l.supplier.name if l.supplier else None,
+            "office_id": l.office_id, "fop": l.fop, "card_number": l.card_number,
+            "yq": float(l.yq), "yr": float(l.yr), "k3_tax": float(l.k3_tax), "tax_others": float(l.tax_others),
+            "seat": float(l.seat), "meal": float(l.meal), "baggage": float(l.baggage), "other_ssr": float(l.other_ssr),
+            "disc_on": l.disc_on, "disc_type": l.disc_type, "disc_value": float(l.disc_value), "tds_per": float(l.tds_per),
+            "addl_markup": float(l.addl_markup), "ssr_markup": float(l.ssr_markup), "service_fee": float(l.service_fee),
+            "addl_service_fee": float(l.addl_service_fee), "ssr_service_fee": float(l.ssr_service_fee), "gst_pct": float(l.gst_pct),
+            "supp_comm_on": l.supp_comm_on, "supp_comm_type": l.supp_comm_type,
+            "supp_comm_value": float(l.supp_comm_value), "supp_tds_per": float(l.supp_tds_per),
+            "supp_markup": float(l.supp_markup), "supp_addl_markup": float(l.supp_addl_markup),
+            "supp_service_fee": float(l.supp_service_fee), "supp_addl_service_fee": float(l.supp_addl_service_fee),
+            "computed_discount": float(l.computed_discount), "computed_tds": float(l.computed_tds), "computed_gst": float(l.computed_gst),
+            "computed_supp_gst": float(l.computed_supp_gst),
+            # Reschedule-only fields - no equivalent on tickets_list()'s rows.
+            "agent_penalty": float(l.agent_penalty), "reschedule_penalty": float(l.reschedule_penalty),
+            "supplier_penalty": float(l.supplier_penalty),
+        })
+    return JsonResponse(rows, safe=False)
+
+
 def tickets_list(request):
     """
     GET /api/tickets/?company_id=1
@@ -2081,13 +2467,31 @@ def ticket_lookup_for_reschedule(request):
     Finds a single Ticket by whichever identifier was actually given -
     Ticket No first (unique to one TicketLine, so most specific), then
     S PNR (Booking Reference), then Airline PNR - and returns every
-    passenger on that ticket with their own sectors already split out.
+    eligible (not yet rescheduled) passenger on that ticket with their own
+    sectors already split out.
 
-    TicketLine stores a multi-city ticket's sector/flight_no/travel_class/
-    travel_date as one comma-joined value per field (same convention
-    page-ticket-entry.js's own parseSectorsFromPassenger() splits client-
-    side) - mirrored here so the Reschedule page can show each sector as
-    its own row without re-implementing that parsing twice.
+    Also searches RescheduleAirlineTicket/RescheduleAirlineTicketLine by
+    the exact same 3 identifiers (chaining) - rescheduling an
+    ALREADY-RESCHEDULED ticket again. FKs always anchor back to the true
+    original Ticket/TicketLine regardless of chain depth (ticket_id/
+    matched_line_id below are always the ORIGINAL ids, since that's what
+    reschedule_ticket_create needs), but the response's booking_reference/
+    airline_pnr/invoice_number and each passenger's own fields come from
+    the MATCHED RESCHEDULE's own data when found there, so "Parent PNR
+    Details" on the next reschedule reflects the most recent state, not
+    the stale several-steps-back original. source_reschedule_ticket_id is
+    set in that case so the frontend can carry it through to ticket-
+    entry.html, and each passenger carries its own reschedule_line_id
+    (the chain link reschedule_ticket_create needs to flip the RIGHT
+    eligibility flag - the reschedule's own, not the original's, which
+    was already flipped False the first time around).
+
+    TicketLine/RescheduleAirlineTicketLine both store a multi-city
+    ticket's sector/flight_no/travel_class/travel_date as one comma-joined
+    value per field (same convention page-ticket-entry.js's own
+    parseSectorsFromPassenger() splits client-side) - mirrored here so the
+    Reschedule page can show each sector as its own row without
+    re-implementing that parsing twice.
     """
     if request.method != "GET":
         return HttpResponseNotAllowed(["GET"])
@@ -2104,17 +2508,57 @@ def ticket_lookup_for_reschedule(request):
 
     ticket = None
     matched_line_id = None
+    matched_line = None
+    resched_source = None       # RescheduleAirlineTicket, set when found via reschedule data
+    resched_source_line = None  # RescheduleAirlineTicketLine, set only on an exact Ticket No match
+
     if ticket_no:
         line = TicketLine.objects.filter(ticket__company_id=company_id, ticket_no=ticket_no).select_related("ticket").first()
-        ticket = line.ticket if line else None
-        matched_line_id = line.id if line else None
+        if line:
+            ticket = line.ticket
+            matched_line_id = line.id
+            matched_line = line
+        else:
+            rline = RescheduleAirlineTicketLine.objects.filter(
+                reschedule_ticket__company_id=company_id, ticket_no=ticket_no
+            ).select_related("reschedule_ticket", "original_ticket_line__ticket").first()
+            if rline:
+                resched_source_line = rline
+                resched_source = rline.reschedule_ticket
+                matched_line = rline.original_ticket_line
+                matched_line_id = matched_line.id
+                ticket = matched_line.ticket
     if not ticket and s_pnr:
         ticket = Ticket.objects.filter(company_id=company_id, booking_reference=s_pnr).first()
+        if not ticket:
+            rt = RescheduleAirlineTicket.objects.filter(company_id=company_id, booking_reference=s_pnr).select_related("original_ticket").first()
+            if rt:
+                resched_source = rt
+                ticket = rt.original_ticket
     if not ticket and airline_pnr:
         ticket = Ticket.objects.filter(company_id=company_id, airline_pnr=airline_pnr).first()
+        if not ticket:
+            rt = RescheduleAirlineTicket.objects.filter(company_id=company_id, airline_pnr=airline_pnr).select_related("original_ticket").first()
+            if rt:
+                resched_source = rt
+                ticket = rt.original_ticket
 
     if not ticket:
         return JsonResponse({"error": "No ticket found matching that S PNR / Airline PNR / Ticket No."}, status=404)
+
+    # Searched by an EXACT Ticket No that's already been rescheduled - this
+    # one specific passenger can never be rescheduled again, regardless of
+    # whether other passengers on the same invoice are still eligible.
+    # Checks the RIGHT flag depending on which table actually matched:
+    # the reschedule's own (if chaining) or the original line's.
+    already_rescheduled = (
+        not resched_source_line.is_reschedule_eligible if resched_source_line is not None
+        else (matched_line is not None and not matched_line.is_reschedule_eligible)
+    )
+    if already_rescheduled:
+        return JsonResponse({
+            "error": "This ticket has already been rescheduled and cannot be rescheduled again."
+        }, status=409)
 
     def split_sectors(l):
         pairs = [p.strip() for p in (l.sector or "").split(",") if p.strip()]
@@ -2128,20 +2572,46 @@ def ticket_lookup_for_reschedule(request):
             "travel_date": dates[i] if i < len(dates) else (dates[0] if len(dates) == 1 else ""),
         } for i in range(len(pairs))]
 
+    # Partial passenger reschedule: a passenger/line that's already been
+    # rescheduled (is_reschedule_eligible=False) is excluded here rather
+    # than blocking the whole invoice/reschedule - other passengers who
+    # haven't been rescheduled yet must still show up.
+    if resched_source is not None:
+        eligible_lines = list(resched_source.lines.filter(is_reschedule_eligible=True))
+    else:
+        eligible_lines = [l for l in ticket.lines.all() if l.is_reschedule_eligible]
+    if not eligible_lines:
+        return JsonResponse({
+            "error": "All passengers/tickets in this booking have already been rescheduled."
+        }, status=409)
+
     passengers = [{
-        "line_id": l.id, "ticket_no": l.ticket_no, "pax_type": l.pax_type, "passenger_name": l.passenger_name,
+        # Always the TRUE original line's id (reschedule_ticket_create's
+        # own original_ticket_line_id) regardless of chain depth.
+        "line_id": l.original_ticket_line_id if resched_source is not None else l.id,
+        "ticket_no": l.ticket_no, "pax_type": l.pax_type, "passenger_name": l.passenger_name,
         "sectors": split_sectors(l),
-    } for l in ticket.lines.all()]
+        # Set only when this passenger came from a reschedule (chaining) -
+        # the chain link the NEW reschedule's own line needs.
+        "reschedule_line_id": l.id if resched_source is not None else None,
+    } for l in eligible_lines]
 
     return JsonResponse({
-        "ticket_id": ticket.id, "invoice_number": ticket.invoice_number,
-        "booking_reference": ticket.booking_reference, "airline_pnr": ticket.airline_pnr,
+        "ticket_id": ticket.id,
+        "invoice_number": resched_source.invoice_number if resched_source is not None else ticket.invoice_number,
+        "booking_reference": resched_source.booking_reference if resched_source is not None else ticket.booking_reference,
+        "airline_pnr": resched_source.airline_pnr if resched_source is not None else ticket.airline_pnr,
         # Only set when the search matched by Ticket No specifically -
         # that identifies ONE particular passenger's line, not just the
         # ticket as a whole (a ticket can have several passengers who
         # each have their own ticket_no). The frontend uses this to
         # pre-select that exact passenger instead of just the first row.
         "matched_line_id": matched_line_id,
+        # Set whenever the match came from a reschedule rather than the
+        # original ticket - the frontend carries this through as
+        # parent_reschedule_id so ticket-entry.html can build "Parent PNR
+        # Details" from that reschedule's own data instead of the original.
+        "source_reschedule_ticket_id": resched_source.id if resched_source is not None else None,
         "passengers": passengers,
     })
 
@@ -2163,9 +2633,12 @@ def reschedule_ticket_create(request):
     Persists the brand-new "Reschedule PNR Details" ticket + its lines
     into RescheduleAirlineTicket/RescheduleAirlineTicketLine — the
     original ticket/line ("Parent PNR Details") is never touched, only
-    linked via original_ticket / original_ticket_line. No JV is posted
-    here (unlike ticket_create) — that mapping/GL work is out of scope
-    for this endpoint.
+    linked via original_ticket / original_ticket_line. Auto-posts this
+    reschedule's own JournalVoucher immediately (category
+    "AIRLINE_RESCHEDULE", ALR-1/ALR-2/... numbering, source_reschedule_
+    ticket set instead of source_ticket) using _compute_reschedule_jv_
+    lines — entirely additive, the original ticket's own JournalVoucher
+    row is never touched or adjusted.
     """
     if request.method != "POST":
         return HttpResponseNotAllowed(["POST"])
@@ -2230,6 +2703,41 @@ def reschedule_ticket_create(request):
     if missing_original:
         return JsonResponse({"error": "One or more lines reference an original ticket line that doesn't belong to this ticket."}, status=400)
 
+    # Chaining - rescheduling an ALREADY-RESCHEDULED ticket again. Each
+    # line optionally carries reschedule_line_id (the previous
+    # RescheduleAirlineTicketLine this new one is based on, from
+    # ticket_lookup_for_reschedule's own source_reschedule_ticket_id /
+    # per-passenger reschedule_line_id) - keyed here by original_ticket_
+    # line_id since that's what the rest of this view keys lines_in by.
+    based_on_lines = {}
+    reschedule_line_ids = [l.get("reschedule_line_id") for l in lines_in if l.get("reschedule_line_id")]
+    if reschedule_line_ids:
+        based_on_lines = {
+            l.original_ticket_line_id: l
+            for l in RescheduleAirlineTicketLine.objects.filter(id__in=reschedule_line_ids)
+        }
+
+    # Authoritative, server-side re-check (never trust the frontend alone
+    # here) - someone could have already rescheduled this exact line (or
+    # chain) in the time between the lookup screen loading and this Save,
+    # or simply posted directly to this endpoint bypassing the UI
+    # entirely. When chaining, the PREVIOUS reschedule's own eligibility is
+    # what matters - the original TicketLine's flag is expected to already
+    # be False from the first reschedule, that alone isn't a conflict.
+    already_rescheduled = []
+    for oid, original_line in original_lines.items():
+        based_on = based_on_lines.get(oid)
+        if based_on is not None:
+            if not based_on.is_reschedule_eligible:
+                already_rescheduled.append(based_on.ticket_no)
+        elif not original_line.is_reschedule_eligible:
+            already_rescheduled.append(original_line.ticket_no)
+    if already_rescheduled:
+        names = ", ".join(sorted(set(already_rescheduled)))
+        return JsonResponse({
+            "error": f"Ticket No. {names} has already been rescheduled and cannot be rescheduled again."
+        }, status=409)
+
     header_kwargs = {f: body[f] for f in TICKET_HEADER_FIELDS if f in body}
     header_kwargs["invoice_date"] = _parse_date(header_kwargs.get("invoice_date"))
     header_kwargs["booking_ref_date"] = _parse_date(header_kwargs.get("booking_ref_date"))
@@ -2241,6 +2749,7 @@ def reschedule_ticket_create(request):
     )
 
     created_lines = []
+    line_objs = []
     for line_in in lines_in:
         line_kwargs = {f: line_in[f] for f in RESCHED_LINE_FIELDS if f in line_in}
         for f in RESCHED_LINE_NUMERIC_FIELDS:
@@ -2257,18 +2766,55 @@ def reschedule_ticket_create(request):
                     "error": f"\"{line_in['supplier_name']}\" (Ticket No. {line_in.get('ticket_no', '?')}) is not a real supplier ledger (Sundry Creditors)."
                 }, status=400)
 
+        original_line = original_lines[line_in["original_ticket_line_id"]]
+        based_on = based_on_lines.get(line_in["original_ticket_line_id"])
         line = RescheduleAirlineTicketLine(
             reschedule_ticket=resched_ticket,
-            original_ticket_line=original_lines[line_in["original_ticket_line_id"]],
+            original_ticket_line=original_line,
+            based_on_reschedule_line=based_on,
+            # Stored once, here, at creation - never recomputed afterwards
+            # (see the field's own docstring on the model).
+            parent_pnr=based_on.reschedule_ticket.booking_reference if based_on is not None else original_ticket.booking_reference,
             supplier=line_supplier, **line_kwargs,
         )
         line.total_billed = _safe_decimal(line.compute_total())
         line.save()
         created_lines.append(line.id)
+        line_objs.append(line)
 
+        # Flips the moment this reschedule is actually created - this
+        # passenger/line can never be rescheduled again (see
+        # ticket_lookup_for_reschedule's own eligibility filter/check).
+        # The original TicketLine's own flag flips every time regardless
+        # (harmless no-op if already False from an earlier reschedule in
+        # this same chain) - when chaining, the PREVIOUS reschedule's own
+        # line also flips, since IT is what's actually being reschedule-d
+        # again here.
+        original_line.is_reschedule_eligible = False
+        original_line.save(update_fields=["is_reschedule_eligible"])
+        if based_on is not None:
+            based_on.is_reschedule_eligible = False
+            based_on.save(update_fields=["is_reschedule_eligible"])
+
+    accounts, narration, total_debit, total_credit = _compute_reschedule_jv_lines(resched_ticket, line_objs)
+    total_debit, total_credit = round(total_debit, 2), round(total_credit, 2)
+    if total_debit == 0 and total_credit == 0:
+        transaction.set_rollback(True)
+        return JsonResponse({"error": "This reschedule ticket's GL entry total is zero — check the fare fields."}, status=400)
+
+    voucher = JournalVoucher.objects.create(
+        company_id=company_id, branch_name=resched_ticket.branch_name or "Chennai Branch",
+        voucher_type="Tax Invoice", voucher_date=resched_ticket.invoice_date, narration=narration,
+        source_reschedule_ticket=resched_ticket, total_debit=total_debit, total_credit=total_credit,
+        category="AIRLINE_RESCHEDULE", voucher_no=_next_voucher_no(JournalVoucher, company_id, "AIRLINE_RESCHEDULE"),
+    )
+
+    balanced = abs(total_debit - total_credit) < 0.01
+    status_note = f"Balanced ✓ (Debit {total_debit:.2f} = Credit {total_credit:.2f})" \
+        if balanced else f"⚠ Debit {total_debit:.2f} ≠ Credit {total_credit:.2f} — check the JV tab"
     return JsonResponse({
-        "id": resched_ticket.id, "line_ids": created_lines,
-        "message": f"Reschedule ticket saved — {len(created_lines)} passenger line(s).",
+        "id": resched_ticket.id, "line_ids": created_lines, "voucher_id": voucher.id, "voucher_no": voucher.voucher_no,
+        "message": f"Reschedule ticket saved and GL entry {voucher.voucher_no} posted — {status_note}.",
     }, status=201)
 
 
@@ -2348,6 +2894,49 @@ def reschedule_ticket_update(request, reschedule_ticket_id):
     if missing_original:
         return JsonResponse({"error": "One or more lines reference an original ticket line that doesn't belong to this ticket."}, status=400)
 
+    # Chaining - same resolution as reschedule_ticket_create, keyed by
+    # original_ticket_line_id so a re-save of an already-chained reschedule
+    # (reschedule_ticket_detail sends each line's own reschedule_line_id
+    # back) keeps its based_on_reschedule_line link instead of losing it.
+    based_on_lines = {}
+    reschedule_line_ids = [l.get("reschedule_line_id") for l in lines_in if l.get("reschedule_line_id")]
+    if reschedule_line_ids:
+        based_on_lines = {
+            l.original_ticket_line_id: l
+            for l in RescheduleAirlineTicketLine.objects.filter(id__in=reschedule_line_ids)
+        }
+
+    # Eligibility re-check, same as reschedule_ticket_create - but only for
+    # lines NEWLY being attached to this reschedule ticket. A line already
+    # linked to THIS SAME reschedule ticket (same original_ticket_line_id
+    # AND same based_on_reschedule_line, if chained) is correctly already
+    # marked ineligible - that's expected on every edit, not a conflict -
+    # only a DIFFERENT original line, or a different chain source, is one.
+    old_lines_by_original = {
+        l["original_ticket_line_id"]: l
+        for l in resched_ticket.lines.values("original_ticket_line_id", "based_on_reschedule_line_id")
+    }
+    new_original_line_ids = set(line_original_ids)
+    old_original_line_ids = set(old_lines_by_original.keys())
+    newly_added_ids = {
+        oid for oid in new_original_line_ids
+        if oid not in old_lines_by_original
+        or old_lines_by_original[oid]["based_on_reschedule_line_id"] != (based_on_lines.get(oid).id if based_on_lines.get(oid) else None)
+    }
+    conflicting = []
+    for oid in newly_added_ids:
+        based_on = based_on_lines.get(oid)
+        if based_on is not None:
+            if not based_on.is_reschedule_eligible:
+                conflicting.append(based_on.ticket_no)
+        elif not original_lines[oid].is_reschedule_eligible:
+            conflicting.append(original_lines[oid].ticket_no)
+    if conflicting:
+        names = ", ".join(sorted(set(conflicting)))
+        return JsonResponse({
+            "error": f"Ticket No. {names} has already been rescheduled and cannot be rescheduled again."
+        }, status=409)
+
     header_kwargs = {f: body[f] for f in TICKET_HEADER_FIELDS if f in body}
     header_kwargs["invoice_date"] = _parse_date(header_kwargs.get("invoice_date"))
     header_kwargs["booking_ref_date"] = _parse_date(header_kwargs.get("booking_ref_date"))
@@ -2360,8 +2949,23 @@ def reschedule_ticket_update(request, reschedule_ticket_id):
         setattr(resched_ticket, f, v)
     resched_ticket.save()
 
+    # A line dropped from this reschedule (no longer in the resubmitted
+    # lines) goes back to eligible - it's no longer rescheduled by anything.
+    # Reverts BOTH the original TicketLine and, if it was chained, the
+    # reschedule line it was based on.
+    dropped_ids = old_original_line_ids - new_original_line_ids
+    if dropped_ids:
+        TicketLine.objects.filter(id__in=dropped_ids).update(is_reschedule_eligible=True)
+        dropped_based_on_ids = [
+            old_lines_by_original[oid]["based_on_reschedule_line_id"] for oid in dropped_ids
+            if old_lines_by_original[oid]["based_on_reschedule_line_id"]
+        ]
+        if dropped_based_on_ids:
+            RescheduleAirlineTicketLine.objects.filter(id__in=dropped_based_on_ids).update(is_reschedule_eligible=True)
+
     resched_ticket.lines.all().delete()
     updated_lines = []
+    line_objs = []
     for line_in in lines_in:
         line_kwargs = {f: line_in[f] for f in RESCHED_LINE_FIELDS if f in line_in}
         for f in RESCHED_LINE_NUMERIC_FIELDS:
@@ -2381,26 +2985,66 @@ def reschedule_ticket_update(request, reschedule_ticket_id):
         line = RescheduleAirlineTicketLine(
             reschedule_ticket=resched_ticket,
             original_ticket_line=original_lines[line_in["original_ticket_line_id"]],
+            based_on_reschedule_line=based_on_lines.get(line_in["original_ticket_line_id"]),
+            parent_pnr=(
+                based_on_lines[line_in["original_ticket_line_id"]].reschedule_ticket.booking_reference
+                if based_on_lines.get(line_in["original_ticket_line_id"]) is not None
+                else resched_ticket.original_ticket.booking_reference
+            ),
             supplier=line_supplier, **line_kwargs,
         )
         line.total_billed = _safe_decimal(line.compute_total())
         line.save()
         updated_lines.append(line.id)
+        line_objs.append(line)
 
+    # Every line actually used by this reschedule (old and newly-added
+    # alike) is ineligible for further rescheduling - both the original
+    # TicketLine and, if chained, the reschedule line it's based on.
+    TicketLine.objects.filter(id__in=new_original_line_ids).update(is_reschedule_eligible=False)
+    if based_on_lines:
+        RescheduleAirlineTicketLine.objects.filter(id__in=[l.id for l in based_on_lines.values()]).update(is_reschedule_eligible=False)
+
+    accounts, narration, total_debit, total_credit = _compute_reschedule_jv_lines(resched_ticket, line_objs)
+    total_debit, total_credit = round(total_debit, 2), round(total_credit, 2)
+    if total_debit == 0 and total_credit == 0:
+        transaction.set_rollback(True)
+        return JsonResponse({"error": "This reschedule ticket's GL entry total is zero — check the fare fields."}, status=400)
+
+    voucher = JournalVoucher.objects.filter(source_reschedule_ticket_id=resched_ticket.id).first()
+    if voucher:
+        voucher.branch_name = resched_ticket.branch_name or "Chennai Branch"
+        voucher.voucher_date = resched_ticket.invoice_date
+        voucher.narration = narration
+        voucher.total_debit = total_debit
+        voucher.total_credit = total_credit
+        voucher.save()
+    else:
+        voucher = JournalVoucher.objects.create(
+            company_id=company_id, branch_name=resched_ticket.branch_name or "Chennai Branch",
+            voucher_type="Tax Invoice", voucher_date=resched_ticket.invoice_date, narration=narration,
+            source_reschedule_ticket=resched_ticket, total_debit=total_debit, total_credit=total_credit,
+            category="AIRLINE_RESCHEDULE", voucher_no=_next_voucher_no(JournalVoucher, company_id, "AIRLINE_RESCHEDULE"),
+        )
+
+    balanced = abs(total_debit - total_credit) < 0.01
+    status_note = f"Balanced ✓ (Debit {total_debit:.2f} = Credit {total_credit:.2f})" \
+        if balanced else f"⚠ Debit {total_debit:.2f} ≠ Credit {total_credit:.2f} — check the JV tab"
     return JsonResponse({
-        "id": resched_ticket.id, "line_ids": updated_lines,
-        "message": f"Reschedule ticket updated — {len(updated_lines)} passenger line(s).",
+        "id": resched_ticket.id, "line_ids": updated_lines, "voucher_id": voucher.id, "voucher_no": voucher.voucher_no,
+        "message": f"Reschedule ticket updated and GL entry {voucher.voucher_no} re-posted — {status_note}.",
     })
 
 
 # ============================================================
-# Reschedule-only Journal Voucher (project owner's spec, 2026-09-30) -
-# entirely separate from _compute_jv_lines/JV_LINE_MAP (jv_hardcode.py),
-# which is Booking's own JV and must never be touched by this. Every one
-# of the 26 Main JV fields below is fixed and always emitted (even at
-# zero) - "Do not remove any field" - unlike the Booking JV, which hides
-# zero-amount rows and combines/state-splits its two "Output IGST A/c"
-# entries. Here they stay as two separate, literal rows.
+# Reschedule-only Journal Voucher - entirely separate from
+# _compute_jv_lines/JV_LINE_MAP (jv_hardcode.py), which is Booking's own
+# JV and must never be touched by this. The frontend now filters out
+# zero-amount rows itself (renderRescheduleJvPreview), and the two
+# "Output IGST A/c" entries below (customer-side "gst" and supplier-side
+# "supp_gst") are combined and state-split into Output CGST/Output SGST
+# or a single Output IGST A/c, matching Booking's own JV exactly (see
+# _compute_reschedule_jv_lines' own Output GST handling below).
 # ============================================================
 RESCHED_JV_LINE_MAP = [
     ("Credit", "Earnings From Supplier", "Commission A/c", "commission"),
@@ -2430,7 +3074,7 @@ RESCHED_JV_LINE_MAP = [
 ]
 
 
-def _compute_reschedule_jv_lines(resched_ticket, lines, mapping_cache=None):
+def _compute_reschedule_jv_lines(resched_ticket, lines, mapping_cache=None, company_state=None):
     """
     Customer (Debit) = Basic+YQ+YR+K3+Tax&Others+Seat+Meal+Baggage+Other
     SSR + Customer TDS + Customer Markup/Addl Markup/Service Fee/Addl
@@ -2524,8 +3168,34 @@ def _compute_reschedule_jv_lines(resched_ticket, lines, mapping_cache=None):
         ledger_id, ledger_name = mapped_ledger(masters_category, field_name)
         return {"role": field_name, "ledger_id": ledger_id, "ledger_name": ledger_name, "debit": debit, "credit": credit}
 
+    # Output GST - same concept as Booking's own JV: the customer-side
+    # ("gst") and supplier-side ("supp_gst") Output IGST A/c amounts are
+    # combined into ONE, then shown as Output CGST + Output SGST (split in
+    # half) when the customer is in the SAME state as the company, or one
+    # combined Output IGST A/c otherwise - never as two separate, literal
+    # "Output IGST A/c" rows the way this used to.  The separate DEBIT
+    # "Input IGST A/c" line (also fed by supp_gst) is untouched - that's a
+    # different line entirely (Input, not Output).
+    if company_state is None:
+        company_state = (CompanyMaster.objects.filter(id=resched_ticket.company_id).values_list("state", flat=True).first() or "").strip().lower()
+    customer_state = (resched_ticket.customer.state_name or "").strip().lower()
+    same_state = bool(company_state) and bool(customer_state) and company_state == customer_state
+    OUTPUT_GST_KEYS = {"gst", "supp_gst"}
+
     accounts = customer_rows("Debit", customer_total) + supplier_rows("Credit")
+    output_gst_emitted = False
     for dr_cr, masters_category, field_name, amount_key in RESCHED_JV_LINE_MAP:
+        if dr_cr == "Credit" and masters_category == "GST and TDS" and field_name == "Output IGST A/c" and amount_key in OUTPUT_GST_KEYS:
+            if not output_gst_emitted:
+                output_gst_emitted = True
+                combined_gst = round(role_amounts["gst"] + role_amounts["supp_gst"], 2)
+                if same_state:
+                    half = round(combined_gst / 2, 2)
+                    accounts.append(mapped_row("Credit", "GST and TDS", "Output CGST A/c", half))
+                    accounts.append(mapped_row("Credit", "GST and TDS", "Output SGST A/c", half))
+                else:
+                    accounts.append(mapped_row("Credit", "GST and TDS", "Output IGST A/c", combined_gst))
+            continue
         accounts.append(mapped_row(dr_cr, masters_category, field_name, role_amounts[amount_key]))
 
     narration = " / ".join(filter(None, [
@@ -2537,14 +3207,89 @@ def _compute_reschedule_jv_lines(resched_ticket, lines, mapping_cache=None):
     return accounts, narration, total_debit, total_credit
 
 
+def _reschedule_fop_payment_lines(resched_ticket, lines):
+    """
+    Reschedule's own FOP Payment settlement (JV-3 Own Card / JV-4 Client
+    Card) - mirrors _fop_payment_lines exactly, except the per-line
+    supplier amount also folds in Supplier Penalty + Reschedule Penalty
+    (see _compute_reschedule_jv_lines' own supplier formula, which this
+    must stay in sync with - the two tabs settle the SAME Supplier
+    balance the Main JV debited/credited).
+    """
+    fop = lines[0].fop if lines else None
+    if not fop or fop == "Cash":
+        return []
+
+    supplier_groups = {}
+    for l in lines:
+        group = supplier_groups.setdefault(l.supplier_id, {"ledger": l.supplier, "amount": 0.0})
+        group["amount"] += (
+            float(l.supplier_cost) - float(l.computed_supp_commission) + float(l.computed_supp_tds)
+            + float(l.supp_markup) + float(l.supp_addl_markup)
+            + float(l.supp_service_fee) + float(l.supp_addl_service_fee)
+            + float(l.computed_supp_gst)
+            + float(l.supplier_penalty) + float(l.reschedule_penalty)
+        )
+    total_amount = round(sum(g["amount"] for g in supplier_groups.values()), 2)
+    if total_amount == 0:
+        return []
+
+    result = [(g["ledger"].id, g["amount"], 0) for g in supplier_groups.values() if g["ledger"]]
+    if fop == "Own Card":
+        card_number = lines[0].card_number or ""
+        card = FOPMaster.objects.filter(company_id=resched_ticket.company_id, card_number=card_number).first()
+        if card:
+            result.append((card.card_master_ledger_id, 0, total_amount))
+    else:  # Client Card
+        result.append((resched_ticket.customer_id, 0, total_amount))
+    return result
+
+
+def _reschedule_pg_receipt_lines(resched_ticket, lines):
+    """
+    Reschedule's own PG Receipt settlement (JV-2/JV-5) - mirrors
+    _pg_receipt_lines, except the Customer amount settled back to zero
+    also folds in Supplier Penalty + Reschedule Penalty + Agent Penalty
+    (see _compute_reschedule_jv_lines' own customer formula, which this
+    must stay in sync with - same Customer balance the Main JV debited).
+    """
+    if resched_ticket.payment_mode != "Payment Gateway":
+        return []
+    customer_total = round(sum(
+        float(l.compute_total()) + float(l.supplier_penalty) + float(l.reschedule_penalty) + float(l.agent_penalty)
+        for l in lines
+    ), 2)
+    if customer_total == 0:
+        return []
+    result = [(resched_ticket.customer_id, 0, customer_total)]
+    snapshot = _pg_master_effective_snapshot(
+        resched_ticket.company_id, resched_ticket.payment_gateway_ref or "",
+        resched_ticket.invoice_date or resched_ticket.booking_ref_date,
+    )
+    if snapshot:
+        pg_charges_total = round(sum(float(l.pg_charges or 0) for l in lines), 2)
+        pg_gst_pct = snapshot["pg_charges_master_ledger_gst_percentage"]
+        pg_gst_total = round(pg_charges_total * pg_gst_pct / 100, 2)
+
+        gateway_debit_total = round(customer_total + pg_charges_total + pg_gst_total, 2)
+        result.append((snapshot["payment_master_ledger_id"], gateway_debit_total, 0))
+        if pg_charges_total and snapshot["pg_charges_master_ledger_id"]:
+            result.append((snapshot["pg_charges_master_ledger_id"], pg_charges_total, 0))
+            result.append((snapshot["payment_master_ledger_id"], 0, pg_charges_total))
+        if pg_gst_total:
+            result.append((snapshot["payment_master_ledger_id"], 0, pg_gst_total))
+    return result
+
+
 def reschedule_jv_preview(request, reschedule_ticket_id):
     """
     GET /api/reschedule-tickets/<id>/jv-preview/?company_id=1
-    Reschedule-only JV preview for an already-saved RescheduleAirlineTicket
-    - see _compute_reschedule_jv_lines. No JournalVoucher is ever posted
-    for a reschedule ticket yet (out of scope so far - reschedule_ticket_
-    create/update only persist RescheduleAirlineTicket/Line rows), so
-    "posted" is always False here.
+    Always computes the JV lines LIVE from this reschedule ticket's own
+    lines (_compute_reschedule_jv_lines) - never reads a stored snapshot.
+    JournalVoucher is only consulted here to report whether this
+    reschedule ticket has actually been posted yet (reschedule_ticket_
+    create/update auto-post one immediately on save, same as a normal
+    ticket), and its ALR-prefixed voucher_no if so.
     """
     if request.method != "GET":
         return HttpResponseNotAllowed(["GET"])
@@ -2561,8 +3306,12 @@ def reschedule_jv_preview(request, reschedule_ticket_id):
 
     accounts, narration, total_debit, total_credit = _compute_reschedule_jv_lines(rt, lines)
 
+    voucher = JournalVoucher.objects.filter(source_reschedule_ticket_id=rt.id).only("id", "voucher_no").first()
+
     return JsonResponse({
-        "posted": False, "voucher_id": None, "voucher_no": None,
+        "posted": voucher is not None,
+        "voucher_id": voucher.id if voucher else None,
+        "voucher_no": voucher.voucher_no if voucher else None,
         "branch_name": rt.branch_name or "Chennai Branch",
         "voucher_type": "Tax Invoice",
         "voucher_date": rt.invoice_date.isoformat() if rt.invoice_date else None,
@@ -2686,6 +3435,204 @@ def reschedule_ticket_lookup(request):
     return JsonResponse({"reschedule_ticket_id": resched_ticket.id})
 
 
+PARENT_CHAIN_SUM_FIELDS = [
+    "basic_fare", "yq", "yr", "k3_tax", "tax_others", "seat", "meal", "baggage", "other_ssr",
+    "markup", "addl_markup", "ssr_markup", "service_fee", "addl_service_fee", "ssr_service_fee",
+    "supp_markup", "supp_addl_markup", "supp_service_fee", "supp_addl_service_fee", "pg_charges",
+    # Only exist on RescheduleAirlineTicketLine, never on the true
+    # original TicketLine (a fresh booking has nothing to charge a
+    # penalty against yet) - getattr(..., 0) below naturally returns 0
+    # for the original, so these are correctly 0 on a FIRST reschedule
+    # (chain is empty, nothing to sum) and only start accumulating from
+    # the second reschedule onward, exactly as specified.
+    "agent_penalty", "reschedule_penalty", "supplier_penalty",
+]
+# disc_value/supp_comm_value are handled separately below (not summed as
+# raw numbers here) - each one is a RATE under "Percentage" but a real
+# currency AMOUNT under "Flat", so blindly summing the raw field across a
+# chain that mixes both types would add percentages to amounts and
+# produce nonsense (e.g. a 1121% "discount"). Everything else on a line
+# (passenger info, sector/flight details, FOP, discount/commission TYPE
+# and RATE, office/supplier) is a point-in-time choice, not a running
+# total - the LATEST item in the chain's own value is used as-is, never
+# summed.
+PARENT_CHAIN_PASSTHROUGH_FIELDS = [
+    "airline_code", "airline_name", "airline_category", "flight_no", "ticket_no", "passenger_name", "pax_type",
+    "sector", "travel_date", "cabin", "travel_class", "fare_type", "status",
+    "disc_on", "pg_charges_percentage", "gst_pct",
+    "office_id", "fop", "card_number",
+    "supp_comm_on", "supp_gst_pct",
+]
+
+
+def _resolve_parent_chain_line(original_ticket_line, based_on_reschedule_line):
+    """
+    "Parent PNR Details" for a reschedule that is itself chained off a
+    PREVIOUS reschedule must show the CUMULATIVE fare totals across the
+    whole chain (original booking + every reschedule in between), not
+    just the immediately-previous reschedule's own standalone figures -
+    e.g. Ref 1 Basic Fare 998 + Ref 2's own 26 = 1024 shown when creating
+    Ref 3. Walks based_on_reschedule_line backwards from the given link
+    down to the true original TicketLine, summing every fare AMOUNT
+    field (PARENT_CHAIN_SUM_FIELDS) across every level, while every
+    other field (passenger info, discount/commission type+rate, FOP,
+    etc. - PARENT_CHAIN_PASSTHROUGH_FIELDS) is taken from whichever item
+    is most recent in the chain, since those are a fresh choice each
+    reschedule rather than something that accumulates.
+
+    based_on_reschedule_line=None means this is a reschedule of the
+    original ticket directly (no chaining) - the original line's own
+    values are returned unchanged.
+
+    Returns a plain dict shaped like TICKET_LINE_FIELDS/RESCHED_LINE_FIELDS
+    (plus total_billed=0, recomputed client-side from the summed inputs),
+    never an ORM object, since this is a frozen display-only snapshot -
+    not something ever saved back to the database.
+    """
+    chain = []
+    node = based_on_reschedule_line
+    while node is not None:
+        chain.append(node)
+        node = node.based_on_reschedule_line
+    chain.reverse()  # oldest reschedule first, most recent last
+
+    latest = chain[-1] if chain else original_ticket_line
+
+    result = {}
+    for f in PARENT_CHAIN_SUM_FIELDS:
+        total = float(getattr(original_ticket_line, f, 0) or 0)
+        for node in chain:
+            total += float(getattr(node, f, 0) or 0)
+        result[f] = total
+
+    if chain:
+        # Chained - the running Discount/Commission AMOUNT across every
+        # level is the SUM of each level's own ALREADY-COMPUTED amount
+        # (computed_discount/computed_supp_commission - these honor that
+        # level's own Flat/Percentage type and base, so this is a real
+        # cumulative currency total, e.g. Ref 1's 50 + Ref 2's 25 = 75).
+        # Always shown as "Flat" here regardless of what type any
+        # individual level actually used - there is no single rate that
+        # reproduces this total via the frontend's own Amount = f(type,
+        # value) formula, and showing it as "Percentage" would have the
+        # frontend multiply this already-final amount by a rate AGAIN,
+        # producing nonsense (e.g. a 1121% "discount").
+        result["disc_value"] = round(
+            float(original_ticket_line.computed_discount) + sum(float(n.computed_discount) for n in chain), 2
+        )
+        result["disc_type"] = "Flat"
+        result["supp_comm_value"] = round(
+            float(original_ticket_line.computed_supp_commission) + sum(float(n.computed_supp_commission) for n in chain), 2
+        )
+        result["supp_comm_type"] = "Flat"
+        # True cumulative TDS is the SUM of each level's own computed_tds
+        # (its own amount x its own rate) - e.g. Booking's own TDS 22.38 +
+        # 1st Reschedule's own TDS 0.31 = 22.69. No single TDS % actually
+        # produced that chain, so rather than show a meaningless "blended"
+        # rate (confusing on its own), TDS % is shown as 0 and the real
+        # summed amount is sent explicitly as tds_amount/supp_tds_amount -
+        # the frontend overrides its live-derived display with these for
+        # the frozen Parent tab only (see applyRescheduleTab).
+        result["tds_per"] = 0.0
+        result["tds_amount"] = round(
+            float(original_ticket_line.computed_tds) + sum(float(n.computed_tds) for n in chain), 2
+        )
+        result["supp_tds_per"] = 0.0
+        result["supp_tds_amount"] = round(
+            float(original_ticket_line.computed_supp_tds) + sum(float(n.computed_supp_tds) for n in chain), 2
+        )
+    else:
+        # No chaining - nothing to aggregate, so the original line's own
+        # type/value/rate is shown exactly as entered (a legitimate
+        # Percentage discount, or its real TDS %, same as before this fix).
+        # tds_amount/supp_tds_amount are left unset (None) - the frontend's
+        # normal live Amount x Rate derivation is already correct here.
+        result["disc_value"] = float(original_ticket_line.disc_value)
+        result["disc_type"] = original_ticket_line.disc_type
+        result["supp_comm_value"] = float(original_ticket_line.supp_comm_value)
+        result["supp_comm_type"] = original_ticket_line.supp_comm_type
+        result["tds_per"] = float(original_ticket_line.tds_per)
+        result["supp_tds_per"] = float(original_ticket_line.supp_tds_per)
+        result["tds_amount"] = None
+        result["supp_tds_amount"] = None
+
+    passthrough_numeric = {
+        "pg_charges_percentage", "gst_pct", "supp_gst_pct",
+    }
+    for f in PARENT_CHAIN_PASSTHROUGH_FIELDS:
+        value = getattr(latest, f, None)
+        result[f] = (float(value) if value is not None else None) if f in passthrough_numeric else value
+    result["supplier_name"] = latest.supplier.name if getattr(latest, "supplier_id", None) else None
+    result["total_billed"] = 0
+    return result
+
+
+def reschedule_parent_chain_line(request):
+    """
+    GET /api/reschedule-tickets/parent-chain-line/?company_id=1&original_ticket_line_id=5&based_on_reschedule_line_id=9
+    Returns the cumulative "Parent PNR Details" line (see
+    _resolve_parent_chain_line) for a given chain position. Used by
+    ticket-entry.html both when creating a brand-new reschedule
+    (original_ticket_line_id=the eligible line being rescheduled,
+    based_on_reschedule_line_id=the immediate parent reschedule's own
+    line if chaining, omitted otherwise) and when viewing/editing an
+    already-saved reschedule (same two ids, read back from that
+    reschedule's own stored original_ticket_line_id/reschedule_line_id).
+    """
+    if request.method != "GET":
+        return HttpResponseNotAllowed(["GET"])
+
+    company_id = request.GET.get("company_id")
+    original_ticket_line_id = request.GET.get("original_ticket_line_id")
+    based_on_reschedule_line_id = request.GET.get("based_on_reschedule_line_id")
+    if not company_id or not original_ticket_line_id:
+        return JsonResponse({"error": "company_id and original_ticket_line_id are required"}, status=400)
+
+    try:
+        original_line = TicketLine.objects.select_related("supplier", "ticket").get(
+            id=original_ticket_line_id, ticket__company_id=company_id
+        )
+    except TicketLine.DoesNotExist:
+        return JsonResponse({"error": "Original ticket line not found."}, status=404)
+
+    based_on = None
+    if based_on_reschedule_line_id:
+        try:
+            based_on = RescheduleAirlineTicketLine.objects.select_related("supplier", "reschedule_ticket").get(
+                id=based_on_reschedule_line_id, reschedule_ticket__company_id=company_id
+            )
+        except RescheduleAirlineTicketLine.DoesNotExist:
+            return JsonResponse({"error": "Parent reschedule line not found."}, status=404)
+
+    result = _resolve_parent_chain_line(original_line, based_on)
+
+    # One entry per ancestor level, each showing THAT level's own
+    # standalone data (not summed) - sits alongside the cumulative total
+    # above, for a separate "one tab per ancestor PNR" view. Ordered
+    # nearest-ancestor-first (Tab 1 = the immediate parent, last = the
+    # true original), reusing _resolve_parent_chain_line itself for each
+    # level (based_on_reschedule_line=None there means "just this one
+    # line's own data, nothing to aggregate" - works for either a
+    # TicketLine or a RescheduleAirlineTicketLine, both expose the same
+    # computed_discount/computed_supp_commission/etc properties this
+    # relies on).
+    chain_levels = []
+    node = based_on
+    while node is not None:
+        chain_levels.append({
+            "pnr": node.reschedule_ticket.booking_reference,
+            **_resolve_parent_chain_line(node, None),
+        })
+        node = node.based_on_reschedule_line
+    chain_levels.append({
+        "pnr": original_line.ticket.booking_reference,
+        **_resolve_parent_chain_line(original_line, None),
+    })
+    result["chain_levels"] = chain_levels
+
+    return JsonResponse(result)
+
+
 def reschedule_ticket_detail(request, reschedule_ticket_id):
     """
     GET /api/reschedule-tickets/<id>/?company_id=1
@@ -2708,6 +3655,14 @@ def reschedule_ticket_detail(request, reschedule_ticket_id):
 
     lines = [{
         "id": l.id, "original_ticket_line_id": l.original_ticket_line_id,
+        # Set only when this reschedule was itself chained off a PREVIOUS
+        # reschedule - re-sent as the same key reschedule_ticket_create/
+        # update expect, so re-saving a chained reschedule never loses its
+        # chain link.
+        "reschedule_line_id": l.based_on_reschedule_line_id,
+        # Stored, not dynamically re-derived - whatever Parent PNR was
+        # actually used when THIS reschedule was created, permanently.
+        "parent_pnr": l.parent_pnr,
         "airline_code": l.airline_code, "airline_name": l.airline_name, "airline_category": l.airline_category,
         "flight_no": l.flight_no,
         "ticket_no": l.ticket_no, "passenger_name": l.passenger_name, "pax_type": l.pax_type,
@@ -3220,12 +4175,24 @@ def voucher_type_next_number(request):
     period = vt.an_restart_period if vt.allow_additional_numbering else "None"
 
     candidates = Ticket.objects.filter(company_id=company_id, invoice_type=name)
+    # A Reschedule ticket is still invoiced under the SAME Invoice Type
+    # (Sales Invoice etc) as a plain booking, so it must share one
+    # continuous numbering sequence with Ticket - not its own separate
+    # one. Without this, a reschedule invoice number was never counted
+    # here, so the next plain booking after it could suggest an already-
+    # used number again (collision) instead of continuing past it.
+    resched_candidates = RescheduleAirlineTicket.objects.filter(company_id=company_id, invoice_type=name)
     if vt.allow_additional_numbering and vt.an_restart_applicable_from:
         candidates = candidates.filter(invoice_date__gte=vt.an_restart_applicable_from)
+        resched_candidates = resched_candidates.filter(invoice_date__gte=vt.an_restart_applicable_from)
     candidates = candidates.filter(**_period_bucket_filter("invoice_date", voucher_date, period))
+    resched_candidates = resched_candidates.filter(**_period_bucket_filter("invoice_date", voucher_date, period))
+
+    all_invoice_numbers = list(candidates.values_list("invoice_number", flat=True)) + \
+        list(resched_candidates.values_list("invoice_number", flat=True))
 
     max_seq = None
-    for inv_no in candidates.values_list("invoice_number", flat=True):
+    for inv_no in all_invoice_numbers:
         s = inv_no or ""
         if prefix and s.startswith(prefix):
             s = s[len(prefix):]

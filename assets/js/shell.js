@@ -639,14 +639,6 @@
         });
       }
 
-      // Financial Year label (Apr-Mar accounting year) - current year only,
-      // no switching.
-      const fyLabel = document.getElementById("fy-label");
-      if (fyLabel) {
-        const today = new Date();
-        const currentFyStart = today.getMonth() >= 3 ? today.getFullYear() : today.getFullYear() - 1;
-        fyLabel.textContent = `FY ${currentFyStart}-${String(currentFyStart + 1).slice(-2)}`;
-      }
     }
 
     // Build the horizontal dropdown menu bar - created fresh each load, no
@@ -700,15 +692,41 @@
     const flagBtn = document.getElementById("flag-current-btn");
     const flagIcon = document.getElementById("flag-current-icon");
     const flagDropdown = document.getElementById("flag-dropdown");
+    // Real per-company Country (from Company Master) drives the flag and
+    // Financial Year convention - "India" (or blank) is Apr-Mar, anything
+    // else (UAE, etc.) is Jan-Dec, matched loosely so "UAE"/"U.A.E"/
+    // "United Arab Emirates" all resolve the same way.
+    function countryCodeFromText(text) {
+      const t = (text || "").trim().toLowerCase();
+      return (!t || t === "india" || t === "in" || t === "bharat") ? "IN" : "AE";
+    }
+    function fyLabelForCountry(countryCode) {
+      const today = new Date();
+      if (countryCode !== "IN") return `FY ${today.getFullYear()}`;
+      const fyStart = today.getMonth() >= 3 ? today.getFullYear() : today.getFullYear() - 1;
+      return `FY ${fyStart}-${String(fyStart + 1).slice(-2)}`;
+    }
     if (select) {
+      // Wraps the WHOLE block, not just the fetch - this used to be a
+      // plain mock-data read that could never fail; now it's a real
+      // network call plus a bunch of DOM wiring, and ANY exception in
+      // here escaping uncaught would reject the whole init() promise,
+      // leaving every page's own "Could not load the active company"
+      // fallback alert firing even though the rest of init() (menubar,
+      // theme, etc.) already succeeded. Falls through to a safe default
+      // company further below no matter what goes wrong here.
+      try {
       if (!select.dataset.loaded) {
-        const COUNTRY_CODE = { India: "IN", "United Arab Emirates": "AE" };
-        const rawCompanies = await get("/company-master/");
-        const companies = rawCompanies.map((c) => ({
-          id: c.id,
-          name: c.name || c.company_name,
-          country_code: c.country_code || COUNTRY_CODE[c.country] || "IN",
-        }));
+        // Real companies (Company Master), so the flag/FY reflect whatever
+        // Country is actually set there. Uses the shared get() (long timeout)
+        // rather than a 2.5s fetch - live API calls can take a few seconds.
+        let companies = [];
+        try {
+          const rows = await get("/company-master/");
+          companies = (rows || []).map((c) => ({ id: c.id, name: c.company_name || c.name, country_code: countryCodeFromText(c.country) }));
+        } catch (_) { companies = []; }
+        if (!companies.length) companies = [{ id: 1, name: "Travel Agency", country_code: "IN" }];
+
         select.innerHTML = companies.map((c) =>
           `<option value="${c.id}" data-country="${c.country_code}">${c.name} (${c.country_code})</option>`).join("");
         const savedId = Store.getCompanyId();
@@ -724,6 +742,11 @@
           flagDropdown.querySelectorAll(".flag-dropdown-item").forEach((item) => {
             item.classList.toggle("active", item.dataset.value === select.value);
           });
+          // Looked up fresh rather than captured in an outer closure - the
+          // topnav markup that creates #fy-label is only (re)built further
+          // up, in a separate block that doesn't share scope with this one.
+          const fyLabelEl = document.getElementById("fy-label");
+          if (fyLabelEl) fyLabelEl.textContent = fyLabelForCountry(activeCountry);
         };
 
         flagDropdown.innerHTML = companies.map((c) => `
@@ -761,6 +784,14 @@
         });
 
         syncFlagUI();
+      }
+      } catch (err) {
+        console.error("Company/flag selector setup failed - falling back to the default company", err);
+        if (!select.dataset.loaded) {
+          select.innerHTML = `<option value="1" data-country="IN">Travel Agency (IN)</option>`;
+          Store.setCompanyId("1");
+          select.dataset.loaded = "1";
+        }
       }
     }
 

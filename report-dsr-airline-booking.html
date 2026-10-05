@@ -136,6 +136,7 @@
   <div class="app-body">
     <main class="app-main dsr-main" style="max-width: 1440px; margin: 0 auto;">
       <div class="page-header-row">
+        <div style="font-weight:700; font-size:0.78rem; color:var(--color-text-dark);">DSR</div>
         <div class="dsr-toolbar">
           <span class="dsr-toolbar-label">From</span>
           <input type="date" class="form-control-custom dsr-toolbar-date" id="filter-from" />
@@ -147,6 +148,10 @@
           </button>
           <button type="button" class="dom-nav-btn btn-primary" onclick="applyFiltersAndRender()">Apply</button>
           <span style="margin-left:auto;"></span>
+          <!-- Moved here from the grid's own toolbar (table-toolbar), right
+               before Print, per request - search still targets the same
+               table via filterTable(), only its position changed. -->
+          <input type="text" class="form-control-custom table-search" id="dsr-search-input" placeholder="Search records..." oninput="filterTable(this.value)" style="height:26px; width:200px;" />
           <button type="button" class="dom-nav-btn" onclick="window.print()">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9V2h12v7M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2m-12 0v4h12v-4"/></svg>
             Print
@@ -182,6 +187,12 @@
                 <option value="Domestic">Domestic</option>
                 <option value="International">International</option>
               </select>
+              <select class="form-control-custom dsr-toolbar-select" id="filter-status" onchange="updateClearFiltersState()">
+                <option value="">All Status</option>
+                <option value="Confirmed">Confirmed</option>
+                <option value="Re-Scheduled">Reschedule</option>
+                <option value="Cancelled">Cancellation</option>
+              </select>
             </span>
             <div class="chip-picker dsr-inline-picker" id="customer-picker">
               <div class="chip-picker-input-wrap">
@@ -206,10 +217,6 @@
       </div>
 
       <div class="table-container">
-        <div class="table-toolbar">
-          <div style="font-weight:700; font-size:0.78rem; color:var(--color-text-dark);">DSR</div>
-          <input type="text" class="form-control-custom table-search" placeholder="Search records..." oninput="filterTable(this.value)" />
-        </div>
         <div class="table-scroll">
           <table class="table-custom" id="main-data-table">
             <thead>
@@ -285,13 +292,19 @@
       loadReport();
     })();
 
-    // Double-click a row to open that ticket in ticket-entry.html, read-only
-    // (view mode) - passing ?id=<ticket id> is all it takes; ticket-entry.js
-    // loads that ticket and renders it via enterViewMode() automatically.
+    // Double-click a row to open that ticket in ticket-entry.html - a
+    // normal ticket opens read-only (view mode) via ?id=<ticket id>; a
+    // Reschedule ticket (no real Ticket behind it) opens via
+    // ?reschedule_saved_id=<reschedule ticket id> instead.
+    function navigateToTicket(row) {
+      window.location.href = row.dataset.rescheduleId
+        ? `ticket-entry.html?reschedule_saved_id=${row.dataset.rescheduleId}`
+        : `ticket-entry.html?id=${row.dataset.id}`;
+    }
     document.getElementById("main-data-tbody").addEventListener("dblclick", (e) => {
       const row = e.target.closest(".dsr-data-row");
       if (!row) return;
-      window.location.href = `ticket-entry.html?id=${row.dataset.id}`;
+      navigateToTicket(row);
     });
 
     // ============================================================
@@ -337,7 +350,7 @@
         selectRow(selectedRowIndex > 0 ? selectedRowIndex - 1 : rows.length - 1);
       } else if (e.key === "Enter" && selectedRowIndex >= 0) {
         e.preventDefault();
-        window.location.href = `ticket-entry.html?id=${rows[selectedRowIndex].dataset.id}`;
+        navigateToTicket(rows[selectedRowIndex]);
       }
     });
 
@@ -347,6 +360,7 @@
     // and tickets.html already use).
     // ============================================================
     const TICKETS_API = `${window.API_BASE || "/api"}/tickets/`;
+    const RESCHEDULE_TICKETS_API = `${window.API_BASE || "/api"}/reschedule-tickets/list/`;
     let allRows = [];
 
     function fmtAmt(n) {
@@ -372,15 +386,21 @@
     function groupRowsByTicket(rows) {
       const byTicket = new Map();
       rows.forEach((r) => {
-        let g = byTicket.get(r.ticket_id);
+        // Reschedule rows all carry ticket_id: null (no real Ticket behind
+        // them) - grouping by that alone would collapse every Reschedule
+        // booking into one single row, so the key also folds in
+        // reschedule_ticket_id for those.
+        const groupKey = r.ticket_id != null ? `t${r.ticket_id}` : `r${r.reschedule_ticket_id}`;
+        let g = byTicket.get(groupKey);
         if (!g) {
           g = {
-            ticket_id: r.ticket_id, invoice_date: r.invoice_date, invoice_number: r.invoice_number,
+            ticket_id: r.ticket_id, reschedule_ticket_id: r.reschedule_ticket_id,
+            invoice_date: r.invoice_date, invoice_number: r.invoice_number,
             customer_name: r.customer_name, booking_reference: r.booking_reference, airline_pnr: r.airline_pnr,
             lead_passenger_name: r.passenger_name, airline_names: [], supplier_names: [], sectors: [],
             basic_fare: 0, other_tax: 0, net_amount: 0,
           };
-          byTicket.set(r.ticket_id, g);
+          byTicket.set(groupKey, g);
         }
         const airline = r.airline_name || r.airline_code;
         if (airline && !g.airline_names.includes(airline)) g.airline_names.push(airline);
@@ -428,7 +448,7 @@
         return;
       }
       tbody.innerHTML = tickets.map((t) => `
-        <tr class="dsr-data-row" data-id="${t.ticket_id}" title="Double-click to view this ticket">
+        <tr class="dsr-data-row" data-id="${t.ticket_id || ""}" data-reschedule-id="${t.reschedule_ticket_id || ""}" title="Double-click to view this ticket">
           <td>${t.invoice_date || "-"}</td>
           <td>${t.invoice_number || "-"}</td>
           <td class="truncate-cell" title="${escAttr(t.customer_name || "-")}">${t.customer_name || "-"}</td>
@@ -466,6 +486,7 @@
       const product = document.getElementById("filter-product").value;
       const category = document.getElementById("filter-airline-category").value;
       const travelType = document.getElementById("filter-travel-type").value;
+      const status = document.getElementById("filter-status").value;
       const pickedCustomers = customerPicker.getSelected();
       const pickedSuppliers = supplierPicker.getSelected();
 
@@ -483,6 +504,7 @@
         if (pickedSuppliers.length && !pickedSuppliers.includes(r.supplier_name)) return false;
         if (category && r.airline_category !== category) return false;
         if (travelType && r.travel_type !== travelType) return false;
+        if (status && r.booking_status !== status) return false;
         return true;
       });
       renderTable(rows);
@@ -491,10 +513,19 @@
     async function loadReport() {
       const tbody = document.getElementById("main-data-tbody");
       try {
-        const res = await fetch(`${TICKETS_API}?company_id=${activeCompanyId}`);
+        const [res, rescheduleRes] = await Promise.all([
+          fetch(`${TICKETS_API}?company_id=${activeCompanyId}`),
+          fetch(`${RESCHEDULE_TICKETS_API}?company_id=${activeCompanyId}`),
+        ]);
         if (!res.ok) throw new Error(`Server returned ${res.status}`);
         const data = await res.json();
-        allRows = data.map((l) => ({ ...l, pnr: l.airline_pnr || l.gds_pnr || l.booking_reference }));
+        // Reschedule bookings are a completely separate table from normal
+        // Tickets - merged in here so they show up in DSR the same way a
+        // normal booking does, instead of being invisible to this report.
+        // Failure to load them isn't fatal to the whole report (same
+        // tolerant convention as the rest of this try block).
+        const rescheduleData = rescheduleRes.ok ? await rescheduleRes.json() : [];
+        allRows = [...data, ...rescheduleData].map((l) => ({ ...l, pnr: l.airline_pnr || l.gds_pnr || l.booking_reference }));
       } catch (err) {
         console.error("Could not load tickets for the DSR report - is the Django backend running?", err);
         allRows = [];
@@ -618,6 +649,7 @@
       const anyActive = document.getElementById("filter-product").value !== "Airline"
         || document.getElementById("filter-airline-category").value
         || document.getElementById("filter-travel-type").value
+        || document.getElementById("filter-status").value
         || customerPicker.getSelected().length
         || supplierPicker.getSelected().length;
       btn.disabled = !anyActive;
@@ -626,6 +658,7 @@
       document.getElementById("filter-product").value = "Airline";
       document.getElementById("filter-airline-category").value = "";
       document.getElementById("filter-travel-type").value = "";
+      document.getElementById("filter-status").value = "";
       customerPicker.clear();
       supplierPicker.clear();
       toggleAirlineOnlyFilters();

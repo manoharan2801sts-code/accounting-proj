@@ -113,7 +113,7 @@
              into ticket-entry.html pre-filled with it (both its own data
              and the original's Parent PNR Details) - no picker needed,
              since a saved reschedule already has exactly one passenger. -->
-        <div class="filter-group" style="flex-direction:row; align-items:center; gap:1rem; padding-bottom:6px;">
+        <div class="filter-group" style="flex-direction:column; align-items:flex-start; gap:0.4rem; padding-bottom:6px;">
           <label style="display:flex; align-items:center; gap:0.35rem; font-weight:600; color:var(--color-text-dark); cursor:pointer;">
             <input type="radio" name="rs-lookup-mode" id="rs-mode-new" value="new" checked /> New
           </label>
@@ -173,7 +173,7 @@
 
   <script src="assets/js/api.js"></script>
   <script src="assets/js/hardcode.js"></script>
-  <script src="assets/js/shell.js"></script>
+  <script src="assets/js/shell.js?v=10"></script>
   <script>
     // Not gated on DOMContentLoaded - this page's <script> can be injected
     // by the app's SPA navigation (shell.js's navigateTo) into a document
@@ -208,6 +208,11 @@
     let lookupPassengers = [];
     let lookupMatchedLineId = null;
     let lookupTicketId = null;
+    // Set only when the lookup matched a PREVIOUS reschedule rather than
+    // the original ticket (chaining - rescheduling an already-rescheduled
+    // ticket again) - carried through to ticket-entry.html so it can
+    // build "Parent PNR Details" from that reschedule's own data.
+    let lookupSourceRescheduleId = null;
 
     async function lookupTicketForReschedule() {
       // Falls back to reading the topnav's own company switcher directly
@@ -238,6 +243,7 @@
         if (!res.ok) throw new Error(data.error || "Ticket not found.");
         lookupTicketId = data.ticket_id || null;
         lookupMatchedLineId = data.matched_line_id || null;
+        lookupSourceRescheduleId = data.source_reschedule_ticket_id || null;
         // A Ticket No search identifies exactly ONE passenger, not the
         // whole booking - only show that one, not every passenger on
         // the same ticket (S PNR/Airline PNR searches have no single
@@ -350,11 +356,27 @@
       const checkedPax = Array.from(document.querySelectorAll(".rs-pax-check:checked"))
         .map((cb) => lookupPassengers[Number(cb.dataset.idx)]);
       if (!lookupTicketId || !checkedPax.length) return;
-      // Reschedule always produces one new ticket for one passenger - if
-      // more than one pax got checked, the first one picked is who this
-      // screen carries forward.
-      const lineId = checkedPax[0].line_id;
-      window.location.href = `ticket-entry.html?reschedule_ticket_id=${lookupTicketId}&reschedule_line_id=${lineId}`;
+      // One new reschedule ticket, carrying EVERY checked passenger -
+      // passed via sessionStorage (not the URL) as a small JSON array of
+      // {line_id, reschedule_line_id} pairs, one per checked passenger,
+      // since there can be more than one. ticket-entry.html reads this on
+      // load and falls back to the single-passenger URL params below if
+      // it's ever missing (e.g. a stale bookmark).
+      sessionStorage.setItem("reschedule_picked_lines", JSON.stringify(
+        checkedPax.map((p) => ({ line_id: p.line_id, reschedule_line_id: p.reschedule_line_id || null }))
+      ));
+      let url = `ticket-entry.html?reschedule_ticket_id=${lookupTicketId}&reschedule_line_id=${checkedPax[0].line_id}`;
+      // Chaining - these passengers were found via a PREVIOUS reschedule,
+      // not the original ticket, so ticket-entry.html needs which
+      // reschedule to build "Parent PNR Details" from. This is ticket-
+      // level (the same source reschedule for every passenger checked
+      // from one lookup result) - each passenger's own chain line id
+      // travels in the sessionStorage array above instead.
+      if (lookupSourceRescheduleId) {
+        url += `&parent_reschedule_id=${lookupSourceRescheduleId}`;
+        if (checkedPax[0].reschedule_line_id) url += `&parent_reschedule_line_id=${checkedPax[0].reschedule_line_id}`;
+      }
+      window.location.href = url;
     });
 
     })();

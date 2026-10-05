@@ -47,7 +47,7 @@
         icon: "M2 16l20-8-8 20-2-8-8-2z",
         children: [
           { key: "tickets", label: "Booking", href: "ticket-entry.html" },
-          { key: "trans-airline-reschedule", label: "Reschedule", href: "trans-airline-reschedule.html" },
+          { key: "trans-airline-reschedule", label: "Reschedule", href: "ticket-entry.html?reschedule_new=1" },
           { key: "trans-airline-cancellation", label: "Cancellation", href: "trans-airline-cancellation.html" },
           { key: "trans-airline-ssr", label: "SSR Updation", href: "trans-airline-ssr.html" },
         ]
