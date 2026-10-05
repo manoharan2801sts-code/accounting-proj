@@ -53,8 +53,24 @@ class IfNeeded(Operation):
     def database_forwards(self, app_label, schema_editor, from_state, to_state):
         # RemoveField's model no longer has the field in to_state, so check it against from_state's table instead.
         check_state = from_state if isinstance(self.inner, migrations.RemoveField) else to_state
-        if not self._applied(app_label, schema_editor, check_state):
+        if self._applied(app_label, schema_editor, check_state):
+            return
+        if not isinstance(self.inner, migrations.AddField) or not self.inner.field.remote_field:
             self.inner.database_forwards(app_label, schema_editor, from_state, to_state)
+            return
+        # TiDB rejects Django's MySQL "ADD COLUMN x ..., ADD CONSTRAINT ...
+        # FOREIGN KEY (x)" in one ALTER (1072 "Key column 'x' doesn't exist"),
+        # so add the column first and the FK as its own ALTER right after.
+        schema_editor.sql_create_column_inline_fk = None
+        queued = len(schema_editor.deferred_sql)
+        try:
+            self.inner.database_forwards(app_label, schema_editor, from_state, to_state)
+        finally:
+            del schema_editor.sql_create_column_inline_fk
+        fk_sql = schema_editor.deferred_sql[queued:]
+        del schema_editor.deferred_sql[queued:]
+        for sql in fk_sql:
+            schema_editor.execute(sql)
 
     def database_backwards(self, app_label, schema_editor, from_state, to_state):
         check_state = to_state if isinstance(self.inner, migrations.RemoveField) else from_state
