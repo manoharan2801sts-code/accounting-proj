@@ -115,6 +115,12 @@
             var titleEl = document.getElementById("page-title");
             if (titleEl) titleEl.textContent = "Reschedule";
           }
+          // Cancellation's own blank shell - same reasoning as Reschedule's
+          // own guard just above.
+          if (params.get("cancellation_new") === "1") {
+            var titleEl2 = document.getElementById("page-title");
+            if (titleEl2) titleEl2.textContent = "Cancellation";
+          }
         })();
       </script>
       <!-- 1. Window Title Bar (Our Project Title) -->
@@ -342,6 +348,10 @@
              replaces the old separate trans-airline-reschedule.html
              search page. -->
         <button type="button" class="dom-nav-btn btn-primary" id="reschedule-new-btn" style="display:none; font-weight:700;" title="Find the ticket/passenger to reschedule">New</button>
+        <!-- Cancellation's own blank "awaiting a pick" shell (see
+             enterBlankCancellationShell) - UI only for now, no real
+             lookup wired yet. -->
+        <button type="button" class="dom-nav-btn btn-primary" id="cancellation-new-btn" style="display:none; font-weight:700;" title="Find the ticket/passenger to cancel">New</button>
         <button type="button" class="dom-nav-btn" id="find-btn" title="Find an existing ticket">Find</button>
         <button type="submit" form="ticket-form" class="dom-nav-btn btn-primary" id="submit-btn" style="font-weight:700;">Save Ticket</button>
         <a href="ticket-entry.html" class="dom-nav-btn" id="cancel-link">Discard</a>
@@ -402,11 +412,11 @@
             <button type="button" class="dom-chip-add-btn" id="modal-sector-add-btn" title="Add another sector">+</button>
           </div>
 
-          <label>Office ID</label>
+          <label>Office ID<span class="dom-req">*</span></label>
           <input class="dom-input" id="modal-office-id" list="modal-office-id-options" placeholder="Type to search…" autocomplete="off" />
           <datalist id="modal-office-id-options"></datalist>
 
-          <label>Supplier</label>
+          <label>Supplier<span class="dom-req">*</span></label>
           <input class="dom-input" id="modal-supplier" placeholder="Auto-filled from Office ID" readonly />
 
           <label>FOP</label>
@@ -468,7 +478,9 @@
             <!-- Reschedule mode ONLY (both Parent and Reschedule PNR
                  Details tabs) - hidden only for a normal, non-reschedule
                  ticket (which never has this column) - shown/hidden in
-                 applyRescheduleTab(). -->
+                 applyRescheduleTab(). Also shown in Cancellation mode
+                 (see openFareModal) - both modes reference a line that
+                 can carry its own Supplier Penalty. -->
             <div class="fare-item" id="modal-fare-supplier-penalty-field" style="display:none;">
               <label>Supplier Penalty</label>
               <input class="dom-input modal-calc dom-amount" type="text" inputmode="decimal" id="modal-fare-supplier-penalty" min="0" step="0.01" value="0.00" />
@@ -711,7 +723,13 @@
                     <span class="acct-pct-box"><span id="resched-supp-gst-pct-slot"></span><span class="acct-pct-suffix">%</span></span>
                     <span id="resched-supp-gst-amt-slot" style="flex:1; min-width:0;"></span>
                   </span>
-                  <label style="white-space:normal; line-height:1.1; font-size:10px;">Reschedule Penalty</label>
+                  <!-- Label text + underlying field swap to Cancellation
+                       Penalty in Cancellation mode (see openFareModal/
+                       writeModalPassenger/readModalPassenger) - same one
+                       input either way, reschedule/cancellation modes
+                       are mutually exclusive so it's never ambiguous
+                       which it means. -->
+                  <label id="modal-reschedule-penalty-label" style="white-space:normal; line-height:1.1; font-size:10px;">Reschedule Penalty</label>
                   <input class="dom-input modal-calc dom-acct-input-sm dom-max10 dom-amount" type="text" inputmode="decimal" id="modal-reschedule-penalty" min="0" max="9999999999" step="0.01" value="0.00" />
                 </div>
                 <!-- Merging Commission Amount + TDS Amount onto one row
@@ -1133,11 +1151,86 @@
   </div>
 </div>
 
+<!-- Cancellation "New" Lookup Modal - same pattern as the Reschedule
+     lookup modal above, opened via the "New" button shown only on
+     Cancellation's own blank "awaiting a pick" shell (see
+     enterBlankCancellationShell/openCancellationLookupModal in
+     page-ticket-entry.js). Finds the real ticket to cancel by S PNR /
+     Airline PNR / Ticket No, via its own lookup-for-cancellation
+     endpoint (no reschedule-eligibility filtering - irrelevant here). -->
+<div class="dom-modal-backdrop spa-extra-content" id="cancellation-lookup-modal">
+  <div class="dom-modal-window" style="max-width: 900px; width: 95%; max-height: 90vh;">
+    <div class="dom-modal-titlebar">
+      <div>Find Ticket to Cancel</div>
+      <button type="button" class="dom-titlebar-btn btn-close" id="cx-lookup-close-x-btn" title="Close">&times;</button>
+    </div>
+    <div class="dom-modal-body dom-modal-body-scroll" style="display:block; padding:12px; max-height:76vh;">
+      <div style="display:flex; align-items:flex-end; gap:1rem; flex-wrap:wrap; margin-bottom:12px;">
+        <div style="display:flex; flex-direction:column; gap:2px; font-size:11px;">
+          <label style="font-weight:600; color:#334155;">S PNR</label>
+          <input class="dom-input" type="text" id="cx-search-spnr" placeholder="Booking Reference" autocomplete="off" />
+        </div>
+        <div style="display:flex; flex-direction:column; gap:2px; font-size:11px;">
+          <label style="font-weight:600; color:#334155;">Airline PNR</label>
+          <input class="dom-input" type="text" id="cx-search-airline-pnr" placeholder="Airline PNR" autocomplete="off" />
+        </div>
+        <div style="display:flex; flex-direction:column; gap:2px; font-size:11px;">
+          <label style="font-weight:600; color:#334155;">Ticket No</label>
+          <input class="dom-input" type="text" id="cx-search-ticket-no" placeholder="Ticket No" autocomplete="off" />
+        </div>
+        <button type="button" class="dom-nav-btn btn-primary" id="cx-get-btn" style="font-weight:700;">Get</button>
+      </div>
+
+      <div id="cx-selection-row" style="display:none; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
+        <div style="border:1px solid var(--color-border, #CBD5E1); border-radius:3px; overflow:hidden; display:flex; flex-direction:column; max-height:320px;">
+          <div style="padding:8px 10px; font-weight:700; font-size:12px; background:#FAFBFD; border-bottom:1px solid var(--color-border, #CBD5E1);">Passengers</div>
+          <div style="overflow-y:auto; flex:1; min-height:0;">
+            <table style="width:100%; border-collapse:collapse; font-size:11.5px;">
+              <thead>
+                <tr style="background:#3B6DB5; color:#FFFFFF; font-weight:700; text-align:left; height:26px;">
+                  <th style="width:30px; position:sticky; top:0; background:#3B6DB5;"></th>
+                  <th style="padding:4px 8px; position:sticky; top:0; background:#3B6DB5;">Pax Type</th>
+                  <th style="padding:4px 8px; position:sticky; top:0; background:#3B6DB5;">Pax Name</th>
+                </tr>
+              </thead>
+              <tbody id="cx-pax-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+        <div style="border:1px solid var(--color-border, #CBD5E1); border-radius:3px; overflow:hidden; display:flex; flex-direction:column; max-height:320px;">
+          <div style="padding:8px 10px; font-weight:700; font-size:12px; background:#FAFBFD; border-bottom:1px solid var(--color-border, #CBD5E1);">Sectors</div>
+          <div style="overflow-y:auto; flex:1; min-height:0;">
+            <table style="width:100%; border-collapse:collapse; font-size:11.5px;">
+              <thead>
+                <tr style="background:#3B6DB5; color:#FFFFFF; font-weight:700; text-align:left; height:26px;">
+                  <th style="width:30px; position:sticky; top:0; background:#3B6DB5;"></th>
+                  <th style="padding:4px 8px; position:sticky; top:0; background:#3B6DB5;">Sector</th>
+                  <th style="padding:4px 8px; position:sticky; top:0; background:#3B6DB5;">Flight No</th>
+                  <th style="padding:4px 8px; position:sticky; top:0; background:#3B6DB5;">Class</th>
+                  <th style="padding:4px 8px; position:sticky; top:0; background:#3B6DB5;">Date</th>
+                </tr>
+              </thead>
+              <tbody id="cx-sector-tbody">
+                <tr><td colspan="5" style="text-align:center; padding:1rem; color:#64748B;">Select a passenger to see their sectors.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div id="cx-cancel-row" style="display:none; flex-direction:column; align-items:center; gap:6px;">
+        <button type="button" class="dom-nav-btn btn-primary" id="cx-cancel-btn" style="height:36px; padding:0 28px; font-weight:700;" disabled>Cancel Ticket</button>
+        <span style="font-size:11px; color:#64748B;">Cancel Selected Passenger(s)</span>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script src="assets/js/hardcode.js"></script>
 <script src="assets/js/mock-data.js"></script>
 <script src="assets/js/api.js"></script>
 <script src="assets/js/util.js"></script>
 <script src="assets/js/shell.js?v=10"></script>
 <script src="assets/js/entry-common.js"></script>
-<script src="assets/js/page-ticket-entry.js?v=22"></script>
+<script src="assets/js/page-ticket-entry.js?v=30"></script>
 </body></html>

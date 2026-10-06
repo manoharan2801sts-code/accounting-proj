@@ -25,7 +25,13 @@
   // "awaiting a pick" shell (see enterBlankRescheduleShell), reached
   // before any original ticket/passenger has been chosen yet.
   const rescheduleNew = params.get("reschedule_new") === "1";
-  const rescheduleActiveKey = (rescheduleTicketId || rescheduleSavedId || rescheduleNew) ? "trans-airline-reschedule" : "tickets";
+  // Cancellation's own menu item, same pattern as Reschedule above - UI
+  // shell only for now (see enterBlankCancellationShell): title +
+  // Booking Status + bottom toolbar, no real lookup/save logic wired
+  // yet.
+  const cancellationNew = params.get("cancellation_new") === "1";
+  const rescheduleActiveKey = (rescheduleTicketId || rescheduleSavedId || rescheduleNew)
+    ? "trans-airline-reschedule" : (cancellationNew ? "trans-airline-cancellation" : "tickets");
   let activeCompanyId, activeCountry, allCustomers = [], allSuppliers = [], existingTickets = [];
   let voucherTypes = []; // active Voucher Types for the active company - drives the Invoice Type dropdown + Invoice Number auto-numbering
   const VOUCHER_TYPE_API = `${API_BASE}/voucher-type/`;
@@ -37,6 +43,7 @@
   let editingIndex = null;
   let viewMode = false;
   let rescheduleMode = false; // true only for the "Reschedule" pre-filled new-ticket flow - freezes fare/accounting amounts and Booking Status, and caps the register at the one carried-over passenger
+  let cancellationMode = false; // true only for Cancellation's own blank shell (see enterBlankCancellationShell) - UI only for now, no save/lookup logic wired yet
   // Reschedule's fare modal shows two tabs covering the WHOLE modal (both
   // Passenger & Segment Details and Base Fare/Customer/Supplier):
   // "Parent PNR Details" (the original ticket line, frozen/non-editable,
@@ -715,7 +722,7 @@
     service_fee: 0, addl_service_fee: 0, ssr_service_fee: 0, gst_pct: 0, supplier_name: "", office_id: "", fop: "Cash", card_number: "",
     supp_comm_on: "", supp_comm_type: "", supp_comm_value: 0, supp_tds_per: 0,
     supp_markup: 0, supp_addl_markup: 0, supp_service_fee: 0, supp_addl_service_fee: 0, supp_gst_pct: 0,
-    agent_penalty: 0, reschedule_penalty: 0,
+    agent_penalty: 0, reschedule_penalty: 0, cancellation_penalty: 0,
   });
 
   // Money amounts only (Basic Fare, Taxes, Markup, Service Fee, GST
@@ -735,8 +742,9 @@
     // left Parent PNR Details showing its redundant "Discount %"/
     // "Commission %" label crammed into the tiny %-box meant for just a
     // number, overflowing and squeezing the real Amount/TDS/Taxable/GST
-    // boxes next to it out of view.
-    const inReschedLayout = rescheduleMode;
+    // boxes next to it out of view. Cancellation mode uses this same
+    // merged layout too (see openFareModal) - same reasoning applies.
+    const inReschedLayout = rescheduleMode || cancellationMode;
     // Discount % and Cust Discount On stay visible always now - only
     // Percentage makes them editable (Discount % is meaningless for Flat,
     // Cust Discount On is the base % is calculated against).
@@ -781,8 +789,8 @@
     // Commission Amount box, the % side has no visible label (just the
     // .acct-pct-box's "%" suffix) - same treatment as Discount's own box.
     // Both tabs share this merged layout now - see the same note in
-    // updateDiscValueLabel() above.
-    const inReschedLayout = rescheduleMode;
+    // updateDiscValueLabel() above. Cancellation mode too.
+    const inReschedLayout = rescheduleMode || cancellationMode;
     document.getElementById("modal-supp-comm-value-field").style.display = "contents";
     document.getElementById("modal-supp-comm-val-label").style.display = inReschedLayout ? "none" : "";
     document.getElementById("modal-supp-comm-value").disabled = !isPct || viewMode;
@@ -865,7 +873,13 @@
       supp_markup: num("modal-supp-markup"), supp_addl_markup: num("modal-supp-addl-markup"),
       supp_service_fee: num("modal-supp-service-fee"), supp_addl_service_fee: num("modal-supp-addl-service-fee"),
       supp_gst_pct: num("modal-supp-gst-pct"),
-      agent_penalty: num("modal-agent-penalty"), reschedule_penalty: num("modal-reschedule-penalty"),
+      agent_penalty: num("modal-agent-penalty"),
+      // Same one input, repurposed - see openFareModal's cancellationMode
+      // branch. Only one of these two is ever actually shown/meaningful
+      // at a time (the two modes are mutually exclusive), the other
+      // always reads 0 so neither gets double-counted in the Total.
+      reschedule_penalty: cancellationMode ? 0 : num("modal-reschedule-penalty"),
+      cancellation_penalty: cancellationMode ? num("modal-reschedule-penalty") : 0,
       // original_ticket_line_id/reschedule_line_id have no modal field of
       // their own - carry them forward from whatever THIS passenger
       // (passengers[editingIndex]) already had (set by
@@ -891,10 +905,11 @@
     // Taxable Amount - display-only, not used in any calculation.
     document.getElementById("modal-taxable-amount").textContent =
       fmtN(p.service_fee + p.addl_service_fee + p.ssr_service_fee);
-    // Same 3 penalties the pax table's own row Total already folds in
-    // (see renderPaxTable's lineTotal) - only ever non-zero in reschedule
-    // mode, so this is a no-op for a normal, non-reschedule ticket.
-    const penalties = (p.supplier_penalty || 0) + (p.reschedule_penalty || 0) + (p.agent_penalty || 0);
+    // Same 4 penalties the pax table's own row Total already folds in
+    // (see renderPaxTable's lineTotal) - only ever non-zero in reschedule/
+    // cancellation mode, so this is a no-op for a normal, non-reschedule/
+    // non-cancellation ticket.
+    const penalties = (p.supplier_penalty || 0) + (p.reschedule_penalty || 0) + (p.agent_penalty || 0) + (p.cancellation_penalty || 0);
     document.getElementById("modal-total-computed").textContent = fmtN(r.total + penalties);
     updatePgCharges();
     return r;
@@ -986,7 +1001,9 @@
     document.getElementById("modal-supp-addl-service-fee").value = fmtN(p.supp_addl_service_fee || 0);
     document.getElementById("modal-supp-gst-pct").value = Number(p.supp_gst_pct || 0).toFixed(2);
     document.getElementById("modal-agent-penalty").value = fmtN(p.agent_penalty || 0);
-    document.getElementById("modal-reschedule-penalty").value = fmtN(p.reschedule_penalty || 0);
+    // Same one input, repurposed for Cancellation Penalty in cancellation
+    // mode - see openFareModal/readModalPassenger.
+    document.getElementById("modal-reschedule-penalty").value = fmtN(cancellationMode ? (p.cancellation_penalty || 0) : (p.reschedule_penalty || 0));
     // Whatever's already saved counts as a deliberate choice - don't let a
     // later Client Accounting edit silently clobber it. Only a brand-new
     // (blank) passenger starts in "follow Client Accounting" mode.
@@ -1336,6 +1353,18 @@
     if (rescheduleMode) {
       renderAncestorTabs(index);
       applyRescheduleTab("reschedule");
+    } else if (cancellationMode) {
+      // No Parent/Reschedule tab bar here (cancellation has just the one
+      // view, no chain to show) - just the same merged "resched" row
+      // layout and the same penalty fields reused, since this is "like
+      // Reschedule popup" per the request. Reschedule Penalty's own
+      // label+field is repurposed as Cancellation Penalty here (see
+      // readModalPassenger/writeModalPassenger) rather than adding a
+      // separate field - the two modes are mutually exclusive, so the
+      // one slot never needs to mean both at once.
+      layoutAcctFieldsForReschedule(true);
+      document.getElementById("modal-fare-supplier-penalty-field").style.display = "";
+      document.getElementById("modal-reschedule-penalty-label").textContent = "Cancellation Penalty";
     }
     fareModal.classList.add("open");
   }
@@ -1579,6 +1608,12 @@
     const ticketNoBase = p.ticket_no.includes("-") ? p.ticket_no.slice(0, p.ticket_no.lastIndexOf("-")) : p.ticket_no;
     if (ticketNoBase.length !== 10) { voyagerAlert("Ticket No. must be exactly 10 characters (not counting any -1/-2 passenger suffix)."); return; }
     if (!p.passenger_name) { voyagerAlert("Pax Name is required."); return; }
+    // Mandatory in both New Ticket and Reschedule's own "Reschedule PNR
+    // Details" tab (this same Save & Apply handler covers both flows) -
+    // Supplier only ever gets filled via a valid Office ID lookup, so an
+    // empty Supplier here means Office ID never actually matched one.
+    if (!p.office_id) { voyagerAlert("Office ID is required."); return; }
+    if (!p.supplier_name) { voyagerAlert("Supplier is required - enter a valid Office ID."); return; }
     const dupInList = passengers.some((x, i) => x.ticket_no === p.ticket_no && i !== editingIndex);
     const dupExisting = existingTickets.some((t) => t.ticket_no === p.ticket_no && String(t.id) !== String(editId));
     if (dupInList || dupExisting) { voyagerAlert("This Ticket Number is already used."); return; }
@@ -1610,9 +1645,11 @@
     const atCap = passengers.length >= MAX_PASSENGERS;
     // Reschedule locks the register to exactly the one carried-over
     // passenger - no Remove, no adding more, so the whole Action column
-    // is pointless and hidden entirely.
+    // is pointless and hidden entirely. Cancellation's own blank shell
+    // has the same locked-register look (nothing to add/remove here
+    // either, at least for this UI-only pass).
     const actionTh = document.getElementById("pax-action-th");
-    if (actionTh) actionTh.style.display = rescheduleMode ? "none" : "";
+    if (actionTh) actionTh.style.display = (rescheduleMode || cancellationMode) ? "none" : "";
 
     const rowsHtml = passengers.map((p, i) => {
       const r = computeFareLine(p);
@@ -1621,8 +1658,8 @@
       // have their own columns) - YR + Tax & Others, both Supplier and
       // Customer's Markup/Addl Markup/Service Fee/Addl Service Fee/GST,
       // Customer's SSR Markup/SSR Service Fee, Customer TDS minus Customer
-      // Discount, plus Supplier Penalty + Reschedule Penalty + Agent Penalty.
-      const penalties = (p.supplier_penalty || 0) + (p.reschedule_penalty || 0) + (p.agent_penalty || 0);
+      // Discount, plus Supplier/Reschedule/Agent/Cancellation Penalty.
+      const penalties = (p.supplier_penalty || 0) + (p.reschedule_penalty || 0) + (p.agent_penalty || 0) + (p.cancellation_penalty || 0);
       const allTaxes = p.yr + p.tax_others
         + (p.supp_markup || 0) + (p.supp_addl_markup || 0) + (p.supp_service_fee || 0) + (p.supp_addl_service_fee || 0) + rs.gst
         + p.markup + p.addl_markup + (p.ssr_markup || 0) + p.service_fee + p.addl_service_fee + (p.ssr_service_fee || 0)
@@ -1638,7 +1675,7 @@
         <td class="num">${z(p.basic_fare)}</td><td class="num">${z(p.yq)}</td><td class="num">${z(p.k3_tax)}</td>
         <td class="num">${z(p.seat + p.meal + p.baggage + p.other_ssr)}</td>
         <td class="num">${z(allTaxes)}</td><td class="num" style="font-weight:700;">${z(lineTotal)}</td>
-        ${rescheduleMode ? "" : `<td style="text-align:center;">
+        ${(rescheduleMode || cancellationMode) ? "" : `<td style="text-align:center;">
           ${viewMode ? "" : `<button type="button" class="pax-circle-btn pax-circle-remove pax-remove-btn" data-idx="${i}" title="Remove passenger">REMOVE</button>`}
         </td>`}
       </tr>`;
@@ -1650,7 +1687,7 @@
     // is added the row it came from turns into a normal data row above
     // (its "+" is gone, only "-" remains) and this empty row shifts down
     // for the next one.
-    const addRowHtml = (!viewMode && !rescheduleMode && !atCap) ? `<tr class="pax-row pax-add-row">
+    const addRowHtml = (!viewMode && !rescheduleMode && !cancellationMode && !atCap) ? `<tr class="pax-row pax-add-row">
         <td colspan="11" style="text-align:center; padding:14px; font-size:11.5px;">
           ${passengers.length === 0
             ? 'No passengers added yet. Fill booking details above, then click <strong style="color:#3B6DB5;">ADD</strong> to add a passenger.'
@@ -1661,12 +1698,14 @@
         </td>
       </tr>` : "";
 
-    // Reschedule's own blank "awaiting a pick" shell (see
-    // enterBlankRescheduleShell) - nothing to show yet since no ticket has
-    // been picked, points at the "New" button instead of the generic
-    // fallback message below.
+    // Reschedule/Cancellation's own blank "awaiting a pick" shell (see
+    // enterBlankRescheduleShell/enterBlankCancellationShell) - nothing to
+    // show yet since no ticket has been picked, points at the "New"
+    // button instead of the generic fallback message below.
     const blankRescheduleHtml = (rescheduleMode && !passengers.length)
       ? `<tr id="no-pax-row"><td colspan="11" style="text-align:center; padding:18px; color:#64748B; font-size:11.5px;">Click <strong style="color:#3B6DB5;">New</strong> below to find the ticket/passenger to reschedule.</td></tr>`
+      : (cancellationMode && !passengers.length)
+      ? `<tr id="no-pax-row"><td colspan="11" style="text-align:center; padding:18px; color:#64748B; font-size:11.5px;">Click <strong style="color:#3B6DB5;">New</strong> below to find the ticket/passenger to cancel.</td></tr>`
       : "";
     linesBody.innerHTML = rowsHtml + addRowHtml || blankRescheduleHtml || `<tr id="no-pax-row"><td colspan="12" style="text-align:center; padding:18px; color:#64748B; font-size:11.5px;">No passengers to show.</td></tr>`;
 
@@ -2459,6 +2498,205 @@
     renderPaxTable();
   }
 
+  // Cancellation's own menu item lands here directly too (cancellation_
+  // new=1), same blank "awaiting a pick" shell pattern as Reschedule
+  // above - UI only for now (explicitly scoped this way): title, frozen
+  // Booking Status, and the bottom toolbar's own "New" button all show
+  // correctly, but that button has no real lookup/save logic wired yet.
+  function enterBlankCancellationShell() {
+    cancellationMode = true;
+    document.getElementById("page-title").textContent = "Cancellation";
+    document.getElementById("booking_status").value = "Cancelled";
+    document.getElementById("booking_status").disabled = true;
+    document.getElementById("proceed-btn").style.display = "none";
+    document.getElementById("submit-btn").style.display = "none";
+    document.getElementById("cancellation-new-btn").style.display = "";
+    renderPaxTable();
+  }
+  // ============================================================
+  // Cancellation "New" Lookup Modal - same pattern as the Reschedule
+  // lookup modal below, opened via the "New" button on
+  // enterBlankCancellationShell's empty form above. Finds the real
+  // ticket to cancel by S PNR / Airline PNR / Ticket No, via its own
+  // lookup-for-cancellation endpoint (no reschedule-eligibility
+  // filtering - irrelevant for cancellation). Picking a passenger here
+  // doesn't do anything beyond confirming the pick yet - the actual
+  // cancel/save flow is a separate follow-up step, same as
+  // enterBlankCancellationShell's own "New" button was before this.
+  // ============================================================
+  let cxLookupPassengers = [];
+  let cxLookupMatchedLineId = null;
+  let cxLookupTicketId = null;
+  // Set only when the lookup matched a reschedule rather than the
+  // original ticket (chaining - same convention as the reschedule
+  // screen's own lookupSourceRescheduleId) - the frontend fetches full
+  // details from THAT record instead of the original once this is set.
+  let cxLookupSourceRescheduleId = null;
+  const cancellationLookupModal = document.getElementById("cancellation-lookup-modal");
+
+  function openCancellationLookupModal() {
+    ["cx-search-spnr", "cx-search-airline-pnr", "cx-search-ticket-no"].forEach((id) => { document.getElementById(id).value = ""; });
+    cxLookupPassengers = []; cxLookupMatchedLineId = null; cxLookupTicketId = null; cxLookupSourceRescheduleId = null;
+    document.getElementById("cx-selection-row").style.display = "none";
+    document.getElementById("cx-cancel-row").style.display = "none";
+    cancellationLookupModal.classList.add("open");
+  }
+  function closeCancellationLookupModal() { cancellationLookupModal.classList.remove("open"); }
+  document.getElementById("cancellation-new-btn").addEventListener("click", openCancellationLookupModal);
+  document.getElementById("cx-lookup-close-x-btn").addEventListener("click", closeCancellationLookupModal);
+
+  async function cxLookupTicketForCancellation() {
+    if (!activeCompanyId) {
+      voyagerAlert("Could not determine the active company. Check your connection and try Get again.");
+      return;
+    }
+    const sPnr = document.getElementById("cx-search-spnr").value.trim();
+    const airlinePnr = document.getElementById("cx-search-airline-pnr").value.trim();
+    const ticketNo = document.getElementById("cx-search-ticket-no").value.trim();
+    if (!sPnr && !airlinePnr && !ticketNo) {
+      voyagerAlert("Enter S PNR, Airline PNR or Ticket No to search.");
+      return;
+    }
+    try {
+      const params = new URLSearchParams({ company_id: activeCompanyId, s_pnr: sPnr, airline_pnr: airlinePnr, ticket_no: ticketNo });
+      const res = await fetch(`${API_BASE}/tickets/lookup-for-cancellation/?${params}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Ticket not found.");
+      cxLookupTicketId = data.ticket_id || null;
+      cxLookupMatchedLineId = data.matched_line_id || null;
+      cxLookupSourceRescheduleId = data.source_reschedule_ticket_id || null;
+      // A Ticket No search identifies exactly ONE passenger, not the
+      // whole booking - only show that one, not every passenger on the
+      // same ticket (S PNR/Airline PNR searches have no single matched
+      // passenger, so those still show everyone).
+      cxLookupPassengers = cxLookupMatchedLineId
+        ? (data.passengers || []).filter((p) => p.line_id === cxLookupMatchedLineId)
+        : (data.passengers || []);
+      renderCxPassengers();
+      document.getElementById("cx-selection-row").style.display = "grid";
+      document.getElementById("cx-cancel-row").style.display = "flex";
+    } catch (err) {
+      voyagerAlert(err.message || "Could not search for this ticket. Is the Django backend running?", { icon: "error" });
+    }
+  }
+  document.getElementById("cx-get-btn").addEventListener("click", cxLookupTicketForCancellation);
+  ["cx-search-spnr", "cx-search-airline-pnr", "cx-search-ticket-no"].forEach((id) => {
+    document.getElementById(id).addEventListener("keydown", (e) => { if (e.key === "Enter") cxLookupTicketForCancellation(); });
+  });
+
+  function renderCxPassengers() {
+    const tbody = document.getElementById("cx-pax-tbody");
+    if (!cxLookupPassengers.length) {
+      tbody.innerHTML = `<tr><td colspan="3" style="text-align:center; padding:1rem; color:#64748B;">No passengers on this ticket.</td></tr>`;
+      renderCxSectors();
+      return;
+    }
+    tbody.innerHTML = cxLookupPassengers.map((p, i) => `
+      <tr>
+        <td style="padding:4px 8px;"><input type="checkbox" class="cx-pax-check" data-idx="${i}" /></td>
+        <td style="padding:4px 8px;">${p.pax_type || "-"}</td>
+        <td style="padding:4px 8px;">${p.passenger_name || "-"}</td>
+      </tr>
+    `).join("");
+    tbody.querySelectorAll(".cx-pax-check").forEach((cb) => cb.addEventListener("change", updateCxCancelButtonState));
+    renderCxSectors();
+  }
+  // Shows every passenger's sectors right away, independent of the Pax
+  // checkboxes - those only mark who's selected for cancellation, they
+  // don't gate what's visible here.
+  function renderCxSectors() {
+    const tbody = document.getElementById("cx-sector-tbody");
+    const rows = [];
+    cxLookupPassengers.forEach((p) => {
+      (p.sectors || []).forEach((s) => {
+        rows.push(`
+          <tr>
+            <td style="padding:4px 8px;"><input type="checkbox" class="cx-sector-check" /></td>
+            <td style="padding:4px 8px;">${s.sector || "-"}</td>
+            <td style="padding:4px 8px;">${s.flight_no || "-"}</td>
+            <td style="padding:4px 8px;">${s.travel_class || "-"}</td>
+            <td style="padding:4px 8px;">${s.travel_date || "-"}</td>
+          </tr>
+        `);
+      });
+    });
+    tbody.innerHTML = rows.length
+      ? rows.join("")
+      : `<tr><td colspan="5" style="text-align:center; padding:1rem; color:#64748B;">Select a passenger to see their sectors.</td></tr>`;
+    tbody.querySelectorAll(".cx-sector-check").forEach((cb) => cb.addEventListener("change", updateCxCancelButtonState));
+    updateCxCancelButtonState();
+  }
+  // Cancel only makes sense once at least one passenger AND one of
+  // their sectors is actually picked.
+  function updateCxCancelButtonState() {
+    const anyPax = document.querySelectorAll(".cx-pax-check:checked").length > 0;
+    const anySector = document.querySelectorAll(".cx-sector-check:checked").length > 0;
+    document.getElementById("cx-cancel-btn").disabled = !(anyPax && anySector);
+  }
+  document.getElementById("cx-cancel-btn").addEventListener("click", async () => {
+    const checkedPax = Array.from(document.querySelectorAll(".cx-pax-check:checked"))
+      .map((cb) => cxLookupPassengers[Number(cb.dataset.idx)]);
+    if (!cxLookupTicketId || !checkedPax.length) return;
+    const ticketId = cxLookupTicketId;
+    const sourceRescheduleId = cxLookupSourceRescheduleId;
+    closeCancellationLookupModal();
+    await enterCancellationMode(ticketId, checkedPax, sourceRescheduleId);
+  });
+
+  // Loads the real picked ticket's own header + the picked passenger(s)
+  // only (not every passenger on the ticket, same convention as
+  // Reschedule's own picker) into the still-blank Cancellation form,
+  // read-only - a frozen reference view, same as opening any saved
+  // ticket to view. No real cancel/save flow is wired yet (that's a
+  // separate follow-up step) - this just loads the data into the fields.
+  // sourceRescheduleId (optional) - set when the lookup matched a
+  // reschedule rather than the original ticket (chaining, any depth) -
+  // fetches that record's own live data instead of the stale original.
+  async function enterCancellationMode(ticketId, pickedPax, sourceRescheduleId) {
+    try {
+      const url = sourceRescheduleId
+        ? `${API_BASE}/reschedule-tickets/${sourceRescheduleId}/?company_id=${activeCompanyId}`
+        : `${API_BASE}/tickets/${ticketId}/?company_id=${activeCompanyId}`;
+      const res = await fetch(url);
+      const t = await res.json();
+      if (!res.ok) throw new Error(t.error || "Ticket not found.");
+
+      document.getElementById("invoice_number").value = t.invoice_number || "";
+      setDateGroupValue(document.getElementById("invoice_date"), t.invoice_date ? isoToDDMMYYYY(t.invoice_date) : "");
+      document.getElementById("invoice_type").value = t.invoice_type || "";
+      document.getElementById("booking_mode").value = t.booking_mode || "";
+      document.getElementById("customer").value = t.customer_name || "";
+      document.getElementById("booking_reference").value = t.booking_reference || "";
+      document.getElementById("booking_given_by").value = t.booking_given_by || "";
+      document.getElementById("booking_type").value = t.booking_type || "";
+      document.getElementById("travel_type").value = t.travel_type || "";
+      document.getElementById("user_name").value = t.user_name || "";
+      document.getElementById("payment_mode").value = t.payment_mode || "";
+      document.getElementById("payment_gateway_ref").value = t.payment_gateway_ref || "";
+      updateGatewayRefField();
+      document.getElementById("roe").value = t.roe;
+      document.getElementById("airline_pnr_header").value = t.airline_pnr || "";
+      document.getElementById("gds_pnr_header").value = t.gds_pnr || "";
+      setDateGroupValue(document.getElementById("booking_ref_date"), t.booking_ref_date ? isoToDDMMYYYY(t.booking_ref_date) : "");
+      document.getElementById("customer").dispatchEvent(new Event("input"));
+      // Frozen to Cancelled regardless of the ticket's own current status -
+      // same convention enterBlankCancellationShell already set, just
+      // reasserted here since the blanket disable below would otherwise
+      // re-enable it along with everything else.
+      document.getElementById("booking_status").value = "Cancelled";
+
+      const pickedIds = new Set(pickedPax.map((p) => p.line_id));
+      passengers = t.lines.filter((l) => pickedIds.has(l.id)).map((l) => ({ ...blankPassenger(), ...l }));
+      renderPaxTable();
+
+      // Frozen/read-only reference, same as any saved ticket opened to
+      // view - nothing here is editable yet (no real cancel/save flow).
+      document.querySelectorAll(".dom-form-grid input, .dom-form-grid select").forEach((el) => (el.disabled = true));
+    } catch (err) {
+      voyagerAlert(err.message || "Could not load this ticket. Is the Django backend running?", { icon: "error" });
+    }
+  }
+
   // ============================================================
   // Reschedule "New" Lookup Modal - replaces the old separate
   // trans-airline-reschedule.html search page, opened via the "New"
@@ -3060,6 +3298,8 @@
         }
       } else if (rescheduleNew) {
         enterBlankRescheduleShell();
+      } else if (cancellationNew) {
+        enterBlankCancellationShell();
       } else {
         renderPaxTable();
       }

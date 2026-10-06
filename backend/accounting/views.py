@@ -3701,6 +3701,139 @@ def reschedule_ticket_detail(request, reschedule_ticket_id):
     })
 
 
+def ticket_lookup_for_cancellation(request):
+    """
+    GET /api/tickets/lookup-for-cancellation/?company_id=1&s_pnr=..&airline_pnr=..&ticket_no=..
+    Finds a single Ticket by whichever identifier was actually given -
+    same 3-way search priority as ticket_lookup_for_reschedule (Ticket No
+    first, then S PNR/Booking Reference, then Airline PNR).
+
+    Also searches RescheduleAirlineTicket/RescheduleAirlineTicketLine by
+    the exact same 3 identifiers, same chaining logic as the reschedule
+    lookup - if a passenger has since been rescheduled, their CURRENT
+    live data lives there, not on the stale original Ticket, so:
+      - Searching by that reschedule's own new PNR/Ticket No finds and
+        returns ITS OWN data (works correctly, any chain depth).
+      - Searching by an exact Ticket No that's since been superseded by a
+        reschedule errors instead of silently loading the outdated
+        original (points the user at the new PNR/Ticket No instead).
+      - Searching by the ORIGINAL ticket's own S PNR/Airline PNR - which
+        still validly identifies whichever passengers on it have NOT yet
+        been rescheduled - returns only THOSE (partial reschedule: e.g.
+        2 of 4 passengers rescheduled, searching the original S PNR
+        correctly shows just the remaining 2, not the 2 that moved).
+    Each returned passenger's own "line_id" is that line's own real id in
+    WHICHEVER table currently holds its live data (the original
+    TicketLine, or that specific RescheduleAirlineTicketLine) - the
+    frontend uses source_reschedule_ticket_id (set only when the match
+    came from a reschedule) to know which one to fetch full details from.
+    """
+    if request.method != "GET":
+        return HttpResponseNotAllowed(["GET"])
+
+    company_id = request.GET.get("company_id")
+    if not company_id:
+        return JsonResponse({"error": "company_id is required"}, status=400)
+
+    s_pnr = (request.GET.get("s_pnr") or "").strip()
+    airline_pnr = (request.GET.get("airline_pnr") or "").strip()
+    ticket_no = (request.GET.get("ticket_no") or "").strip()
+    if not (s_pnr or airline_pnr or ticket_no):
+        return JsonResponse({"error": "Enter S PNR, Airline PNR or Ticket No to search."}, status=400)
+
+    ticket = None
+    matched_line_id = None
+    matched_line = None
+    resched_source = None       # RescheduleAirlineTicket, set when found via reschedule data
+    resched_source_line = None  # RescheduleAirlineTicketLine, set only on an exact Ticket No match
+
+    if ticket_no:
+        line = TicketLine.objects.filter(ticket__company_id=company_id, ticket_no=ticket_no).select_related("ticket").first()
+        if line:
+            ticket = line.ticket
+            matched_line_id = line.id
+            matched_line = line
+        else:
+            rline = RescheduleAirlineTicketLine.objects.filter(
+                reschedule_ticket__company_id=company_id, ticket_no=ticket_no
+            ).select_related("reschedule_ticket", "original_ticket_line__ticket").first()
+            if rline:
+                resched_source_line = rline
+                resched_source = rline.reschedule_ticket
+                matched_line = rline.original_ticket_line
+                matched_line_id = rline.id  # the reschedule's OWN id - cancellation loads this live record, not the stale original
+                ticket = matched_line.ticket
+    if not ticket and s_pnr:
+        ticket = Ticket.objects.filter(company_id=company_id, booking_reference=s_pnr).first()
+        if not ticket:
+            rt = RescheduleAirlineTicket.objects.filter(company_id=company_id, booking_reference=s_pnr).select_related("original_ticket").first()
+            if rt:
+                resched_source = rt
+                ticket = rt.original_ticket
+    if not ticket and airline_pnr:
+        ticket = Ticket.objects.filter(company_id=company_id, airline_pnr=airline_pnr).first()
+        if not ticket:
+            rt = RescheduleAirlineTicket.objects.filter(company_id=company_id, airline_pnr=airline_pnr).select_related("original_ticket").first()
+            if rt:
+                resched_source = rt
+                ticket = rt.original_ticket
+
+    if not ticket:
+        return JsonResponse({"error": "No ticket found matching that S PNR / Airline PNR / Ticket No."}, status=404)
+
+    # Exact Ticket No match on a line that's since been superseded by a
+    # reschedule (any chain depth) - the stale original no longer
+    # reflects this passenger's current state.
+    already_rescheduled = (
+        not resched_source_line.is_reschedule_eligible if resched_source_line is not None
+        else (matched_line is not None and not matched_line.is_reschedule_eligible)
+    )
+    if already_rescheduled:
+        return JsonResponse({
+            "error": "This ticket has already been rescheduled - search using its new PNR/Ticket No instead."
+        }, status=409)
+
+    def split_sectors(l):
+        pairs = [p.strip() for p in (l.sector or "").split(",") if p.strip()]
+        flight_nos = (l.flight_no or "").split(",")
+        classes = (l.travel_class or "").split(",")
+        dates = [d.strip() for d in (l.travel_date or "").split(",")]
+        return [{
+            "sector": pairs[i],
+            "flight_no": (flight_nos[i].strip() if i < len(flight_nos) else ""),
+            "travel_class": (classes[i].strip() if i < len(classes) else ""),
+            "travel_date": dates[i] if i < len(dates) else (dates[0] if len(dates) == 1 else ""),
+        } for i in range(len(pairs))]
+
+    # Partial passenger reschedule: a passenger/line that's already been
+    # rescheduled (is_reschedule_eligible=False) is excluded here rather
+    # than blocking the whole invoice - other passengers who haven't been
+    # rescheduled yet must still show up, with their own live data.
+    if resched_source is not None:
+        current_lines = list(resched_source.lines.filter(is_reschedule_eligible=True))
+    else:
+        current_lines = [l for l in ticket.lines.all() if l.is_reschedule_eligible]
+    if not current_lines:
+        return JsonResponse({
+            "error": "All passengers on this booking have since been rescheduled - search using their new PNR/Ticket No instead."
+        }, status=409)
+
+    passengers = [{
+        "line_id": l.id, "ticket_no": l.ticket_no, "pax_type": l.pax_type,
+        "passenger_name": l.passenger_name, "sectors": split_sectors(l),
+    } for l in current_lines]
+
+    return JsonResponse({
+        "ticket_id": ticket.id,
+        "invoice_number": resched_source.invoice_number if resched_source is not None else ticket.invoice_number,
+        "booking_reference": resched_source.booking_reference if resched_source is not None else ticket.booking_reference,
+        "airline_pnr": resched_source.airline_pnr if resched_source is not None else ticket.airline_pnr,
+        "matched_line_id": matched_line_id,
+        "source_reschedule_ticket_id": resched_source.id if resched_source is not None else None,
+        "passengers": passengers,
+    })
+
+
 def ticket_jv_preview(request, ticket_id):
     """
     GET /api/tickets/<id>/jv-preview/?company_id=1

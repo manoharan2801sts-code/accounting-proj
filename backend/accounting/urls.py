@@ -26,6 +26,7 @@ urlpatterns = [
     path("profit-loss/", views.profit_loss_report, name="profit-loss-report"),
     path("tickets/", views.tickets_list, name="tickets-list"),
     path("tickets/lookup-for-reschedule/", views.ticket_lookup_for_reschedule, name="ticket-lookup-for-reschedule"),
+    path("tickets/lookup-for-cancellation/", views.ticket_lookup_for_cancellation, name="ticket-lookup-for-cancellation"),
     path("tickets/create/", views.ticket_create, name="ticket-create"),
     path("tickets/<int:ticket_id>/update/", views.ticket_update, name="ticket-update"),
     path("tickets/<int:ticket_id>/", views.ticket_detail, name="ticket-detail"),

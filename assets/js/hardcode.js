@@ -48,7 +48,7 @@
         children: [
           { key: "tickets", label: "Booking", href: "ticket-entry.html" },
           { key: "trans-airline-reschedule", label: "Reschedule", href: "ticket-entry.html?reschedule_new=1" },
-          { key: "trans-airline-cancellation", label: "Cancellation", href: "trans-airline-cancellation.html" },
+          { key: "trans-airline-cancellation", label: "Cancellation", href: "ticket-entry.html?cancellation_new=1" },
           { key: "trans-airline-ssr", label: "SSR Updation", href: "trans-airline-ssr.html" },
         ]
       },

@@ -12,6 +12,13 @@
 <link href="assets/css/loader.css" rel="stylesheet" />
   <link rel="icon" type="image/png" href="assets/img/favicon.png" />
   <style>
+    /* Hides the page's own vertical scrollbar track - still scrollable
+       with the mouse wheel/keyboard if content ever runs taller than the
+       viewport (Detailed View can get long), just no visible scrollbar
+       chrome down the right edge. */
+    html { scrollbar-width: none; }
+    html::-webkit-scrollbar { display: none; }
+
     /* Flat - no card background/border, sits directly on the page like
        the reference screenshot, not boxed in its own white card. */
     .filter-card {
@@ -26,15 +33,20 @@
        the left, Cr (Credit) on the right - NOT a modern vertical income
        statement. Each side is its own independent table (different row
        counts are normal and don't need to line up 1:1 across the
-       divider), both using the exact same column widths/styling for
-       visual symmetry. */
+       divider). Grid's own default stretch makes both columns the same
+       height (the taller side's natural height); each column is then a
+       flex column itself so its OWN Total row sits flush at the bottom
+       of that shared height instead of wherever its own content happens
+       to end - the body area (.pl-col-body) just grows via flex:1, never
+       scrolls (no max-height/overflow here on purpose - no scrollbar). */
     .pl-box {
       background: var(--color-white); border: 1px solid var(--color-border);
       border-radius: var(--radius-md); overflow: hidden;
       display: grid; grid-template-columns: 1fr 1fr;
     }
-    .pl-col { min-width: 0; }
+    .pl-col { min-width: 0; display: flex; flex-direction: column; }
     .pl-col.pl-col-left { border-right: 2px solid var(--color-border); }
+    .pl-col-body { flex: 1; }
     .pl-table { width: 100%; border-collapse: collapse; }
     .pl-table th {
       padding: 0.5rem 0.9rem; background: #F8FAFC; border-bottom: 1px solid var(--color-border);
@@ -45,18 +57,21 @@
       padding: 0.4rem 0.9rem; font-size: 12.5px; color: var(--color-text); vertical-align: middle;
     }
     .pl-table td.pl-amt { font-family: var(--font-mono); text-align: right; white-space: nowrap; }
-    /* Orange group-header bar - "Purchase Accounts"/"Sales Accounts", the
-       Trading Account's own two main lines, same look as the reference
-       screenshot. */
-    .pl-group-row td { background: #F5A623; color: #1E293B; font-weight: 700; }
+    /* Group header - "Purchase Accounts"/"Sales Accounts"/"Indirect
+       Expenses"/"Indirect Income" - plain bold, no highlight color. In
+       collapsed (non-detailed) view this row also carries the group's
+       own rolled-up total; in Detailed View it's just a label, with its
+       itemised ledgers (.pl-item-row) below it instead. */
+    .pl-group-row td { font-weight: 700; }
     .pl-item-row td { padding-left: 1.6rem; color: var(--color-text-muted); }
     .pl-carry-row td { font-weight: 700; font-style: italic; }
-    .pl-divider-row td { padding: 0; height: 2px; background: var(--color-text-dark); }
+    .pl-divider-row td { padding: 0; height: 1px; border-bottom: 1px solid var(--color-border); }
     .pl-total-row td {
-      font-weight: 800; border-top: 2px solid var(--color-text-dark);
+      font-weight: 800; border-top: 1px solid var(--color-border);
       padding-top: 0.55rem; padding-bottom: 0.55rem;
     }
     .pl-empty-row td { padding: 1.25rem 0.9rem; text-align: center; color: var(--color-text-muted); font-size: 12px; }
+    .pl-detailed-toggle { display: flex; align-items: center; gap: 0.35rem; font-size: 12px; font-weight: 600; color: var(--color-text-dark); cursor: pointer; }
   </style>
 </head>
 <body>
@@ -74,6 +89,10 @@
         <span class="pl-toolbar-label">To</span>
         <input type="date" class="form-control-custom pl-toolbar-date" id="filter-to" />
         <button type="button" class="dom-nav-btn btn-primary" onclick="loadReport()">Apply</button>
+        <label class="pl-detailed-toggle">
+          <input type="checkbox" id="pl-detailed-view" onchange="rerender()" />
+          Detailed View
+        </label>
         <span style="margin-left:auto;"></span>
         <button type="button" class="dom-nav-btn" onclick="window.print()">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9V2h12v7M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2m-12 0v4h12v-4"/></svg>
@@ -91,16 +110,22 @@
             <thead>
               <tr><th>Particulars</th><th class="pl-amt-head" id="pl-left-period">FY</th></tr>
             </thead>
-            <tbody id="pl-left-body"></tbody>
           </table>
+          <div class="pl-col-body">
+            <table class="pl-table"><tbody id="pl-left-body"></tbody></table>
+          </div>
+          <table class="pl-table"><tbody id="pl-left-total"></tbody></table>
         </div>
         <div class="pl-col pl-col-right">
           <table class="pl-table">
             <thead>
               <tr><th>Particulars</th><th class="pl-amt-head" id="pl-right-period">FY</th></tr>
             </thead>
-            <tbody id="pl-right-body"></tbody>
           </table>
+          <div class="pl-col-body">
+            <table class="pl-table"><tbody id="pl-right-body"></tbody></table>
+          </div>
+          <table class="pl-table"><tbody id="pl-right-total"></tbody></table>
         </div>
       </div>
     </main>
@@ -143,19 +168,26 @@
       return `${d}/${m}/${y}`;
     }
 
-    // Builds one side's <tbody> rows - group (orange header) + its own
-    // itemised ledgers, for however many groups this side has (Trading
-    // section groups first, then - after the divider - the P&L section's
-    // one group), plus whichever "carry" lines apply (Gross Profit/Loss
-    // c/o or b/f, Net Profit/Loss) and the final Total row.
-    function sectionRows(groups) {
+    // Builds one side's <tbody> rows - group header + (only in Detailed
+    // View) its own itemised ledgers, for however many groups this side
+    // has (Trading section groups first, then - after the divider - the
+    // P&L section's one group), plus whichever "carry" lines apply
+    // (Gross Profit/Loss c/o or b/f, Net Profit/Loss). Collapsed
+    // (default) view shows just the group's own rolled-up total on its
+    // one header row - Detailed View (the checkbox) additionally lists
+    // every ledger under it.
+    function sectionRows(groups, detailed) {
       let html = "";
       groups.forEach((g) => {
         if (!g.items.length) return;
-        html += `<tr class="pl-group-row"><td colspan="2">${g.name}</td></tr>`;
-        g.items.forEach((it) => {
-          html += `<tr class="pl-item-row"><td>${it.name}</td><td class="pl-amt">${fmtN(it.amount)}</td></tr>`;
-        });
+        html += detailed
+          ? `<tr class="pl-group-row"><td colspan="2">${g.name}</td></tr>`
+          : `<tr class="pl-group-row"><td>${g.name}</td><td class="pl-amt">${fmtN(g.total)}</td></tr>`;
+        if (detailed) {
+          g.items.forEach((it) => {
+            html += `<tr class="pl-item-row"><td>${it.name}</td><td class="pl-amt">${fmtN(it.amount)}</td></tr>`;
+          });
+        }
       });
       return html;
     }
@@ -166,7 +198,10 @@
       return `<tr class="pl-total-row"><td>Total</td><td class="pl-amt">${fmtN(amount)}</td></tr>`;
     }
 
+    let lastData = null;
     function render(data) {
+      lastData = data;
+      const detailed = document.getElementById("pl-detailed-view").checked;
       const period = `FY ${ddmmyyyy(data.from_date)} - ${ddmmyyyy(data.to_date)}`;
       document.getElementById("pl-left-period").textContent = period;
       document.getElementById("pl-right-period").textContent = period;
@@ -179,32 +214,27 @@
       // Profit c/o if the Trading Account made a profit (balances this
       // side up to match Credit), divider, Indirect Expenses, Gross Loss
       // b/f if it made a loss instead, Net Profit if the P&L Account made
-      // one (balances this side up to match Credit).
-      let left = sectionRows([t.debit.purchase, t.debit.direct_expense]);
+      // one (balances this side up to match Credit). Total is now its
+      // own separate footer table (see pl-col-body in the markup) so it
+      // always sits flush at the bottom of the box, not wherever this
+      // side's own content happens to end.
+      let left = sectionRows([t.debit.purchase, t.debit.direct_expense], detailed);
       if (grossProfit > 0) left += carryRow("Gross Profit c/o", grossProfit);
       left += `<tr class="pl-divider-row"><td colspan="2"></td></tr>`;
-      left += sectionRows([p.debit.indirect_expense]);
+      left += sectionRows([p.debit.indirect_expense], detailed);
       if (grossProfit < 0) left += carryRow("Gross Loss b/f", -grossProfit);
       if (netProfit > 0) left += carryRow("Net Profit", netProfit);
-      // The P&L Account's own balanced total already equals indirect
-      // items + whichever carry-forward/Net Profit figure was just added
-      // above (see profit_loss_report's own total_debit = max(pl_dr,
-      // pl_cr)) - the one Total shown at the bottom of the whole combined
-      // account, same as the reference screenshot (no separate sub-total
-      // for the Trading Account section above the divider).
-      left += totalRow(p.total_debit);
 
       // RIGHT (Credit) side: Sales Accounts + Direct Income, Gross Loss
       // c/o if the Trading Account made a loss, divider, Indirect Income,
       // Gross Profit b/f if it made a profit instead, Net Loss if the
       // P&L Account made one.
-      let right = sectionRows([t.credit.sales, t.credit.direct_income]);
+      let right = sectionRows([t.credit.sales, t.credit.direct_income], detailed);
       if (grossProfit < 0) right += carryRow("Gross Loss c/o", -grossProfit);
       right += `<tr class="pl-divider-row"><td colspan="2"></td></tr>`;
-      right += sectionRows([p.credit.indirect_income]);
+      right += sectionRows([p.credit.indirect_income], detailed);
       if (grossProfit > 0) right += carryRow("Gross Profit b/f", grossProfit);
       if (netProfit < 0) right += carryRow("Net Loss", -netProfit);
-      right += totalRow(p.total_credit);
 
       const noActivity = !t.debit.purchase.items.length && !t.debit.direct_expense.items.length
         && !t.credit.sales.items.length && !t.credit.direct_income.items.length
@@ -213,7 +243,21 @@
         ? `<tr class="pl-empty-row"><td colspan="2">No activity in this period.</td></tr>` : left;
       document.getElementById("pl-right-body").innerHTML = noActivity
         ? `<tr class="pl-empty-row"><td colspan="2">No activity in this period.</td></tr>` : right;
+      // The P&L Account's own balanced total already equals indirect
+      // items + whichever carry-forward/Net Profit figure was just added
+      // above (see profit_loss_report's own total_debit = max(pl_dr,
+      // pl_cr)) - the one Total shown at the bottom of the whole combined
+      // account, same as the reference screenshot (no separate sub-total
+      // for the Trading Account section above the divider).
+      document.getElementById("pl-left-total").innerHTML = totalRow(p.total_debit);
+      document.getElementById("pl-right-total").innerHTML = totalRow(p.total_credit);
     }
+    // Detailed View toggles without a network round-trip - the last
+    // response already has everything needed to re-render either way.
+    function rerender() {
+      if (lastData) render(lastData);
+    }
+    window.rerender = rerender;
 
     async function loadReport() {
       if (!activeCompanyId) return;
@@ -233,9 +277,12 @@
 
     function exportCSV() {
       let csv = [];
-      document.querySelectorAll("#pl-box table").forEach((table, i) => {
+      // Each side is now 3 separate <table>s (header/body/total footer -
+      // see pl-col-body in the markup, which keeps the Total pinned to
+      // the bottom) - grouped by .pl-col here, not by raw table index.
+      document.querySelectorAll("#pl-box .pl-col").forEach((col, i) => {
         csv.push(i === 0 ? "Debit (Dr)" : "Credit (Cr)");
-        table.querySelectorAll("tr").forEach((row) => {
+        col.querySelectorAll("table tr").forEach((row) => {
           const cols = Array.from(row.querySelectorAll("th, td")).map((td) => `"${td.innerText.replace(/"/g, '""')}"`);
           if (cols.length) csv.push(cols.join(","));
         });
