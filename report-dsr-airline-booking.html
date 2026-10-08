@@ -98,7 +98,13 @@
       border-bottom: 1px solid var(--color-border); gap: 1rem; flex-wrap: wrap; background: #FAFBFD;
     }
     .table-search { max-width: 220px; width: 100%; height: 26px; font-size: 11.5px; padding: 0 0.5rem; }
-    .table-scroll { flex: 1; min-height: 0; overflow-y: auto; overflow-x: auto; }
+    /* No horizontal scrollbar, ever (explicit request) - the main area now
+       spans the full window width (no more 1440px cap) and every
+       long-text column is already capped via .truncate-cell below, so
+       everything fits in one page; overflow-x: hidden is the hard
+       guarantee against a stray wide column reintroducing the scrollbar
+       on a narrower screen. */
+    .table-scroll { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; }
     .table-custom { width: 100%; border-collapse: collapse; text-align: left; }
     .table-custom th { padding: 0.35rem 0.75rem; background: #F8FAFC; border-bottom: 1px solid var(--color-border);
       font-size: 10.5px; font-weight: 700; color: var(--color-text-muted); letter-spacing: 0.03em;
@@ -114,27 +120,30 @@
        the untruncated value shown via the title tooltip on hover. */
     .table-custom td { white-space: nowrap; }
     .table-custom td.truncate-cell {
-      max-width: 160px; overflow: hidden; text-overflow: ellipsis;
+      max-width: 130px; overflow: hidden; text-overflow: ellipsis;
     }
     .table-custom tbody tr.dsr-data-row.dsr-row-selected td { background: var(--color-primary); color: #FFFFFF; }
     .table-custom tbody tr:last-child td { border-bottom: none; }
     .table-custom tbody tr.dsr-data-row { cursor: pointer; }
-    .status-badge { display: inline-flex; align-items: center; padding: 0.2rem 0.55rem;
-      border-radius: 4px; font-size: 11.5px; font-weight: 700; }
-    .badge-issued, .badge-success { background: #DCFCE7; color: #166534; }
-    .badge-pending, .badge-warning { background: #FEF3C7; color: #92400E; }
-    .badge-cancelled, .badge-danger { background: #FEE2E2; color: #991B1B; }
-    .badge-rescheduled, .badge-info { background: #E0E7FF; color: #3730A3; }
     
     .amt { font-family: var(--font-mono); font-weight: 600; text-align: right; }
     th.amt-header { text-align: right; }
+
+    /* Total is a separate, non-scrolling table pinned below .table-scroll
+       (not a sticky row inside it) so it sits flush at the bottom of the
+       grid even when there are too few rows to fill the scroll area, and
+       still never scrolls away when there are many. Column widths are
+       synced to the main table's header via JS (syncTotalColumnWidths). */
+    .lb-total-wrap { flex-shrink: 0; overflow: hidden; }
+    #lb-total-table { table-layout: fixed; }
+    .lb-total-row td { border-top: 2px solid var(--color-border); font-weight: 700; background: #FAFBFD; }
   </style>
 </head>
 <body>
 <script src="assets/js/loader.js?v=2"></script>
   <header class="app-topnav" id="shell-topnav"></header>
   <div class="app-body">
-    <main class="app-main dsr-main" style="max-width: 1440px; margin: 0 auto;">
+    <main class="app-main dsr-main" style="max-width: 100%;">
       <div class="page-header-row">
         <div style="font-weight:700; font-size:0.78rem; color:var(--color-text-dark);">DSR</div>
         <div class="dsr-toolbar">
@@ -230,13 +239,21 @@
                 <th>Sector</th>
                 <th>Airline</th>
                 <th>Supplier</th>
+                <th>Status</th>
                 <th class="amt-header">Base Fare</th>
                 <th class="amt-header">Other Tax</th>
                 <th class="amt-header">Net Amount</th>
               </tr>
             </thead>
             <tbody id="main-data-tbody">
-              <tr><td colspan="11" style="text-align:center; padding:2rem; color:var(--color-text-muted);">Loading…</td></tr>
+              <tr><td colspan="12" style="text-align:center; padding:2rem; color:var(--color-text-muted);">Loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="lb-total-wrap">
+          <table class="table-custom" id="lb-total-table">
+            <tbody>
+              <tr class="lb-total-row" id="lb-total-row"></tr>
             </tbody>
           </table>
         </div>
@@ -289,6 +306,20 @@
       const todayStr = new Date().toISOString().slice(0, 10);
       document.getElementById("filter-from").value = urlParams.get("from") || todayStr;
       document.getElementById("filter-to").value = urlParams.get("to") || todayStr;
+      // Restore the Advanced Filter fields too (same reasoning as From/To
+      // above) - without this, Back from a ticket opened off this report
+      // kept the date range but silently dropped Product/Category/Travel
+      // Type/Status/Customer/Supplier back to their defaults.
+      document.getElementById("filter-product").value = urlParams.get("product") || "Airline";
+      document.getElementById("filter-airline-category").value = urlParams.get("category") || "";
+      document.getElementById("filter-travel-type").value = urlParams.get("travelType") || "";
+      document.getElementById("filter-status").value = urlParams.get("status") || "";
+      const urlCustomers = urlParams.get("customers");
+      const urlSuppliers = urlParams.get("suppliers");
+      if (urlCustomers) customerPicker.setSelected(urlCustomers.split("|"));
+      if (urlSuppliers) supplierPicker.setSelected(urlSuppliers.split("|"));
+      toggleAirlineOnlyFilters();
+      updateClearFiltersState();
       loadReport();
     })();
 
@@ -377,6 +408,11 @@
       return String(str).replace(/&/g, "&amp;").replace(/"/g, "&quot;");
     }
 
+    function statusBadgeHtml(status) {
+      if (!status) return "-";
+      return escAttr(status);
+    }
+
     // One row per Invoice/Ticket, not per passenger - allRows is still
     // one row per TicketLine (straight from /api/tickets/), so multi-
     // passenger tickets get folded here: Pax Name shows the lead (first)
@@ -398,6 +434,7 @@
             invoice_date: r.invoice_date, invoice_number: r.invoice_number,
             customer_name: r.customer_name, booking_reference: r.booking_reference, airline_pnr: r.airline_pnr,
             lead_passenger_name: r.passenger_name, airline_names: [], supplier_names: [], sectors: [],
+            booking_status: r.booking_status,
             basic_fare: 0, other_tax: 0, net_amount: 0,
           };
           byTicket.set(groupKey, g);
@@ -411,43 +448,45 @@
         (r.sector || "").split(",").map((s) => s.trim()).filter(Boolean).forEach((s) => {
           if (!g.sectors.includes(s)) g.sectors.push(s);
         });
-        g.basic_fare += Number(r.basic_fare) || 0;
-        // Other Tax = ticket-entry.html's Summary strip, both rows added
-        // together (see recalcSummary() in page-ticket-entry.js): Sales
-        // Cost's Taxes (YQ+YR+K3+Tax & Others) + SSR (Seat+Meal+Baggage+
-        // Other SSR) - Discount + TDS + Markup (+Addl+SSR) + Service Fee
-        // (+Addl+SSR) + GST Amount, PLUS Purchase Cost's own Markup
-        // (+Addl) + Service Fee (+Addl) + GST Amount. Discount/TDS/GST
-        // come straight from the backend's own computed_discount/
-        // computed_tds/computed_gst/computed_supp_gst (Master Mapping-
-        // driven), not re-derived here.
-        const taxes = (Number(r.yq) || 0) + (Number(r.yr) || 0) + (Number(r.k3_tax) || 0) + (Number(r.tax_others) || 0);
-        const ssr = (Number(r.seat) || 0) + (Number(r.meal) || 0) + (Number(r.baggage) || 0) + (Number(r.other_ssr) || 0);
-        const markup = (Number(r.markup) || 0) + (Number(r.addl_markup) || 0) + (Number(r.ssr_markup) || 0);
-        const serviceFee = (Number(r.service_fee) || 0) + (Number(r.addl_service_fee) || 0) + (Number(r.ssr_service_fee) || 0);
-        const suppMarkup = (Number(r.supp_markup) || 0) + (Number(r.supp_addl_markup) || 0);
-        const suppServiceFee = (Number(r.supp_service_fee) || 0) + (Number(r.supp_addl_service_fee) || 0);
-        const lineOtherTax = taxes + ssr - (Number(r.computed_discount) || 0)
-          + (Number(r.computed_tds) || 0) + markup + serviceFee + (Number(r.computed_gst) || 0)
-          + suppMarkup + suppServiceFee + (Number(r.computed_supp_gst) || 0);
-        g.other_tax += lineOtherTax;
+        // Same 3 columns as ticket-entry.html's Passenger & Segment Details
+        // grid (Basic Fare / YQ / K3 / SSR / Other Taxes / Total), pax-wise
+        // summed across every line on this ticket - DSR-specific formula
+        // (2026-10-08 explicit spec, DSR report only, not the grid itself):
+        // Base Fare = Basic Fare.
+        // Net Amount = Total (total_billed, same stored per-line total the
+        // grid's own Total column shows, plus the 3 Reschedule-only penalty
+        // fields renderPaxTable() also folds into that column - absent/0
+        // on a plain Ticket row).
+        // Other Taxes = YQ + K3 + SSR + Other Taxes (the grid's own Other
+        // Taxes column) added together - equivalently Net Amount minus
+        // Base Fare, since Basic+YQ+K3+SSR+Other Taxes always equals Total
+        // exactly (renderPaxTable's own invariant).
+        const lineBasic = Number(r.basic_fare) || 0;
+        const lineNet = (Number(r.total_billed) || 0)
+          + (Number(r.agent_penalty) || 0) + (Number(r.reschedule_penalty) || 0) + (Number(r.supplier_penalty) || 0);
+        g.basic_fare += lineBasic;
+        g.net_amount += lineNet;
+        g.other_tax += lineNet - lineBasic;
       });
       byTicket.forEach((g) => {
+        g.basic_fare = Math.round(g.basic_fare * 100) / 100;
+        g.net_amount = Math.round(g.net_amount * 100) / 100;
         g.other_tax = Math.round(g.other_tax * 100) / 100;
-        g.net_amount = Math.round((g.basic_fare + g.other_tax) * 100) / 100;
       });
       return Array.from(byTicket.values());
     }
 
     function renderTable(rows) {
       const tbody = document.getElementById("main-data-tbody");
+      const totalRow = document.getElementById("lb-total-row");
       selectedRowIndex = -1; // stale after a full re-render - rows are new DOM nodes
       const tickets = groupRowsByTicket(rows);
       if (!tickets.length) {
-        tbody.innerHTML = `<tr><td colspan="12" style="text-align:center; padding:2rem; color:var(--color-text-muted);">No records found for the selected filters.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="13" style="text-align:center; padding:2rem; color:var(--color-text-muted);">No records found for the selected filters.</td></tr>`;
+        totalRow.innerHTML = "";
         return;
       }
-      tbody.innerHTML = tickets.map((t) => `
+      let rowsHtml = tickets.map((t) => `
         <tr class="dsr-data-row" data-id="${t.ticket_id || ""}" data-reschedule-id="${t.reschedule_ticket_id || ""}" title="Double-click to view this ticket">
           <td>${t.invoice_date || "-"}</td>
           <td>${t.invoice_number || "-"}</td>
@@ -458,12 +497,43 @@
           <td class="truncate-cell" title="${escAttr(t.sectors.join(", ") || "-")}">${t.sectors.join(", ") || "-"}</td>
           <td class="truncate-cell" title="${escAttr(t.airline_names.join(", ") || "-")}">${t.airline_names.join(", ") || "-"}</td>
           <td class="truncate-cell" title="${escAttr(t.supplier_names.join(", ") || "-")}">${t.supplier_names.join(", ") || "-"}</td>
+          <td>${statusBadgeHtml(t.booking_status)}</td>
           <td class="amt">${fmtAmt(t.basic_fare)}</td>
           <td class="amt">${fmtAmt(t.other_tax)}</td>
           <td class="amt">${fmtAmt(t.net_amount)}</td>
         </tr>
       `).join("");
+
+      tbody.innerHTML = rowsHtml;
+
+      const totalBasicFare = tickets.reduce((sum, t) => sum + (Number(t.basic_fare) || 0), 0);
+      const totalOtherTax = tickets.reduce((sum, t) => sum + (Number(t.other_tax) || 0), 0);
+      const totalNetAmount = tickets.reduce((sum, t) => sum + (Number(t.net_amount) || 0), 0);
+      totalRow.innerHTML = `
+        <td colspan="10" style="text-align:right;">Total :</td>
+        <td class="amt">${fmtAmt(totalBasicFare)}</td>
+        <td class="amt">${fmtAmt(totalOtherTax)}</td>
+        <td class="amt">${fmtAmt(totalNetAmount)}</td>`;
+      syncTotalColumnWidths();
     }
+
+    // Keeps the separate (non-scrolling) total table's columns aligned with
+    // the main table's header, since both tables size their columns
+    // independently (table-layout differs per table's own content).
+    function syncTotalColumnWidths() {
+      const headerCells = document.querySelectorAll("#main-data-table thead th");
+      const totalCells = document.querySelectorAll("#lb-total-row td");
+      if (!headerCells.length || !totalCells.length) return;
+      const widths = Array.from(headerCells).map((th) => th.getBoundingClientRect().width);
+      let i = 0;
+      totalCells.forEach((td) => {
+        const span = td.colSpan || 1;
+        const w = widths.slice(i, i + span).reduce((a, b) => a + b, 0);
+        td.style.width = w + "px";
+        i += span;
+      });
+    }
+    window.addEventListener("resize", () => syncTotalColumnWidths());
 
     // Keeps the address bar's From/To in sync with the toolbar, so
     // document.referrer (what ticket-entry.js's "Back" link uses when you
@@ -475,6 +545,22 @@
       const toDate = document.getElementById("filter-to").value;
       if (fromDate) params.set("from", fromDate);
       if (toDate) params.set("to", toDate);
+      // Advanced Filter fields (Product/Category/Travel Type/Status/
+      // Customer/Supplier) - kept in the URL the same way From/To already
+      // are, so Back from a ticket opened off this report restores the
+      // exact filtered view instead of resetting to defaults.
+      const product = document.getElementById("filter-product").value;
+      const category = document.getElementById("filter-airline-category").value;
+      const travelType = document.getElementById("filter-travel-type").value;
+      const status = document.getElementById("filter-status").value;
+      const customers = customerPicker.getSelected();
+      const suppliers = supplierPicker.getSelected();
+      if (product && product !== "Airline") params.set("product", product);
+      if (category) params.set("category", category);
+      if (travelType) params.set("travelType", travelType);
+      if (status) params.set("status", status);
+      if (customers.length) params.set("customers", customers.join("|"));
+      if (suppliers.length) params.set("suppliers", suppliers.join("|"));
       const qs = params.toString();
       history.replaceState(null, "", qs ? `${window.location.pathname}?${qs}` : window.location.pathname);
     }
@@ -621,6 +707,7 @@
 
       return {
         getSelected: () => selected,
+        setSelected: (names) => { selected = [...names]; renderChips(); renderDropdown(); },
         clear: () => { selected = []; renderChips(); renderDropdown(); },
       };
     }
@@ -668,7 +755,7 @@
 
     function exportCSV() {
       let csv = [];
-      const rows = document.querySelectorAll("#main-data-table tr");
+      const rows = document.querySelectorAll("#main-data-table tr, #lb-total-table tr");
       rows.forEach(row => {
         let cols = Array.from(row.querySelectorAll("th, td")).map(td => `"${td.innerText.replace(/"/g, '""')}"`);
         csv.push(cols.join(","));

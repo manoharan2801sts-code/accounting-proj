@@ -75,7 +75,7 @@ def load_data(force=False):
 
     counts = {}
     with connection.cursor() as cursor:
-        for tbl in ["Ledgers", "Ledger_Groups", "Tickets", "TicketLines", "JournalVoucher", "Vouchers", "CompanyMaster"]:
+        for tbl in ["Ledgers", "Ledger_Groups", "AL_Tickets", "AL_TicketLines", "Rescheduled_Al_Ticket", "Cancellation_AL_Tickets", "JournalVoucher", "Vouchers", "CompanyMaster"]:
             try:
                 cursor.execute(f"SELECT COUNT(*) FROM `{tbl}`;")
                 counts[tbl] = cursor.fetchone()[0]

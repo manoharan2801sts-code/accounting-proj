@@ -65,6 +65,13 @@
     .table-custom td.rownum { color: var(--color-text-muted); font-weight: 600; }
     .table-custom td.particulars { font-weight: 700; color: var(--color-text-dark); white-space: normal; }
 
+    /* Total is a separate, non-scrolling table pinned below .table-scroll
+       (not a sticky row inside it) so it sits flush at the bottom of the
+       grid even when there are too few rows to fill the scroll area, and
+       still never scrolls away when there are many. Column widths are
+       synced to the main table's header via JS (syncTotalColumnWidths). */
+    .lb-total-wrap { flex-shrink: 0; overflow: hidden; }
+    #lb-total-table { table-layout: fixed; }
     .lb-total-row td { border-top: 2px solid var(--color-border); font-weight: 700; background: #FAFBFD; }
 
     .amt { font-family: var(--font-mono); font-weight: 600; text-align: right; }
@@ -176,13 +183,19 @@
                 <th>S PNR</th>
                 <th>Air-PNR</th>
                 <th>Ticket No</th>
-                <th>Vch No.</th>
                 <th class="amt-header">Debit</th>
                 <th class="amt-header">Credit</th>
               </tr>
             </thead>
             <tbody id="main-data-tbody">
-              <tr><td colspan="10" style="text-align:center; padding:2rem; color:var(--color-text-muted);">Loading...</td></tr>
+              <tr><td colspan="9" style="text-align:center; padding:2rem; color:var(--color-text-muted);">Loading...</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="lb-total-wrap">
+          <table class="table-custom" id="lb-total-table">
+            <tbody>
+              <tr class="lb-total-row" id="lb-total-row"></tr>
             </tbody>
           </table>
         </div>
@@ -276,7 +289,7 @@
 
     async function loadDayBook() {
       const tbody = document.getElementById("main-data-tbody");
-      tbody.innerHTML = `<tr><td colspan="10" style="text-align:center; padding:2rem; color:var(--color-text-muted);">Loading...</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="9" style="text-align:center; padding:2rem; color:var(--color-text-muted);">Loading...</td></tr>`;
 
       const fromDate = document.getElementById("filter-from").value;
       const toDate = document.getElementById("filter-to").value;
@@ -297,7 +310,7 @@
         applyFilterAndRender();
       } catch (err) {
         console.error("Could not load the day book - is the Django backend running?", err);
-        tbody.innerHTML = `<tr><td colspan="10" style="text-align:center; padding:2rem; color:var(--color-text-muted);">Could not load data. Is the Django backend running on localhost:8000?</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="9" style="text-align:center; padding:2rem; color:var(--color-text-muted);">Could not load data. Is the Django backend running on localhost:8000?</td></tr>`;
       }
     }
 
@@ -313,7 +326,6 @@
       { key: "s_pnr", label: "S PNR", get: (t) => t.s_pnr || "-" },
       { key: "air_pnr", label: "Air-PNR", get: (t) => t.air_pnr || "-" },
       { key: "ticket_no", label: "Ticket No", get: (t) => t.ticket_no || "-" },
-      { key: "voucher_no", label: "Vch No.", get: (t) => t.voucher_no || "-" },
       { key: "debit", label: "Debit", get: (t) => (t.debit ? fmtAmt(t.debit) : "-") },
       { key: "credit", label: "Credit", get: (t) => (t.credit ? fmtAmt(t.credit) : "-") },
     ];
@@ -481,16 +493,18 @@
 
     function renderTable(txns) {
       const tbody = document.getElementById("main-data-tbody");
+      const totalRow = document.getElementById("lb-total-row");
       selectedRowIndex = -1; // stale after a full re-render - rows are new DOM nodes
       if (!txns.length) {
-        tbody.innerHTML = `<tr><td colspan="10" style="text-align:center; padding:2rem; color:var(--color-text-muted);">No transactions match the current filter.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="9" style="text-align:center; padding:2rem; color:var(--color-text-muted);">No transactions match the current filter.</td></tr>`;
+        totalRow.innerHTML = "";
         return;
       }
 
       const totalDebit = txns.reduce((sum, t) => sum + (Number(t.debit) || 0), 0);
       const totalCredit = txns.reduce((sum, t) => sum + (Number(t.credit) || 0), 0);
 
-      let rows = txns.map((t, idx) => `
+      const rows = txns.map((t, idx) => `
         <tr class="${(t.ticket_id || t.reschedule_ticket_id) ? "txn-row" : ""}" data-ticket-id="${t.ticket_id || ""}" data-reschedule-ticket-id="${t.reschedule_ticket_id || ""}" title="${(t.ticket_id || t.reschedule_ticket_id) ? "Click to open this ticket" : ""}">
           <td class="rownum">${idx + 1}</td>
           <td>${fmtDateDisplay(t.date)}</td>
@@ -499,24 +513,40 @@
           <td>${t.s_pnr || "-"}</td>
           <td>${t.air_pnr || "-"}</td>
           <td>${t.ticket_no || "-"}</td>
-          <td>${t.voucher_no || "-"}</td>
           <td class="amt">${t.debit ? fmtAmt(t.debit) : "-"}</td>
           <td class="amt">${t.credit ? fmtAmt(t.credit) : "-"}</td>
         </tr>
       `).join("");
 
-      rows += `
-        <tr class="lb-total-row">
-          <td colspan="8" style="text-align:right;">Total :</td>
-          <td class="amt">${fmtAmt(totalDebit)}</td>
-          <td class="amt">${fmtAmt(totalCredit)}</td>
-        </tr>`;
-
       tbody.innerHTML = rows;
       tbody.querySelectorAll("tr.txn-row").forEach((row) => {
         row.addEventListener("click", () => navigateToTicket(row));
       });
+
+      totalRow.innerHTML = `
+        <td colspan="7" style="text-align:right;">Total :</td>
+        <td class="amt">${fmtAmt(totalDebit)}</td>
+        <td class="amt">${fmtAmt(totalCredit)}</td>`;
+      syncTotalColumnWidths();
     }
+
+    // Keeps the separate (non-scrolling) total table's columns aligned with
+    // the main table's header, since both tables size their columns
+    // independently (table-layout differs per table's own content).
+    function syncTotalColumnWidths() {
+      const headerCells = document.querySelectorAll("#main-data-table thead th");
+      const totalCells = document.querySelectorAll("#lb-total-row td");
+      if (!headerCells.length || !totalCells.length) return;
+      const widths = Array.from(headerCells).map((th) => th.getBoundingClientRect().width);
+      let i = 0;
+      totalCells.forEach((td) => {
+        const span = td.colSpan || 1;
+        const w = widths.slice(i, i + span).reduce((a, b) => a + b, 0);
+        td.style.width = w + "px";
+        i += span;
+      });
+    }
+    window.addEventListener("resize", () => syncTotalColumnWidths());
 
     // Keyboard row navigation - Up/Down moves a highlighted "current row"
     // (same look as mouse hover), Enter opens the ticket, same as a click.
@@ -568,7 +598,7 @@
 
     function exportCSV() {
       let csv = [];
-      const rows = document.querySelectorAll("#main-data-table tr");
+      const rows = document.querySelectorAll("#main-data-table tr, #lb-total-table tr");
       rows.forEach((row) => {
         let cols = Array.from(row.querySelectorAll("th, td")).map((td) => `"${td.innerText.replace(/"/g, '""')}"`);
         csv.push(cols.join(","));

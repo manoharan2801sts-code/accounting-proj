@@ -64,6 +64,7 @@
         { field: "Supplier Service Fee A/c", group: "Expenses" },
         { field: "Supplier Addl Service Fee A/c", group: "Expenses" },
         { field: "Supplier Reschedule Penalty A/c", group: "Expenses" },
+        { field: "Supplier Cancellation Penalty A/c", group: "Expenses" },
       ],
     },
     "gst-and-tds": {

@@ -9,7 +9,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
 <link href="assets/css/design-system.css" rel="stylesheet" />
-<link href="assets/css/app.css?v=2" rel="stylesheet" />
+<link href="assets/css/app.css?v=3" rel="stylesheet" />
 <link href="assets/css/loader.css" rel="stylesheet" />
 <style>
   /* Scoped to this page only — locks the outer page to the viewport so
@@ -101,25 +101,16 @@
       <div id="ticket-loading-overlay" style="display:none; position:absolute; inset:0; z-index:50; background:#ECEFF3; align-items:center; justify-content:center; font-size:12.5px; font-weight:700; color:#334155;">Loading…</div>
       <script>
         (function () {
+          // Covers the static New Airline Ticket form until
+          // page-ticket-entry.js has switched to the real mode - every
+          // non-plain mode, including the blank Reschedule/Cancellation
+          // shells (a full page refresh otherwise showed the New Ticket
+          // form/buttons first, then swapped). Hidden again at the end of
+          // that file's init, whichever branch ran.
           var params = new URLSearchParams(window.location.search);
-          if (params.get("id") || params.get("reschedule_saved_id") || params.get("reschedule_ticket_id")) {
+          if (params.get("id") || params.get("reschedule_saved_id") || params.get("reschedule_ticket_id") || params.get("cancellation_saved_id")
+              || params.get("reschedule_new") === "1" || params.get("cancellation_new") === "1") {
             document.getElementById("ticket-loading-overlay").style.display = "flex";
-          }
-          // Reschedule's own blank "awaiting a pick" shell (reschedule_new=1,
-          // see enterBlankRescheduleShell in page-ticket-entry.js) has no
-          // slow data fetch to cover with the overlay above, but the title
-          // bar's static HTML still says "New Airline Ticket" until that
-          // function runs later - set it right here, synchronously, so it
-          // never flashes the wrong title first.
-          if (params.get("reschedule_new") === "1") {
-            var titleEl = document.getElementById("page-title");
-            if (titleEl) titleEl.textContent = "Reschedule";
-          }
-          // Cancellation's own blank shell - same reasoning as Reschedule's
-          // own guard just above.
-          if (params.get("cancellation_new") === "1") {
-            var titleEl2 = document.getElementById("page-title");
-            if (titleEl2) titleEl2.textContent = "Cancellation";
           }
         })();
       </script>
@@ -127,6 +118,21 @@
       <div class="dom-titlebar">
         <div class="dom-titlebar-title"><span id="page-title" style="font-weight:700; font-size:12.5px;">New Airline Ticket</span></div>
       </div>
+      <script>
+        (function () {
+          // Must run AFTER #page-title exists - on a full page load an
+          // earlier script can't see it yet (the old guard above the title
+          // bar found null and silently did nothing on refresh).
+          var params = new URLSearchParams(window.location.search);
+          var titleEl = document.getElementById("page-title");
+          if (!titleEl) return;
+          if (params.get("reschedule_new") === "1" || params.get("reschedule_ticket_id") || params.get("reschedule_saved_id")) {
+            titleEl.textContent = "Reschedule";
+          } else if (params.get("cancellation_new") === "1" || params.get("cancellation_saved_id")) {
+            titleEl.textContent = "Cancellation";
+          }
+        })();
+      </script>
 
       <!-- 3. Main Form Body -->
       <form id="ticket-form" style="display:flex; flex-direction:column; flex:1; min-height:0; overflow:hidden;">
@@ -251,6 +257,7 @@
                     <th>Airline</th>
                     <th>Card No.</th>
                     <th>Pax Name</th>
+                    <th>Status</th>
                     <th class="num">Basic Fare</th>
                     <th class="num">YQ</th>
                     <th class="num">K3</th>
@@ -299,6 +306,12 @@
               <th>Markup</th>
               <th>Service Fee
               <th>GST Amount</th>
+              <!-- Cancellation only - hidden (display:none) by default for
+                   Booking/Reschedule, shown by enterBlankCancellationShell
+                   (see page-ticket-entry.js). table-layout:fixed already
+                   auto-divides every un-sized column equally, so no extra
+                   width rule is needed either way. -->
+              <th class="cx-summary-col" style="display:none;">Markup Reversal</th>
               <th>Total</th>
             </tr>
           </thead>
@@ -313,6 +326,7 @@
               <td id="pc-markup">0.00</td>
               <td id="pc-sfee">0.00</td>
               <td id="pc-gst">0.00</td>
+              <td id="pc-markup-reversal" class="cx-summary-col" style="display:none;">0.00</td>
               <td id="pc-total" style="font-weight:800; color:#3B6DB5; font-size:12px;">0.00</td>
             </tr>
             <tr>
@@ -325,6 +339,7 @@
               <td id="sc-markup">0.00</td>
               <td id="sc-sfee">0.00</td>
               <td id="sc-gst">0.00</td>
+              <td id="sc-markup-reversal" class="cx-summary-col" style="display:none;">0.00</td>
               <td id="sc-total" style="font-weight:800; color:#3B6DB5; font-size:12px;">0.00</td>
             </tr>
           </tbody>
@@ -352,6 +367,11 @@
              enterBlankCancellationShell) - UI only for now, no real
              lookup wired yet. -->
         <button type="button" class="dom-nav-btn btn-primary" id="cancellation-new-btn" style="display:none; font-weight:700;" title="Find the ticket/passenger to cancel">New</button>
+        <!-- Shown once enterCancellationMode has loaded a picked ticket -
+             saves the Cancellation record via its own independent
+             endpoint (cancellation-tickets/create/), not the shared
+             ticket-form submit flow New Ticket/Reschedule use. -->
+        <button type="button" class="dom-nav-btn btn-primary" id="cancellation-save-btn" style="display:none; font-weight:700;" title="Save this Cancellation">Save Cancellation</button>
         <button type="button" class="dom-nav-btn" id="find-btn" title="Find an existing ticket">Find</button>
         <button type="submit" form="ticket-form" class="dom-nav-btn btn-primary" id="submit-btn" style="font-weight:700;">Save Ticket</button>
         <a href="ticket-entry.html" class="dom-nav-btn" id="cancel-link">Discard</a>
@@ -546,20 +566,41 @@
                   <input class="dom-input dom-acct-input-sm dom-amount" type="text" inputmode="decimal" id="modal-disc-computed" min="0" step="0.01" value="0.00" />
                 </span>
               </div>
-              <div class="dom-acct-field dom-acct-field-triple">
+              <div class="dom-acct-field dom-acct-field-triple" id="cust-markup-row">
                 <label>Markup</label>
                 <input class="dom-input modal-calc dom-acct-input-sm dom-max10 dom-amount" type="text" inputmode="decimal" id="modal-markup" min="0" max="9999999999" step="0.01" value="0.00" />
                 <label>Addl Markup</label>
                 <input class="dom-input modal-calc dom-acct-input-sm dom-max10 dom-amount" type="text" inputmode="decimal" id="modal-addl-markup" min="0" max="9999999999" step="0.01" value="0.00" />
-                <label>SSR Markup</label>
+                <label id="modal-ssr-markup-label">SSR Markup</label>
                 <input class="dom-input modal-calc dom-acct-input-sm dom-max10 dom-amount" type="text" inputmode="decimal" id="modal-ssr-markup" min="0" max="9999999999" step="0.01" value="0.00" />
               </div>
-              <div class="dom-acct-field dom-acct-field-triple">
+              <!-- Cancellation mode ONLY - sum of whichever Markup
+                   components the user picks via the eye icon's popup
+                   (Customer Markup/Addl Markup/SSR Markup), summed across
+                   the WHOLE chain being cancelled (original booking +
+                   every reschedule) - see openMarkupReversalModal in
+                   page-ticket-entry.js. Non-editable, same "eye popup"
+                   pattern as GST Amount above. Hidden for every other
+                   ticket/mode (default display:none, shown only by
+                   openFareModal's cancellationMode branch). Label is
+                   wider than the standard 138px .dom-acct-field label
+                   and wraps instead of overflowing, so this row lines up
+                   cleanly with the others instead of spilling over. -->
+              <div class="dom-acct-field" id="cx-cust-markup-reversal-row" style="display:none;">
+                <label style="flex-basis:150px; white-space:normal; line-height:1.1;">Customer Markup Reversal</label>
+                <span style="flex:1; display:flex; align-items:center; gap:4px;">
+                  <div class="dom-input-readonly" id="modal-cust-markup-reversal" style="flex:1; min-width:0; text-align:right; justify-content:flex-end;">0.00</div>
+                  <button type="button" class="dom-eye-btn" id="modal-cust-markup-reversal-btn" title="Select Markups to reverse">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                  </button>
+                </span>
+              </div>
+              <div class="dom-acct-field dom-acct-field-triple" id="cust-service-fee-row">
                 <label>Service Fee</label>
                 <input class="dom-input modal-calc dom-acct-input-sm dom-max10 dom-amount" type="text" inputmode="decimal" id="modal-service-fee" min="0" max="9999999999" step="0.01" value="0.00" />
                 <label>Addl Service Fee</label>
                 <input class="dom-input modal-calc dom-acct-input-sm dom-max10 dom-amount" type="text" inputmode="decimal" id="modal-addl-service-fee" min="0" max="9999999999" step="0.01" value="0.00" />
-                <label>SSR Service Fee</label>
+                <label id="modal-ssr-service-fee-label">SSR Service Fee</label>
                 <input class="dom-input modal-calc dom-acct-input-sm dom-max10 dom-amount" type="text" inputmode="decimal" id="modal-ssr-service-fee" min="0" max="9999999999" step="0.01" value="0.00" />
               </div>
               <!-- Taxable Amount is display-only - Service Fee + Addl
@@ -695,6 +736,18 @@
                 <label>Addl Markup</label>
                 <input class="dom-input modal-calc dom-acct-input-sm dom-max10 dom-amount" type="text" inputmode="decimal" id="modal-supp-addl-markup" min="0" max="9999999999" step="0.01" value="0.00" />
               </div>
+              <!-- Cancellation mode ONLY - same Markup Reversal pattern as
+                   the Customer card's own (see there for the full
+                   explanation), summing Supplier Markup/Addl Markup. -->
+              <div class="dom-acct-field" id="cx-supp-markup-reversal-row" style="display:none;">
+                <label style="flex-basis:150px; white-space:normal; line-height:1.1;">Supplier Markup Reversal</label>
+                <span style="flex:1; display:flex; align-items:center; gap:4px;">
+                  <div class="dom-input-readonly" id="modal-supp-markup-reversal" style="flex:1; min-width:0; text-align:right; justify-content:flex-end;">0.00</div>
+                  <button type="button" class="dom-eye-btn" id="modal-supp-markup-reversal-btn" title="Select Markups to reverse">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                  </button>
+                </span>
+              </div>
               <div class="dom-acct-field dom-acct-field-dual">
                 <label>Service Fee</label>
                 <input class="dom-input modal-calc dom-acct-input-sm dom-max10 dom-amount" type="text" inputmode="decimal" id="modal-supp-service-fee" min="0" max="9999999999" step="0.01" value="0.00" />
@@ -711,26 +764,25 @@
                   <div class="dom-input-readonly dom-acct-input-sm" id="modal-supp-tds-computed">0.00</div>
                 </span>
               </div>
-              <!-- Reschedule tab ONLY - GST Amount in the same
-                   .acct-pct-box dual-box format as Commission Amount
-                   above (one label, % box with "%" printed inside + wide
-                   amount box) instead of two separate GST %/GST Amount
-                   fields. -->
+              <!-- Reschedule tab ONLY - Taxable Amount/GST Amount in the
+                   same eye-icon format as the default (Booking) layout
+                   below, matching the Customer card's own Agent Penalty/
+                   Taxable Amount/GST Amount row exactly (2026-10-08 -
+                   previously a flat %-box/amount dual-box here). -->
               <div id="acct-resched-supp-gst-row" style="display:none;">
-                <div class="dom-acct-field dom-acct-field-dual" style="grid-template-columns: 50px 1fr 50px 1fr;">
-                  <label style="white-space:normal; line-height:1.1; font-size:10px;">GST Amount</label>
-                  <span id="resched-supp-gst-box" style="display:flex; align-items:center; gap:4px;">
-                    <span class="acct-pct-box"><span id="resched-supp-gst-pct-slot"></span><span class="acct-pct-suffix">%</span></span>
-                    <span id="resched-supp-gst-amt-slot" style="flex:1; min-width:0;"></span>
-                  </span>
+                <div class="dom-acct-field dom-acct-field-triple" style="grid-template-columns: 50px minmax(48px, 1fr) 50px minmax(48px, 1fr) 50px minmax(48px, 1fr);">
                   <!-- Label text + underlying field swap to Cancellation
                        Penalty in Cancellation mode (see openFareModal/
                        writeModalPassenger/readModalPassenger) - same one
                        input either way, reschedule/cancellation modes
                        are mutually exclusive so it's never ambiguous
                        which it means. -->
-                  <label id="modal-reschedule-penalty-label" style="white-space:normal; line-height:1.1; font-size:10px;">Reschedule Penalty</label>
+                  <label id="modal-reschedule-penalty-label" style="white-space:normal; line-height:1.1; font-size:10px;">Penalty Amount</label>
                   <input class="dom-input modal-calc dom-acct-input-sm dom-max10 dom-amount" type="text" inputmode="decimal" id="modal-reschedule-penalty" min="0" max="9999999999" step="0.01" value="0.00" />
+                  <label style="white-space:normal; line-height:1.1; font-size:10px;">Taxable Amount</label>
+                  <span id="resched-supp-taxable-slot" style="text-align:right;"></span>
+                  <label style="white-space:normal; line-height:1.1; font-size:10px;">GST Amount</label>
+                  <span id="resched-supp-gst-slot" style="display:flex; align-items:center; gap:4px;"></span>
                 </div>
                 <!-- Merging Commission Amount + TDS Amount onto one row
                      above (in acct-resched-supp-row) leaves this card one
@@ -739,17 +791,40 @@
                      difference, same reasoning as the Customer card's own. -->
                 <div style="height:24px; flex-shrink:0;"></div>
               </div>
-              <!-- GST % / GST Amount - default (Parent PNR Details + every
-                   normal, non-reschedule ticket) layout, unchanged. -->
-              <div class="dom-acct-field dom-acct-field-dual" id="acct-default-supp-gst-row">
-                <label>GST %</label>
-                <span id="default-supp-gstpct-slot">
-                  <input class="dom-input modal-calc dom-acct-input-sm dom-amount" type="text" inputmode="decimal" id="modal-supp-gst-pct" min="0" step="0.01" value="0.00" />
+              <!-- Taxable Amount / GST Amount - default (Parent PNR Details +
+                   every normal, non-reschedule ticket) layout. Same pattern
+                   as the Customer card's own Taxable Amount/GST Amount row
+                   (2026-10-07) - Supplier GST % is no longer hand-typed,
+                   GST Amount = Supplier Service Fee + Supplier Addl Service
+                   Fee each times its OWN mapped ledger's GST% (Master
+                   Mapping - "Supplier Service Fee A/c"/"Supplier Addl
+                   Service Fee A/c"), not one flat rate (see computeSuppLine).
+                   modal-supp-gst-pct still exists (hidden, inside the
+                   Reschedule tab's own merged row further up) purely so
+                   JV_GUARDED_FIELDS/layoutAcctFieldsForReschedule's existing
+                   element references keep working - never shown or editable
+                   here. -->
+              <div class="dom-acct-field dom-acct-field-dual" id="acct-default-supp-gst-row" style="grid-template-columns: 84px 1fr 68px 1fr;">
+                <label style="white-space:normal; line-height:1.1; font-size:10px;">Taxable Amount</label>
+                <span id="default-supp-taxable-slot">
+                  <div class="dom-input-readonly" id="modal-supp-taxable-amount" style="text-align:right; justify-content:flex-end;">0.00</div>
                 </span>
-                <label>GST Amount</label>
-                <span id="default-supp-gstamt-slot">
-                  <div class="dom-input-readonly dom-acct-input-sm" id="modal-supp-gst-computed">0.00</div>
+                <label style="white-space:normal; line-height:1.1; font-size:10px;">GST Amount</label>
+                <span id="default-supp-gst-slot" style="display:flex; align-items:center; gap:4px;">
+                  <div class="dom-input-readonly" id="modal-supp-gst-computed" style="flex:1; min-width:0; text-align:right; justify-content:flex-end;">0.00</div>
+                  <button type="button" class="dom-eye-btn" id="modal-supp-gst-detail-btn" title="View GST Amount calculation">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                  </button>
                 </span>
+              </div>
+              <!-- Hidden - kept only so existing element-id references
+                   (JV_GUARDED_FIELDS, layoutAcctFieldsForReschedule,
+                   readModalPassenger/writeModalPassenger) keep working.
+                   No longer shown/editable anywhere - same "hidden but kept"
+                   pattern as the Customer card's own modal-gst-pct above. -->
+              <div class="dom-acct-field dom-acct-field-dual" style="display:none;">
+                <label>Supplier GST %</label>
+                <input class="dom-input modal-calc dom-acct-input-sm dom-amount" type="text" inputmode="decimal" id="modal-supp-gst-pct" min="0" step="0.01" value="0.00" />
               </div>
             </div>
             <div class="dom-acct-box-actions">
@@ -791,9 +866,11 @@
 
         <div style="grid-column: 1 / -1; display:flex; align-items:center; gap:6px;">
           <label style="flex:0 0 100px;">Airline Code</label>
-          <input class="dom-input" type="text" id="sector-airline-code" maxlength="2" placeholder="e.g. 6E" style="text-transform:uppercase; width:48px; flex:0 0 auto;" />
+          <input class="dom-input" type="text" id="sector-airline-code" list="sector-airline-code-options" maxlength="2" placeholder="e.g. 6E" autocomplete="off" style="text-transform:uppercase; width:48px; flex:0 0 auto;" />
+          <datalist id="sector-airline-code-options"></datalist>
           <label style="margin-left:8px;">Airline Name</label>
-          <input class="dom-input" type="text" id="sector-airline-name" placeholder="e.g. IndiGo" style="flex:1;" />
+          <input class="dom-input" type="text" id="sector-airline-name" list="sector-airline-name-options" placeholder="e.g. IndiGo" autocomplete="off" style="flex:1;" />
+          <datalist id="sector-airline-name-options"></datalist>
         </div>
 
         <label>Travel Date</label>
@@ -842,6 +919,35 @@
     <div class="dom-modal-footer">
       <div></div>
       <button type="button" class="dom-nav-btn btn-primary" id="gst-detail-ok-btn" style="font-weight:700;">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Cancellation mode ONLY - Markup Reversal selection popup, shared by
+     both the Customer and Supplier eye icons (title/rows rebuilt per
+     click - see openMarkupReversalModal in page-ticket-entry.js). Each
+     row's Amount is that component's own CUMULATIVE total across the
+     whole chain being cancelled (original booking + every reschedule) -
+     checking a row includes it in the Reversal total shown back on the
+     main form; unlike GST Amount's own popup (view-only), this one is a
+     live selection, so it has its own Cancel/Apply instead of just Close. -->
+<div class="dom-modal-backdrop spa-extra-content" id="markup-reversal-modal">
+  <div class="dom-modal-window" style="max-width: 420px; width: 95%;">
+    <div class="dom-modal-titlebar">
+      <div id="markup-reversal-title">Markup Reversal</div>
+      <button type="button" class="dom-titlebar-btn btn-close" id="markup-reversal-close-x-btn" title="Close">&times;</button>
+    </div>
+    <div class="dom-modal-body" style="display:block; padding:12px;">
+      <table class="dom-gst-detail-table">
+        <thead>
+          <tr><th>Component</th><th>Amount</th><th style="width:32px;"></th></tr>
+        </thead>
+        <tbody id="markup-reversal-tbody"></tbody>
+      </table>
+    </div>
+    <div class="dom-modal-footer">
+      <button type="button" class="dom-nav-btn" id="markup-reversal-cancel-btn">Cancel</button>
+      <button type="button" class="dom-nav-btn btn-primary" id="markup-reversal-apply-btn" style="font-weight:700;">Apply</button>
     </div>
   </div>
 </div>
@@ -1090,9 +1196,19 @@
       <button type="button" class="dom-titlebar-btn btn-close" id="rs-lookup-close-x-btn" title="Close">&times;</button>
     </div>
     <div class="dom-modal-body dom-modal-body-scroll" style="display:block; padding:12px; max-height:76vh;">
-      <div style="display:flex; align-items:flex-end; gap:1rem; flex-wrap:wrap; margin-bottom:12px;">
+      <!-- Same full filter set as the generic Find modal, but no results
+           grid - clicking Reschedule resolves the filters straight to the
+           matching ticket (must match exactly one) and opens the
+           Passenger/Sector picker popup directly via the existing
+           rsLookupTicketForReschedule (reads rs-search-ticket-no, which
+           runLookupModalSearch sets first). -->
+      <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:8px; margin-bottom:10px;">
         <div style="display:flex; flex-direction:column; gap:2px; font-size:11px;">
-          <label style="font-weight:600; color:#334155;">S PNR</label>
+          <label style="font-weight:600; color:#334155;">Invoice Number</label>
+          <input class="dom-input" type="text" id="rs-f-invoice-number" placeholder="e.g. INV-IN-00001" autocomplete="off" />
+        </div>
+        <div style="display:flex; flex-direction:column; gap:2px; font-size:11px;">
+          <label style="font-weight:600; color:#334155;">S PNR / Booking Ref</label>
           <input class="dom-input" type="text" id="rs-search-spnr" placeholder="Booking Reference" autocomplete="off" />
         </div>
         <div style="display:flex; flex-direction:column; gap:2px; font-size:11px;">
@@ -1100,13 +1216,71 @@
           <input class="dom-input" type="text" id="rs-search-airline-pnr" placeholder="Airline PNR" autocomplete="off" />
         </div>
         <div style="display:flex; flex-direction:column; gap:2px; font-size:11px;">
+          <label style="font-weight:600; color:#334155;">GDS PNR</label>
+          <input class="dom-input" type="text" id="rs-f-gds-pnr" placeholder="e.g. GDSX1234" autocomplete="off" />
+        </div>
+        <div style="display:flex; flex-direction:column; gap:2px; font-size:11px;">
           <label style="font-weight:600; color:#334155;">Ticket No</label>
           <input class="dom-input" type="text" id="rs-search-ticket-no" placeholder="Ticket No" autocomplete="off" />
         </div>
-        <button type="button" class="dom-nav-btn btn-primary" id="rs-get-btn" style="font-weight:700;">Get</button>
+        <div style="display:flex; flex-direction:column; gap:2px; font-size:11px;">
+          <label style="font-weight:600; color:#334155;">Customer Name</label>
+          <input class="dom-input" type="text" id="rs-f-customer-name" placeholder="e.g. Sundaram Traders" autocomplete="off" />
+        </div>
+        <div style="display:flex; flex-direction:column; gap:2px; font-size:11px;">
+          <label style="font-weight:600; color:#334155;">Airline Code</label>
+          <input class="dom-input" type="text" id="rs-f-airline-code" placeholder="e.g. 6E" autocomplete="off" />
+        </div>
+        <div aria-hidden="true"></div>
+        <div style="display:flex; flex-direction:column; gap:2px; font-size:11px;">
+          <label style="font-weight:600; color:#334155;">Date Type</label>
+          <div class="dom-date-type-toggle" id="rs-f-date-type" data-value="travel_date">
+            <button type="button" class="dom-date-type-btn active" data-value="travel_date">Travel Date</button>
+            <button type="button" class="dom-date-type-btn" data-value="issue_date">Booking Date</button>
+          </div>
+        </div>
+        <div style="display:flex; flex-direction:column; gap:2px; font-size:11px;">
+          <label style="font-weight:600; color:#334155;">Date From</label>
+          <input class="dom-input" type="date" id="rs-f-date-from" />
+        </div>
+        <div style="display:flex; flex-direction:column; gap:2px; font-size:11px;">
+          <label style="font-weight:600; color:#334155;">Date To</label>
+          <input class="dom-input" type="date" id="rs-f-date-to" />
+        </div>
+      </div>
+      <div style="display:flex; justify-content:flex-end; margin-bottom:10px;">
+        <button type="button" class="dom-nav-btn btn-primary" id="rs-get-btn" style="font-weight:700;">Proceed</button>
+      </div>
+      <div id="rs-results-wrap" style="display:none; max-height:260px; overflow:auto; border:1px solid #CBD5E1;">
+        <table class="dom-table" style="width:100%; font-size:11px; border-collapse:collapse;">
+          <thead><tr style="background:#3B6BB5; color:#fff;">
+            <th style="padding:5px 8px; text-align:left;">Invoice Number</th>
+            <th style="padding:5px 8px; text-align:left;">Booking Ref</th>
+            <th style="padding:5px 8px; text-align:left;">Airline PNR</th>
+            <th style="padding:5px 8px; text-align:left;">Customer</th>
+            <th style="padding:5px 8px; text-align:left;">Airline</th>
+            <th style="padding:5px 8px; text-align:left;">Pax</th>
+          </tr></thead>
+          <tbody id="rs-results-body"></tbody>
+        </table>
       </div>
 
-      <div id="rs-selection-row" style="display:none; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
+    </div>
+  </div>
+</div>
+
+<!-- Reschedule's own Pax/Sector picker - a SEPARATE popup (2026-10-07
+     request), opened on top of reschedule-lookup-modal once a search
+     result is picked (rsLookupTicketForReschedule), instead of growing
+     inline inside that same search popup. -->
+<div class="dom-modal-backdrop spa-extra-content" id="reschedule-pax-modal">
+  <div class="dom-modal-window" style="max-width: 760px; width: 95%; max-height: 90vh;">
+    <div class="dom-modal-titlebar">
+      <div>Select Passenger(s) to Reschedule</div>
+      <button type="button" class="dom-titlebar-btn btn-close" id="rs-pax-close-x-btn" title="Close">&times;</button>
+    </div>
+    <div class="dom-modal-body dom-modal-body-scroll" style="display:block; padding:12px; max-height:76vh;">
+      <div id="rs-selection-row" style="display:grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
         <div style="border:1px solid var(--color-border, #CBD5E1); border-radius:3px; overflow:hidden; display:flex; flex-direction:column; max-height:320px;">
           <div style="padding:8px 10px; font-weight:700; font-size:12px; background:#FAFBFD; border-bottom:1px solid var(--color-border, #CBD5E1);">Passengers</div>
           <div style="overflow-y:auto; flex:1; min-height:0;">
@@ -1143,7 +1317,7 @@
         </div>
       </div>
 
-      <div id="rs-reschedule-row" style="display:none; flex-direction:column; align-items:center; gap:6px;">
+      <div id="rs-reschedule-row" style="display:flex; flex-direction:column; align-items:center; gap:6px;">
         <button type="button" class="dom-nav-btn btn-primary" id="rs-reschedule-btn" style="height:36px; padding:0 28px; font-weight:700;" disabled>Reschedule</button>
         <span style="font-size:11px; color:#64748B;">Reschedule with Selected Passenger(s)</span>
       </div>
@@ -1165,9 +1339,19 @@
       <button type="button" class="dom-titlebar-btn btn-close" id="cx-lookup-close-x-btn" title="Close">&times;</button>
     </div>
     <div class="dom-modal-body dom-modal-body-scroll" style="display:block; padding:12px; max-height:76vh;">
-      <div style="display:flex; align-items:flex-end; gap:1rem; flex-wrap:wrap; margin-bottom:12px;">
+      <!-- Same full filter set as the generic Find modal, but no results
+           grid - clicking Cancel resolves the filters straight to the
+           matching ticket (must match exactly one) and opens the
+           Passenger/Sector picker popup directly via the existing
+           cxLookupTicketForCancellation (reads cx-search-ticket-no, which
+           runLookupModalSearch sets first). -->
+      <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:8px; margin-bottom:10px;">
         <div style="display:flex; flex-direction:column; gap:2px; font-size:11px;">
-          <label style="font-weight:600; color:#334155;">S PNR</label>
+          <label style="font-weight:600; color:#334155;">Invoice Number</label>
+          <input class="dom-input" type="text" id="cx-f-invoice-number" placeholder="e.g. INV-IN-00001" autocomplete="off" />
+        </div>
+        <div style="display:flex; flex-direction:column; gap:2px; font-size:11px;">
+          <label style="font-weight:600; color:#334155;">S PNR / Booking Ref</label>
           <input class="dom-input" type="text" id="cx-search-spnr" placeholder="Booking Reference" autocomplete="off" />
         </div>
         <div style="display:flex; flex-direction:column; gap:2px; font-size:11px;">
@@ -1175,13 +1359,71 @@
           <input class="dom-input" type="text" id="cx-search-airline-pnr" placeholder="Airline PNR" autocomplete="off" />
         </div>
         <div style="display:flex; flex-direction:column; gap:2px; font-size:11px;">
+          <label style="font-weight:600; color:#334155;">GDS PNR</label>
+          <input class="dom-input" type="text" id="cx-f-gds-pnr" placeholder="e.g. GDSX1234" autocomplete="off" />
+        </div>
+        <div style="display:flex; flex-direction:column; gap:2px; font-size:11px;">
           <label style="font-weight:600; color:#334155;">Ticket No</label>
           <input class="dom-input" type="text" id="cx-search-ticket-no" placeholder="Ticket No" autocomplete="off" />
         </div>
-        <button type="button" class="dom-nav-btn btn-primary" id="cx-get-btn" style="font-weight:700;">Get</button>
+        <div style="display:flex; flex-direction:column; gap:2px; font-size:11px;">
+          <label style="font-weight:600; color:#334155;">Customer Name</label>
+          <input class="dom-input" type="text" id="cx-f-customer-name" placeholder="e.g. Sundaram Traders" autocomplete="off" />
+        </div>
+        <div style="display:flex; flex-direction:column; gap:2px; font-size:11px;">
+          <label style="font-weight:600; color:#334155;">Airline Code</label>
+          <input class="dom-input" type="text" id="cx-f-airline-code" placeholder="e.g. 6E" autocomplete="off" />
+        </div>
+        <div aria-hidden="true"></div>
+        <div style="display:flex; flex-direction:column; gap:2px; font-size:11px;">
+          <label style="font-weight:600; color:#334155;">Date Type</label>
+          <div class="dom-date-type-toggle" id="cx-f-date-type" data-value="travel_date">
+            <button type="button" class="dom-date-type-btn active" data-value="travel_date">Travel Date</button>
+            <button type="button" class="dom-date-type-btn" data-value="issue_date">Booking Date</button>
+          </div>
+        </div>
+        <div style="display:flex; flex-direction:column; gap:2px; font-size:11px;">
+          <label style="font-weight:600; color:#334155;">Date From</label>
+          <input class="dom-input" type="date" id="cx-f-date-from" />
+        </div>
+        <div style="display:flex; flex-direction:column; gap:2px; font-size:11px;">
+          <label style="font-weight:600; color:#334155;">Date To</label>
+          <input class="dom-input" type="date" id="cx-f-date-to" />
+        </div>
+      </div>
+      <div style="display:flex; justify-content:flex-end; margin-bottom:10px;">
+        <button type="button" class="dom-nav-btn btn-primary" id="cx-get-btn" style="font-weight:700;">Proceed</button>
+      </div>
+      <div id="cx-results-wrap" style="display:none; max-height:260px; overflow:auto; border:1px solid #CBD5E1;">
+        <table class="dom-table" style="width:100%; font-size:11px; border-collapse:collapse;">
+          <thead><tr style="background:#3B6BB5; color:#fff;">
+            <th style="padding:5px 8px; text-align:left;">Invoice Number</th>
+            <th style="padding:5px 8px; text-align:left;">Booking Ref</th>
+            <th style="padding:5px 8px; text-align:left;">Airline PNR</th>
+            <th style="padding:5px 8px; text-align:left;">Customer</th>
+            <th style="padding:5px 8px; text-align:left;">Airline</th>
+            <th style="padding:5px 8px; text-align:left;">Pax</th>
+          </tr></thead>
+          <tbody id="cx-results-body"></tbody>
+        </table>
       </div>
 
-      <div id="cx-selection-row" style="display:none; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
+    </div>
+  </div>
+</div>
+
+<!-- Cancellation's own Pax/Sector picker - a SEPARATE popup (2026-10-07
+     request), opened on top of cancellation-lookup-modal once a search
+     result is picked (cxLookupTicketForCancellation), instead of growing
+     inline inside that same search popup. -->
+<div class="dom-modal-backdrop spa-extra-content" id="cancellation-pax-modal">
+  <div class="dom-modal-window" style="max-width: 760px; width: 95%; max-height: 90vh;">
+    <div class="dom-modal-titlebar">
+      <div>Select Passenger(s) to Cancel</div>
+      <button type="button" class="dom-titlebar-btn btn-close" id="cx-pax-close-x-btn" title="Close">&times;</button>
+    </div>
+    <div class="dom-modal-body dom-modal-body-scroll" style="display:block; padding:12px; max-height:76vh;">
+      <div id="cx-selection-row" style="display:grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
         <div style="border:1px solid var(--color-border, #CBD5E1); border-radius:3px; overflow:hidden; display:flex; flex-direction:column; max-height:320px;">
           <div style="padding:8px 10px; font-weight:700; font-size:12px; background:#FAFBFD; border-bottom:1px solid var(--color-border, #CBD5E1);">Passengers</div>
           <div style="overflow-y:auto; flex:1; min-height:0;">
@@ -1218,7 +1460,7 @@
         </div>
       </div>
 
-      <div id="cx-cancel-row" style="display:none; flex-direction:column; align-items:center; gap:6px;">
+      <div id="cx-cancel-row" style="display:flex; flex-direction:column; align-items:center; gap:6px;">
         <button type="button" class="dom-nav-btn btn-primary" id="cx-cancel-btn" style="height:36px; padding:0 28px; font-weight:700;" disabled>Cancel Ticket</button>
         <span style="font-size:11px; color:#64748B;">Cancel Selected Passenger(s)</span>
       </div>
@@ -1230,7 +1472,7 @@
 <script src="assets/js/mock-data.js"></script>
 <script src="assets/js/api.js"></script>
 <script src="assets/js/util.js"></script>
-<script src="assets/js/shell.js?v=10"></script>
+<script src="assets/js/shell.js?v=13"></script>
 <script src="assets/js/entry-common.js"></script>
-<script src="assets/js/page-ticket-entry.js?v=30"></script>
+<script src="assets/js/page-ticket-entry.js?v=87"></script>
 </body></html>

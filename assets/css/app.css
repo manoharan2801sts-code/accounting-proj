@@ -1953,6 +1953,16 @@ input.dom-input[type="number"], input.dom-input.dom-amount {
 .dom-nav-btn.btn-danger:hover {
   background: #FEE2E2;
 }
+/* Discard on a still-empty New Ticket/Reschedule/Cancellation form (no
+   passengers added yet) - nothing to actually discard yet, so it's
+   blurred/greyed and inert rather than a live, clickable action. */
+.dom-nav-btn.is-disabled {
+  opacity: 0.45;
+  filter: blur(0.3px);
+  pointer-events: none;
+  cursor: not-allowed;
+  box-shadow: none;
+}
 
 /* Find Ticket modal — Travel Date / Booking Date segmented toggle */
 .dom-date-type-toggle {
@@ -2423,7 +2433,7 @@ input.dom-input[type="number"], input.dom-input.dom-amount {
 #resched-supp-comm-pct-slot, #resched-supp-comm-amt-slot,
 #resched-supp-tds-pct-slot, #resched-supp-tds-amt-slot,
 #default-supp-gstpct-slot, #default-supp-gstamt-slot,
-#resched-supp-gst-pct-slot, #resched-supp-gst-amt-slot {
+#resched-supp-taxable-slot {
   display: contents;
 }
 /* Merged-row containers (Discount+TDS / Commission+TDS) - flex column so

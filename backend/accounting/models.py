@@ -34,6 +34,7 @@ from django.db import models
 # there are more than a few dozen tickets. Cleared from views.py whenever
 # Master Mapping or a mapped Ledger's own gst_percentage is edited.
 _gst_pct_cache = {}
+_field_gst_pct_cache = _gst_pct_cache  # the build's name for the same cache
 
 
 def clear_gst_pct_cache():
@@ -232,7 +233,7 @@ class Ticket(models.Model):
     """The invoice/booking header — Part 1 + Part 2 of the New Ticket form."""
 
     BOOKING_MODE_CHOICES = [("Manual", "Manual"), ("Auto Push", "Auto Push")]
-    BOOKING_STATUS_CHOICES = [("Confirmed", "Confirmed"), ("Re-Scheduled", "Re-Scheduled")]
+    BOOKING_STATUS_CHOICES = [("Confirmed", "Confirmed"), ("Re-Scheduled", "Re-Scheduled"), ("Normal Cancelled", "Normal Cancelled")]
     TRAVEL_TYPE_CHOICES = [("Domestic", "Domestic"), ("International", "International")]
     PAYMENT_MODE_CHOICES = [("Top-up", "Top-up"), ("Payment Gateway", "Payment Gateway")]
     AIRLINE_CATEGORY_CHOICES = [("LCC", "LCC"), ("FSC", "FSC"), ("OSC", "OSC")]
@@ -281,7 +282,7 @@ class Ticket(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        db_table = "Tickets"
+        db_table = "AL_Tickets"
         constraints = [
             models.UniqueConstraint(fields=["company_id", "invoice_number"], name="uq_ticket_company_invoice_no"),
             models.UniqueConstraint(fields=["company_id", "booking_reference"], name="uq_ticket_company_booking_ref"),
@@ -391,6 +392,17 @@ class TicketLine(models.Model):
 
     status = models.CharField(max_length=15, choices=STATUS_CHOICES, default="ISSUED")
 
+    # Set by the Cancellation flow once this exact line has been cancelled
+    # (views.cancellation_ticket_create / dbo.sp_CancellationTicket's SAVE
+    # action) - never flipped back, and never deletes the row (record-keeping
+    # only). Checked before allowing a line to be cancelled again.
+    # db_default (not just `default`) is required - every INSERT into this
+    # table goes through dbo.sp_Ticket's own raw SQL (exec_sp, not the
+    # Django ORM), which never mentions this column at all, so without a
+    # real server-side DEFAULT constraint, SQL Server tries to insert NULL
+    # into a NOT NULL column and the whole ticket save fails outright.
+    canceled = models.BooleanField(default=False, db_default=False)
+
     # Moved here from the Ticket header — each passenger/segment can be sourced from
     # a different supplier (Sundry Creditor ledger), so this is now per-line, not
     # once per booking. Nullable: a line can be saved before a supplier is picked;
@@ -408,24 +420,30 @@ class TicketLine(models.Model):
     # historical record of which card number was charged at the time.
     card_number = models.CharField(max_length=40, null=True, blank=True)
 
-    # Reschedule eligibility flag (added 2026-10-03) - True (DB value 1) =
-    # this passenger/line has NOT been rescheduled yet and is still
-    # eligible to be; False (DB value 0) = it already has a
-    # RescheduleAirlineTicketLine against it (see original_ticket_line)
-    # and can never be rescheduled again. Deliberately a plain extra
-    # column on TicketLine itself, not a derived/computed value - nothing
-    # else on this table changes. Flipped to False the moment a reschedule
-    # is created against this line (reschedule_ticket_create), flipped
-    # back to True if that reschedule is ever deleted (not currently
-    # possible from the UI, but kept correct for when it is) - see
-    # views.py's reschedule_ticket_create/ticket_lookup_for_reschedule.
-    is_reschedule_eligible = models.BooleanField(default=True)
+    # Reschedule flag (added 2026-10-03, renamed + inverted 2026-10-07 -
+    # was is_reschedule_eligible, True=not yet rescheduled; existing data
+    # was inverted in place by the rename migration, not just relabeled).
+    # False (DB value 0, the default) = this passenger/line has NOT been
+    # rescheduled yet and is still eligible to be; True (DB value 1) = it
+    # already has a RescheduleAirlineTicketLine against it (see
+    # original_ticket_line) and can never be rescheduled again.
+    # Deliberately a plain extra column on TicketLine itself, not a
+    # derived/computed value - nothing else on this table changes.
+    # Flipped to True the moment a reschedule is created against this line
+    # (reschedule_ticket_create), flipped back to False if that reschedule
+    # is ever deleted (not currently possible from the UI, but kept
+    # correct for when it is) - see views.py's reschedule_ticket_create/
+    # ticket_lookup_for_reschedule. db_default (not just default) is
+    # required - every INSERT into this table goes through dbo.sp_Ticket's
+    # own raw SQL (exec_sp), never the Django ORM (same reasoning as
+    # TicketLine.canceled above).
+    rescheduled = models.BooleanField(default=False, db_default=False)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        db_table = "TicketLines"
+        db_table = "AL_TicketLines"
         constraints = [
             models.UniqueConstraint(fields=["ticket_no"], name="uq_ticketline_ticket_no"),
         ]
@@ -539,7 +557,28 @@ class TicketLine(models.Model):
 
     @property
     def computed_supp_gst(self):
-        return (self.supp_service_fee + self.supp_addl_service_fee) * (self.supp_gst_pct / 100)
+        """
+        Supplier GST Amount - same convention as computed_gst above
+        (2026-10-07): each Supplier fee component times its OWN mapped
+        ledger's GST% (Master Mapping), not one flat rate hand-typed on the
+        line. supp_gst_pct itself is unused now (kept, always 0 - the field
+        was removed from the UI) - see page-ticket-entry.js.
+        """
+        company_id = self.ticket.company_id
+
+        def field_ledger_gst_pct(field_name):
+            cache_key = (company_id, field_name)
+            if cache_key not in _field_gst_pct_cache:
+                m = MasterMapping.objects.filter(
+                    company_id=company_id, product_type="Airline", field_name=field_name
+                ).select_related("ledger").first()
+                _field_gst_pct_cache[cache_key] = float(m.ledger.gst_percentage) if m and m.ledger_id else 0.0
+            return _field_gst_pct_cache[cache_key]
+
+        return (
+            float(self.supp_service_fee) * field_ledger_gst_pct("Supplier Service Fee A/c") / 100
+            + float(self.supp_addl_service_fee) * field_ledger_gst_pct("Supplier Addl Service Fee A/c") / 100
+        )
 
 
 class RescheduleAirlineTicket(models.Model):
@@ -606,7 +645,7 @@ class RescheduleAirlineTicket(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        db_table = "RescheduleAirlineTickets"
+        db_table = "Rescheduled_Al_Ticket"
         constraints = [
             models.UniqueConstraint(fields=["company_id", "invoice_number"], name="uq_resched_ticket_company_invoice_no"),
             models.UniqueConstraint(fields=["company_id", "booking_reference"], name="uq_resched_ticket_company_booking_ref"),
@@ -651,13 +690,14 @@ class RescheduleAirlineTicketLine(models.Model):
         "self", on_delete=models.PROTECT, null=True, blank=True,
         related_name="chained_reschedule_lines", db_column="based_on_reschedule_line_id"
     )
-    # Reschedule eligibility flag (added 2026-10-03, same convention as
-    # TicketLine.is_reschedule_eligible) - True (1) = this reschedule's own
-    # line hasn't itself been rescheduled again yet; False (0) = it has
+    # Reschedule flag (added 2026-10-03, renamed + inverted 2026-10-07 -
+    # same convention and same rename as TicketLine.rescheduled above,
+    # including db_default) - False (0, the default) = this reschedule's
+    # own line hasn't itself been rescheduled again yet; True (1) = it has
     # (see chained_reschedule_lines) and can't be rescheduled a second
     # time. Independent of original_ticket_line's own flag, which only
     # tracks whether THAT original line has ever been rescheduled at all.
-    is_reschedule_eligible = models.BooleanField(default=True)
+    rescheduled = models.BooleanField(default=False, db_default=False)
     # Stored (not dynamically re-derived) Parent PNR - the Booking
     # Reference of whichever ticket/reschedule this line was actually
     # rescheduled FROM, captured once at creation (reschedule_ticket_
@@ -743,6 +783,12 @@ class RescheduleAirlineTicketLine(models.Model):
     total_billed = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     status = models.CharField(max_length=15, choices=TicketLine.STATUS_CHOICES, default="ISSUED")
 
+    # Same reasoning as TicketLine.canceled (incl. db_default - every INSERT
+    # here goes through dbo.sp_RescheduleTicket's own raw SQL, not the ORM)
+    # - set once this specific reschedule line is cancelled, never flipped
+    # back, never deletes the row.
+    canceled = models.BooleanField(default=False, db_default=False)
+
     supplier = models.ForeignKey(
         Ledger, on_delete=models.PROTECT, related_name="reschedulelines_as_supplier",
         null=True, blank=True, db_column="supplier_ledger_id"
@@ -755,7 +801,7 @@ class RescheduleAirlineTicketLine(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        db_table = "RescheduleAirlineTicketLines"
+        db_table = "Rescheduled_Al_TicketLines"
         constraints = [
             models.UniqueConstraint(fields=["ticket_no"], name="uq_resched_ticketline_ticket_no"),
         ]
@@ -840,7 +886,323 @@ class RescheduleAirlineTicketLine(models.Model):
 
     @property
     def computed_supp_gst(self):
-        return (self.supp_service_fee + self.supp_addl_service_fee) * (self.supp_gst_pct / 100)
+        """Supplier GST Amount - same convention as computed_gst above (2026-10-07). See TicketLine's own copy for the full explanation."""
+        company_id = self.reschedule_ticket.company_id
+
+        def field_ledger_gst_pct(field_name):
+            cache_key = (company_id, field_name)
+            if cache_key not in _field_gst_pct_cache:
+                m = MasterMapping.objects.filter(
+                    company_id=company_id, product_type="Airline", field_name=field_name
+                ).select_related("ledger").first()
+                _field_gst_pct_cache[cache_key] = float(m.ledger.gst_percentage) if m and m.ledger_id else 0.0
+            return _field_gst_pct_cache[cache_key]
+
+        return (
+            float(self.supp_service_fee) * field_ledger_gst_pct("Supplier Service Fee A/c") / 100
+            + float(self.supp_addl_service_fee) * field_ledger_gst_pct("Supplier Addl Service Fee A/c") / 100
+        )
+
+
+class CancellationAirlineTicket(models.Model):
+    """
+    The header for a cancelled Airline ticket (cancellation-new.html's
+    "Cancellation" screen) - mirrors Ticket/RescheduleAirlineTicket's own
+    columns, PLUS original_ticket, which is what lets the Cancellation
+    screen show the original booking's data (Parent PNR, its own invoice/
+    booking details) by following this link rather than duplicating any
+    of Ticket's own columns here. Originally record-keeping only (2026-10-06);
+    since 2026-10-07 every Save/Update also posts its own separate
+    Cancellation Journal Voucher (JournalVoucher.source_cancellation_ticket,
+    category "AIRLINE_CANCELLATION", ALC-1, ALC-2, ...) - see
+    views._compute_cancellation_jv_lines. The original booking's own JV is
+    never touched.
+    """
+    id = models.AutoField(primary_key=True)
+    company_id = models.IntegerField()
+    branch_name = models.CharField(max_length=100, null=True, blank=True)
+
+    # The ticket this cancellation was raised against - same convention as
+    # RescheduleAirlineTicket.original_ticket.
+    original_ticket = models.ForeignKey(
+        Ticket, on_delete=models.PROTECT, related_name="cancellations", db_column="original_ticket_id"
+    )
+
+    invoice_number = models.CharField(max_length=20)
+    invoice_date = models.DateField()
+    invoice_type = models.CharField(max_length=100, null=True, blank=True)
+    booking_mode = models.CharField(max_length=20, choices=Ticket.BOOKING_MODE_CHOICES, default="Manual")
+    booking_type = models.CharField(max_length=30, null=True, blank=True)
+    # Frozen to "Normal Cancelled" by the frontend (enterBlankCancellationShell/
+    # enterCancellationMode in page-ticket-entry.js) - kept as a real,
+    # editable column rather than hardcoded, same choices as Ticket's own.
+    booking_status = models.CharField(max_length=20, choices=Ticket.BOOKING_STATUS_CHOICES, null=True, blank=True)
+
+    customer = models.ForeignKey(
+        Ledger, on_delete=models.PROTECT, related_name="cancellations_as_customer", db_column="customer_ledger_id"
+    )
+    supplier = models.ForeignKey(
+        Ledger, on_delete=models.PROTECT, related_name="cancellations_as_supplier",
+        null=True, blank=True, db_column="supplier_ledger_id"
+    )
+
+    travel_type = models.CharField(max_length=20, choices=Ticket.TRAVEL_TYPE_CHOICES, null=True, blank=True)
+    # Manual choice on the Cancellation screen, never auto-filled from the
+    # original ticket (see page-ticket-entry.js's enterCancellationMode).
+    user_name = models.CharField(max_length=100, null=True, blank=True)
+    currency = models.CharField(max_length=5, default="INR")
+    roe = models.DecimalField(max_digits=10, decimal_places=4, default=1)
+    booking_given_by = models.CharField(max_length=25, null=True, blank=True)
+
+    # "Cancellation Reference" / "Cancellation Ref Date" in the UI - this
+    # cancellation's OWN reference, not the original ticket's (that's
+    # original_ticket.booking_reference instead). Named for what it is,
+    # unlike Reschedule's own booking_reference/booking_ref_date columns
+    # (kept that way there for historical/field-reuse reasons).
+    cancellation_reference = models.CharField(max_length=30)
+    cancellation_ref_date = models.DateField(null=True, blank=True)
+    airline_pnr = models.CharField(max_length=13, null=True, blank=True)
+    gds_pnr = models.CharField(max_length=13, null=True, blank=True)
+    office_id = models.CharField(max_length=30, null=True, blank=True)
+
+    # Defaults to "Top-up" on the Cancellation screen (see
+    # enterBlankCancellationShell) - kept as a real, editable column.
+    payment_mode = models.CharField(max_length=20, choices=Ticket.PAYMENT_MODE_CHOICES, null=True, blank=True)
+    payment_gateway_ref = models.CharField(max_length=60, null=True, blank=True)
+    airline_category = models.CharField(max_length=5, choices=Ticket.AIRLINE_CATEGORY_CHOICES, null=True, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "Cancellation_AL_Tickets"
+        constraints = [
+            models.UniqueConstraint(fields=["company_id", "invoice_number"], name="uq_cancel_ticket_company_invoice_no"),
+            models.UniqueConstraint(fields=["company_id", "cancellation_reference"], name="uq_cancel_ticket_company_cancel_ref"),
+        ]
+        indexes = [models.Index(fields=["company_id"]), models.Index(fields=["original_ticket"])]
+
+    def __str__(self):
+        return self.invoice_number
+
+
+class CancellationAirlineTicketLine(models.Model):
+    """
+    One cancelled passenger/line (cancellation_ticket's own lines) -
+    mirrors TicketLine/RescheduleAirlineTicketLine's fare-breakdown
+    columns for record-keeping (the Cancellation screen's own fare table),
+    but deliberately has no is_reschedule_eligible-style flag or chaining
+    fields - a cancellation is terminal, it never chains to a further
+    reschedule/cancellation the way RescheduleAirlineTicketLine does.
+    original_ticket_line has a UNIQUE constraint instead: the same
+    passenger line can only ever be cancelled once.
+    """
+    id = models.AutoField(primary_key=True)
+    cancellation_ticket = models.ForeignKey(
+        CancellationAirlineTicket, on_delete=models.CASCADE, related_name="lines", db_column="cancellation_ticket_id"
+    )
+    # The exact original passenger line this cancellation was raised for.
+    original_ticket_line = models.OneToOneField(
+        TicketLine, on_delete=models.PROTECT, related_name="cancellation_line", db_column="original_ticket_line_id"
+    )
+
+    airline_code = models.CharField(max_length=200, null=True, blank=True)
+    airline_name = models.CharField(max_length=200, null=True, blank=True)
+    airline_category = models.CharField(max_length=5, choices=Ticket.AIRLINE_CATEGORY_CHOICES, null=True, blank=True)
+    flight_no = models.CharField(max_length=200, null=True, blank=True)
+    ticket_no = models.CharField(max_length=30)
+    passenger_name = models.CharField(max_length=50)
+    pax_type = models.CharField(max_length=10, choices=TicketLine.PAX_TYPE_CHOICES, default="Adult")
+    sector = models.CharField(max_length=200, null=True, blank=True)
+    travel_date = models.CharField(max_length=200, null=True, blank=True)
+    cabin = models.CharField(max_length=200, null=True, blank=True)
+    travel_class = models.CharField(max_length=200, null=True, blank=True)
+    fare_type = models.CharField(max_length=300, null=True, blank=True)
+
+    # Fare breakup - same shape as TicketLine's own, captured as it stood
+    # on the original line at the moment of cancellation (record-keeping,
+    # never recomputed afterwards).
+    basic_fare = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    yq = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    yr = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    k3_tax = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    tax_others = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    seat = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    meal = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    baggage = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    other_ssr = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+
+    disc_on = models.CharField(max_length=20, null=True, blank=True)
+    disc_type = models.CharField(max_length=12, choices=TicketLine.DISC_TYPE_CHOICES, null=True, blank=True)
+    disc_value = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    tds_per = models.DecimalField(max_digits=5, decimal_places=2, default=0)
+
+    pg_charges = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    pg_charges_percentage = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+
+    markup = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    addl_markup = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    ssr_markup = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    service_fee = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    addl_service_fee = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    ssr_service_fee = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    gst_pct = models.DecimalField(max_digits=5, decimal_places=2, default=0)
+
+    supp_comm_on = models.CharField(max_length=20, null=True, blank=True)
+    supp_comm_type = models.CharField(max_length=12, choices=TicketLine.DISC_TYPE_CHOICES, null=True, blank=True)
+    supp_comm_value = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    supp_tds_per = models.DecimalField(max_digits=5, decimal_places=2, default=0)
+
+    supp_markup = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    supp_addl_markup = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    supp_service_fee = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    supp_addl_service_fee = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    supp_gst_pct = models.DecimalField(max_digits=5, decimal_places=2, default=0)
+
+    # Cancellation-specific amounts (added 2026-10-07 for the Cancellation
+    # Journal Voucher - see views._compute_cancellation_jv_lines). Every one
+    # carries db_default too, not just default=: every INSERT/UPDATE on this
+    # table goes through dbo.sp_CancellationTicket's own raw SQL, never the
+    # ORM, so only a real SQL Server DEFAULT constraint protects an INSERT
+    # that doesn't name the column (see the canceled-column regression,
+    # Progress update 41).
+    # Supplier Penalty (Base Fare & Tax Components card), Cancellation
+    # Penalty (Supplier card - the repurposed #modal-reschedule-penalty
+    # input) and Agent Penalty (Customer card).
+    supplier_penalty = models.DecimalField(max_digits=14, decimal_places=2, default=0, db_default=0)
+    cancellation_penalty = models.DecimalField(max_digits=14, decimal_places=2, default=0, db_default=0)
+    agent_penalty = models.DecimalField(max_digits=14, decimal_places=2, default=0, db_default=0)
+    # Markup Reversal, stored per COMPONENT (the Markup Reversal popup's own
+    # checkbox rows) rather than as the two combined Customer/Supplier
+    # totals - the JV posts each component against its own ledger
+    # (Markup A/c / Addl Markup A/c / SSR Markup A/c on the customer side,
+    # Supplier Markup A/c / Supplier Addl Markup A/c + their Consolidator
+    # counterparts on the supplier side). The combined totals are just the
+    # sums - see cust_markup_reversal_total/supp_markup_reversal_total below.
+    cust_markup_reversal = models.DecimalField(max_digits=14, decimal_places=2, default=0, db_default=0)
+    cust_addl_markup_reversal = models.DecimalField(max_digits=14, decimal_places=2, default=0, db_default=0)
+    cust_ssr_markup_reversal = models.DecimalField(max_digits=14, decimal_places=2, default=0, db_default=0)
+    supp_markup_reversal = models.DecimalField(max_digits=14, decimal_places=2, default=0, db_default=0)
+    supp_addl_markup_reversal = models.DecimalField(max_digits=14, decimal_places=2, default=0, db_default=0)
+
+    total_billed = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    status = models.CharField(max_length=15, choices=TicketLine.STATUS_CHOICES, default="ISSUED")
+
+    supplier = models.ForeignKey(
+        Ledger, on_delete=models.PROTECT, related_name="cancellationlines_as_supplier",
+        null=True, blank=True, db_column="supplier_ledger_id"
+    )
+    office_id = models.CharField(max_length=30, null=True, blank=True)
+    fop = models.CharField(max_length=20, choices=TicketLine.FOP_CHOICES, null=True, blank=True)
+    card_number = models.CharField(max_length=40, null=True, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "Cancellation_Al_TicketLines"
+        constraints = [
+            models.UniqueConstraint(fields=["ticket_no"], name="uq_cancel_ticketline_ticket_no"),
+        ]
+        indexes = [models.Index(fields=["cancellation_ticket"])]
+
+    def __str__(self):
+        return self.ticket_no
+
+    # Same formulas as TicketLine/RescheduleAirlineTicketLine's own (see
+    # their supplier_cost/computed_* docstrings) - kept in sync by hand
+    # since this is a genuinely separate model, not a subclass. Used by
+    # views._compute_cancellation_jv_lines against unsaved instances.
+    @property
+    def supplier_cost(self):
+        return (self.basic_fare + self.yq + self.yr + self.k3_tax + self.tax_others
+                + self.seat + self.meal + self.baggage + self.other_ssr)
+
+    @property
+    def cust_markup_reversal_total(self):
+        return self.cust_markup_reversal + self.cust_addl_markup_reversal + self.cust_ssr_markup_reversal
+
+    @property
+    def supp_markup_reversal_total(self):
+        return self.supp_markup_reversal + self.supp_addl_markup_reversal
+
+    @property
+    def computed_discount(self):
+        base_map = {
+            "Basic": self.basic_fare,
+            "Basic + YQ": self.basic_fare + self.yq,
+            "Basic + YR": self.basic_fare + self.yr,
+            "Basic + YQ + YR": self.basic_fare + self.yq + self.yr,
+            "Gross": self.supplier_cost,
+        }
+        disc_base = base_map.get(self.disc_on, 0)
+        if self.disc_type == "Percentage":
+            return disc_base * (self.disc_value / 100)
+        if self.disc_type == "Flat":
+            return self.disc_value
+        return 0
+
+    @property
+    def computed_tds(self):
+        return self.computed_discount * (self.tds_per / 100)
+
+    @property
+    def computed_gst(self):
+        company_id = self.cancellation_ticket.company_id
+
+        def field_ledger_gst_pct(field_name):
+            cache_key = (company_id, field_name)
+            if cache_key not in _field_gst_pct_cache:
+                m = MasterMapping.objects.filter(
+                    company_id=company_id, product_type="Airline", field_name=field_name
+                ).select_related("ledger").first()
+                _field_gst_pct_cache[cache_key] = float(m.ledger.gst_percentage) if m and m.ledger_id else 0.0
+            return _field_gst_pct_cache[cache_key]
+
+        return (
+            float(self.service_fee) * field_ledger_gst_pct("Service Fee A/c") / 100
+            + float(self.addl_service_fee) * field_ledger_gst_pct("Addl Service Fee A/c") / 100
+            + float(self.ssr_service_fee) * field_ledger_gst_pct("SSR Service Fee A/c") / 100
+        )
+
+    @property
+    def computed_supp_commission(self):
+        base_map = {
+            "Basic": self.basic_fare,
+            "Basic + YQ": self.basic_fare + self.yq,
+            "Basic + YR": self.basic_fare + self.yr,
+            "Basic + YQ + YR": self.basic_fare + self.yq + self.yr,
+            "Gross": self.supplier_cost,
+        }
+        comm_base = base_map.get(self.supp_comm_on, 0)
+        if self.supp_comm_type == "Percentage":
+            return comm_base * (self.supp_comm_value / 100)
+        if self.supp_comm_type == "Flat":
+            return self.supp_comm_value
+        return 0
+
+    @property
+    def computed_supp_tds(self):
+        return self.computed_supp_commission * (self.supp_tds_per / 100)
+
+    @property
+    def computed_supp_gst(self):
+        """Supplier GST Amount - same convention as computed_gst above (2026-10-07). See TicketLine's own copy for the full explanation."""
+        company_id = self.cancellation_ticket.company_id
+
+        def field_ledger_gst_pct(field_name):
+            cache_key = (company_id, field_name)
+            if cache_key not in _field_gst_pct_cache:
+                m = MasterMapping.objects.filter(
+                    company_id=company_id, product_type="Airline", field_name=field_name
+                ).select_related("ledger").first()
+                _field_gst_pct_cache[cache_key] = float(m.ledger.gst_percentage) if m and m.ledger_id else 0.0
+            return _field_gst_pct_cache[cache_key]
+
+        return (
+            float(self.supp_service_fee) * field_ledger_gst_pct("Supplier Service Fee A/c") / 100
+            + float(self.supp_addl_service_fee) * field_ledger_gst_pct("Supplier Addl Service Fee A/c") / 100
+        )
 
 
 class JournalVoucher(models.Model):
@@ -854,7 +1216,11 @@ class JournalVoucher(models.Model):
     "AIRLINE_RESCHEDULE" category (ALR-1, ALR-2, ...) and the separate
     _compute_reschedule_jv_lines formula - entirely additive, never
     touches or adjusts the original ticket's own JournalVoucher row.
-    Exactly one of source_ticket/source_reschedule_ticket is set per row.
+    Same again for the Cancellation flow (source_cancellation_ticket, added
+    2026-10-07) - one row per CancellationAirlineTicket, "AIRLINE_CANCELLATION"
+    category (ALC-1, ALC-2, ...), _compute_cancellation_jv_lines formula.
+    Exactly one of source_ticket/source_reschedule_ticket/
+    source_cancellation_ticket is set per row.
     Manual double-entry vouchers (Journal/Contra/Payment/Receipt/Debit
     Note/Credit Note via voucher-entry.html) live in their own separate
     `Voucher` table/model instead - this table was originally named
@@ -865,7 +1231,7 @@ class JournalVoucher(models.Model):
     """
     CATEGORY_PREFIX = {
         "AIRLINE": "AL", "HOTEL": "HTL", "VISA": "VSA", "INSURANCE": "INS", "TOUR": "TUR",
-        "AIRLINE_RESCHEDULE": "ALR",
+        "AIRLINE_RESCHEDULE": "ALR", "AIRLINE_CANCELLATION": "ALC",
     }
 
     id = models.AutoField(primary_key=True)
@@ -889,6 +1255,10 @@ class JournalVoucher(models.Model):
         RescheduleAirlineTicket, on_delete=models.SET_NULL, null=True, blank=True,
         related_name="vouchers", db_column="source_reschedule_ticket_id"
     )
+    source_cancellation_ticket = models.ForeignKey(
+        CancellationAirlineTicket, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="vouchers", db_column="source_cancellation_ticket_id"
+    )
 
     total_debit = models.DecimalField(max_digits=16, decimal_places=2, default=0)
     total_credit = models.DecimalField(max_digits=16, decimal_places=2, default=0)
@@ -909,6 +1279,7 @@ class JournalVoucher(models.Model):
             models.Index(fields=["company_id"], name="journal_voucher_company_idx"),
             models.Index(fields=["source_ticket"], name="journal_voucher_ticket_idx"),
             models.Index(fields=["source_reschedule_ticket"], name="journal_voucher_rtid_idx"),
+            models.Index(fields=["source_cancellation_ticket"], name="journal_voucher_ctid_idx"),
         ]
 
     def __str__(self):

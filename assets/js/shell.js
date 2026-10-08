@@ -430,6 +430,57 @@
         currentMain.classList.add("spa-fade-in");
       }
 
+      // 2a-pre. Update Browser History BEFORE running any inline script
+      // below - moved here (2026-10-07) from its old spot after step 4.
+      // Those inline scripts (e.g. ticket-entry.html's own title guard)
+      // read `window.location.search` directly to tell New Ticket/
+      // Reschedule/Cancellation apart, since all three share this one
+      // path with only the query string differing. With pushState still
+      // happening AFTER them, navigating from one of these three to
+      // another left `window.location` pointing at the PREVIOUS page's
+      // URL while the guard script ran - e.g. leaving Cancellation
+      // (?cancellation_new=1) for a plain New Ticket (no params) would
+      // run the just-swapped-in page's own guard script, which re-read
+      // the OLD "?cancellation_new=1" still sitting in window.location
+      // and set the title right back to "Cancellation". Running pushState
+      // first makes window.location already correct by the time any
+      // inline script - current or future - reads it.
+      if (push) {
+        window.history.pushState({ url }, "", url);
+      }
+
+      // 2a. Run every INLINE script (no src) immediately, right after the
+      // swap above - setting .innerHTML does NOT execute embedded
+      // <script> tags (a well-known DOM behavior), which is exactly why
+      // step 6 below has to manually re-create/append each one to make it
+      // run at all. But step 6 processes every script - inline AND
+      // external - in one pass, in document order, and awaits each
+      // external <script src> in turn; a page's "guard" inline script
+      // (e.g. ticket-entry.html's title-fix-up for Reschedule/
+      // Cancellation's blank shell, meant to run before its own heavy
+      // page-ticket-entry.js even loads - see that script's own comment)
+      // was getting reached only AFTER whatever earlier scripts step 6
+      // had already awaited, by which point the browser may have already
+      // painted the just-swapped DOM showing the wrong default content -
+      // precisely the "New Ticket flashes before Cancellation" bug this
+      // fixes. Running all inline scripts here instead, synchronously,
+      // with no `await` between the DOM swap and this loop, means the
+      // browser has no opportunity to paint in between: whatever an
+      // inline script fixes up is correct from the very first rendered
+      // frame. External <script src> tags are unaffected - they still
+      // load/run in step 6 below, in their original relative order.
+      Array.from(doc.querySelectorAll("script")).forEach((s) => {
+        if (s.getAttribute("src") || !s.textContent.trim()) return;
+        try {
+          const inlineScript = document.createElement("script");
+          inlineScript.textContent = s.textContent;
+          document.body.appendChild(inlineScript);
+          inlineScript.remove();
+        } catch (e) {
+          console.error("Inline script execution error:", e);
+        }
+      });
+
       // 2b. Sync page-specific markup that lives OUTSIDE .app-main (e.g.
       // ticket-entry.html's modals, which are siblings of .app-body, not
       // descendants of .app-main) - swapping .app-main's innerHTML alone
@@ -467,14 +518,14 @@
       // 4. Update Menubar Active State
       updateActiveNav(null, url);
 
-      // 5. Update Browser History
-      if (push) {
-        window.history.pushState({ url }, "", url);
-      }
+      // 5. Update Browser History - moved to step 2a-pre (before any inline
+      // script runs); nothing left to do here.
 
       window.scrollTo({ top: 0, behavior: "instant" });
 
-      // 6. Execute scripts from the new page in order
+      // 6. Execute external (src) scripts from the new page in order -
+      // inline scripts already ran in step 2a, immediately after the DOM
+      // swap, so they're not reprocessed here.
       const scripts = Array.from(doc.querySelectorAll("script"));
       for (const s of scripts) {
         const src = s.getAttribute("src");
@@ -498,23 +549,25 @@
           if (src.includes("jquery") && window.jQuery) continue;
           if (src.includes("dataTables") && window.jQuery && window.jQuery.fn && window.jQuery.fn.DataTable) continue;
 
-          // Dynamically load page-specific script
+          // Dynamically load page-specific script. Keep the ORIGINAL src
+          // (including whatever ?v=N cache-busting query it already has)
+          // instead of forcing a fresh "?t="+Date.now() on every single
+          // navigation - that made every menu click re-download every
+          // page's full JS bundle from the network with no caching at
+          // all, which is most of the "menu click feels slow" cost on a
+          // plain static file server (no HTTP cache headers to make a
+          // repeat fetch cheap). The browser can now cache each script by
+          // its own ?v=N, so navigating back to an already-visited page
+          // is instant - a real content change still gets picked up the
+          // moment its own HTML bumps that ?v=N (the convention already
+          // used throughout this app for every edited shared .js file).
           await new Promise((resolve) => {
             const scriptEl = document.createElement("script");
-            scriptEl.src = src.split("?")[0] + "?t=" + Date.now();
+            scriptEl.src = src;
             scriptEl.onload = resolve;
             scriptEl.onerror = resolve;
             document.body.appendChild(scriptEl);
           });
-        } else if (s.textContent.trim()) {
-          try {
-            const inlineScript = document.createElement("script");
-            inlineScript.textContent = s.textContent;
-            document.body.appendChild(inlineScript);
-            inlineScript.remove();
-          } catch (e) {
-            console.error("Inline script execution error:", e);
-          }
         }
       }
     } catch (err) {

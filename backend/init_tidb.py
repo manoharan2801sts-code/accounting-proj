@@ -180,8 +180,12 @@ def main():
         "SupplierCommissionRules",
         "JournalVoucher",
         "Vouchers",
-        "Tickets",
-        "TicketLines",
+        "AL_Tickets",
+        "AL_TicketLines",
+        "Rescheduled_Al_Ticket",
+        "Rescheduled_Al_TicketLines",
+        "Cancellation_AL_Tickets",
+        "Cancellation_Al_TicketLines",
         "django_migrations",
     ]
 

@@ -207,7 +207,7 @@
       "Travel Desk", "Indesk", "Agent", "Retrieve PNR Accounting",
       "Manual Booking", "Mobile Booking", "Travel Co-Ordinator", "SSR Updation",
     ],
-    bookingStatuses: ["Confirmed", "Re-Scheduled"],
+    bookingStatuses: ["Confirmed", "Re-Scheduled", "Normal Cancelled"],
     travelTypes: ["Domestic", "International"],
     currencies: ["INR", "AED"],
     custDiscountOn: ["Basic", "Basic + YQ", "Basic + YR", "Basic + YQ + YR", "Gross"],
