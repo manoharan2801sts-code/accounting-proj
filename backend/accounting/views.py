@@ -1662,6 +1662,25 @@ def _jv_prep(company_id):
         cache_key = (company_id, m["field_name"])
         if cache_key not in _field_gst_pct_cache:
             _field_gst_pct_cache[cache_key] = float(m["ledger_gst_percentage"] or 0)
+    # Live-only speed-up: company_id arrives from the query string as "1",
+    # but mapped_ledger()/computed_gst look keys up by ticket.company_id (1),
+    # so the entries above never hit and every field fell back to its own
+    # MasterMapping query (~25 per report - minutes on TiDB). Also seed the
+    # int-keyed entries, with exactly the values those fallback queries
+    # return: the mapped Ledger's current name, and its GST% (0 if unmapped).
+    if str(company_id).isdigit():
+        company_key = int(company_id)
+        mapped = [m for m in mappings if m["ledger_id"] is not None]
+        names = dict(Ledger.objects.filter(id__in={m["ledger_id"] for m in mapped}).values_list("id", "name"))
+        for m in mapped:
+            if m["ledger_id"] in names:
+                mapping_cache[(company_key, m["masters_category"], m["field_name"])] = (m["ledger_id"], names[m["ledger_id"]])
+        per_field = {}
+        for m in mappings:
+            per_field.setdefault(m["field_name"], []).append(m)
+        for field_name, rows in per_field.items():
+            if len(rows) == 1 and (company_key, field_name) not in _field_gst_pct_cache:
+                _field_gst_pct_cache[(company_key, field_name)] = float(rows[0]["ledger_gst_percentage"] or 0)
     company = sp_client.company_master_get(company_id)
     company_state = ((company or {}).get("state") or "").strip().lower()
     return mapping_cache, company_state

@@ -12,9 +12,12 @@ them) - so sp_client.py and views.py run unchanged.
 
 Handlers live in the per-procedure modules below and register with @sp.
 """
+import contextvars
+import copy
 import datetime
 import decimal
 
+from django.core.signals import request_finished, request_started
 from django.db import connection
 
 HANDLERS = {}
@@ -40,6 +43,16 @@ def error_row(message):
 
 def query(sql, params=None):
     """Runs SQL and returns its rows as dicts (column name -> value)."""
+    memo = _query_memo.get()
+    if memo is not None:
+        memo_key = (sql, tuple(repr(p) for p in (params or [])))
+        if memo_key not in memo:
+            memo[memo_key] = _run_query(sql, params)
+        return copy.deepcopy(memo[memo_key])
+    return _run_query(sql, params)
+
+
+def _run_query(sql, params):
     with connection.cursor() as cursor:
         cursor.execute(sql, params or [])
         if cursor.description is None:
@@ -97,13 +110,60 @@ def bits(row, *names):
     return row
 
 
+# Per-request memo for lookups that a single report repeats once per ticket
+# or line (PG Master snapshot, FOP card, Master Mapping, Company, customer/
+# supplier ledger by name). Each repeat is a TiDB round trip (~0.17s on
+# live). Scoped to one HTTP request, and dropped on any other @Action, so
+# a save inside the request can never be answered from a stale entry.
+CACHED_READS = {
+    ("dbo.sp_pgmaster", "EFFECTIVE_SNAPSHOT"),
+    ("dbo.sp_fopmaster", "GET_BY_CARD_NUMBER"),
+    ("dbo.sp_mastermapping", "LIST"),
+    ("dbo.sp_companymaster", "LIST"),
+    ("dbo.sp_ledger", "GET_BY_NAME"),
+}
+WRITE_ACTIONS = {"SAVE", "SAVE_ROW", "UPDATE", "DELETE"}
+_request_cache = contextvars.ContextVar("sp_request_cache", default=None)
+# While one of CACHED_READS runs: identical SELECTs inside it (e.g. the same
+# gateway's id/history row for every ticket) also hit the DB once per request.
+_query_memo = contextvars.ContextVar("sp_query_memo", default=None)
+
+
+def _start_request_cache(**kwargs):
+    _request_cache.set({"calls": {}, "queries": {}})
+
+
+def _end_request_cache(**kwargs):
+    _request_cache.set(None)
+
+
+request_started.connect(_start_request_cache, dispatch_uid="sp_mysql_cache_start")
+request_finished.connect(_end_request_cache, dispatch_uid="sp_mysql_cache_end")
+
+
 def exec_sp(proc_name, params=None):
     params = dict(params or {})
     action = str(params.get("Action") or "").upper()
-    handler = HANDLERS.get((proc_name.lower(), action))
+    key = (proc_name.lower(), action)
+    handler = HANDLERS.get(key)
     if handler is None:
         raise NotImplementedError(f"{proc_name} @Action='{action}' has no MySQL implementation")
-    return handler(params) or []
+    cache = _request_cache.get()
+    if cache is None:
+        return handler(params) or []
+    if key not in CACHED_READS:
+        if action in WRITE_ACTIONS:
+            cache["calls"].clear()
+            cache["queries"].clear()
+        return handler(params) or []
+    memo_key = (key, tuple(sorted((k, repr(v)) for k, v in params.items())))
+    if memo_key not in cache["calls"]:
+        token = _query_memo.set(cache["queries"])
+        try:
+            cache["calls"][memo_key] = handler(params) or []
+        finally:
+            _query_memo.reset(token)
+    return copy.deepcopy(cache["calls"][memo_key])
 
 
 # Register every procedure's handlers.
