@@ -1,5 +1,4 @@
 ﻿(async function () {
-  const API_BASE = window.API_BASE || "/api";
   const { get } = window.VoyagerAPI;
   const { currencyFor } = window.VoyagerUtil;
   let allAccounts = [], byParent = {}, byId = {}, currentCcy = "INR", currentCompanyId, currentCountryCode;
@@ -105,7 +104,7 @@
         );
         if (!ok) return;
         try {
-          const res = await fetch(`${API_BASE}/ledgers/${btn.dataset.id}/delete/?company_id=${currentCompanyId}`, {
+          const res = await fetch(`http://localhost:8000/api/ledgers/${btn.dataset.id}/delete/?company_id=${currentCompanyId}`, {
             method: "DELETE",
           });
           const result = await res.json();
@@ -118,7 +117,7 @@
     });
   }
 
-  const ACCOUNTS_API = `${API_BASE}/accounts/`;
+  const ACCOUNTS_API = "http://localhost:8000/api/accounts/";
 
   async function load(companyId, country) {
     currentCompanyId = companyId; currentCountryCode = country;

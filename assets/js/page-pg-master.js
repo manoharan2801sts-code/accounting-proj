@@ -1,5 +1,4 @@
 (async function () {
-  const API_BASE = window.API_BASE || "/api";
   let activeCompanyId;
   let allGateways = []; // local cache of gateways for active company
   let ledgers = []; // "Current Liabilities" ledgers, loaded once per company
@@ -8,8 +7,8 @@
 
   const LEDGER_GROUP = "Current Liabilities";
   const CHARGES_LEDGER_GROUP = "Expenses";
-  const PG_MASTER_API = `${API_BASE}/pg-master/`;
-  const LEDGERS_BY_GROUP_API = `${API_BASE}/ledgers-by-group/`;
+  const PG_MASTER_API = "http://localhost:8000/api/pg-master/";
+  const LEDGERS_BY_GROUP_API = "http://localhost:8000/api/ledgers-by-group/";
 
   // DOM Elements - Left Form
   const formName = document.getElementById("pg-form-name");
@@ -108,7 +107,7 @@
         <td style="color:var(--color-text-dark); font-weight:500;">${gw.payment_master_ledger_name || "-"}</td>
         <td style="color:var(--color-text-dark); font-weight:500;">${gw.pg_charges_master_ledger_name || "-"}</td>
         <td style="text-align:center; color:var(--color-text-dark); font-weight:500;">${gw.pg_charges_percentage != null ? `${Number(gw.pg_charges_percentage).toFixed(2)}%` : "-"}</td>
-        <td style="text-align:center; color:var(--color-text-dark); font-weight:500;">${gw.pg_charges_percentage_effective_from || "-"}</td>
+        <td style="text-align:center; color:var(--color-text-dark); font-weight:500;">${gw.pg_charges_percentage_effective_from ? window.VoyagerUtil.fmtDate(gw.pg_charges_percentage_effective_from) : "-"}</td>
         <td style="text-align:center;">${statusHtml}</td>
         <td style="text-align:center;">${minusBtnHtml}</td>
       `;

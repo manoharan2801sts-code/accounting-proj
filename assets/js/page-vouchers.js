@@ -1,5 +1,4 @@
 (async function () {
-  const API_BASE = window.API_BASE || "/api";
   const { fmtMoney, fmtDate, currencyFor, titleCaseLabel } = window.VoyagerUtil;
   const { zoomInUrl } = window.VoyagerEntry;
 
@@ -10,7 +9,7 @@
   async function load(companyId, country) {
     let vouchers = [];
     try {
-      const res = await fetch(`${API_BASE}/vouchers/?company_id=${companyId}`);
+      const res = await fetch(`http://localhost:8000/api/vouchers/?company_id=${companyId}`);
       if (!res.ok) throw new Error(`Vouchers API returned ${res.status}`);
       vouchers = await res.json();
     } catch (err) {

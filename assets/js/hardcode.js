@@ -17,12 +17,6 @@
  * ------------------------------------------------------------------
  */
 (function (window) {
-  if (!window.API_BASE) {
-    window.API_BASE =
-      window.location.protocol === "file:" || ((window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") && window.location.port !== "8000")
-        ? "http://127.0.0.1:8000/api"
-        : "/api";
-  }
 
   // Sidebar + top pulldown menu structure.
   // Moved out of shell.js (was: local NAV_SECTIONS).

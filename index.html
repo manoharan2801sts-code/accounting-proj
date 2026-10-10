@@ -11,16 +11,8 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
 <link href="assets/css/design-system.css" rel="stylesheet" />
 <link href="assets/css/app.css" rel="stylesheet" />
-<link href="assets/css/loader.css" rel="stylesheet" />
-<script>
-  (function(){
-    const t = localStorage.getItem("voyager-theme") || "light";
-    document.documentElement.setAttribute("data-theme", t);
-  })();
-</script>
 </head>
 <body>
-<script src="assets/js/loader.js?v=2"></script>
 
 <div class="login-shell">
   <div class="login-brand-pane">
@@ -85,18 +77,12 @@
           <button type="submit" class="btn-brand" style="width:100%;" id="login-btn">Sign in</button>
         </form>
 
-        <div class="card-flat card-pad" style="margin-top:1rem; font-size:0.8rem;">
-          <strong>Demo credentials</strong>
-          <div class="text-muted-custom" style="margin-top:0.3rem; line-height:1.6;">
-            admin@travelagency.com &middot; Passw0rd!<br/>
-            <span style="opacity:0.7;">(Super Admin — access to both India &amp; UAE entities)</span>
+        <div class="card-flat card-pad" style="margin-top:1rem; font-size:0.8rem; background:var(--color-bg-subtle, #F8FAFC); border:1px solid var(--color-border, #E2E8F0); border-radius:6px; padding:0.75rem 1rem;">
+          <strong>Super Admin credentials:</strong>
+          <div class="text-muted-custom" style="margin-top:0.3rem; line-height:1.5;">
+            <code>admin@travelagency.com</code> &middot; <code>Passw0rd!</code><br/>
+            <code>ananya.krishnan@travelagency.com</code> &middot; <code>Passw0rd!</code>
           </div>
-        </div>
-
-        <div style="text-align:center; margin-top:1.3rem;">
-          <a href="#" id="demo-link" style="font-size:0.85rem; font-weight:700;">
-            Or explore the app with sample data — no backend or database needed →
-          </a>
         </div>
       </div>
 
@@ -123,7 +109,7 @@
 
 <script src="assets/js/hardcode.js"></script>
 <script src="assets/js/mock-data.js"></script>
-<script src="assets/js/api.js"></script>
-<script src="assets/js/auth.js"></script>
+<script src="assets/js/api.js?v=3"></script>
+<script src="assets/js/auth.js?v=2"></script>
 </body>
 </html>

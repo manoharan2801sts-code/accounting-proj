@@ -109,60 +109,8 @@
   --t-med: 220ms var(--ease);
 }
 
-/* ==========================================================================
-   DARK THEME VARIABLES ([data-theme="dark"])
-   ========================================================================== */
-[data-theme="dark"] {
-  --color-bg-canvas: #0B0F19;
-  --color-bg-subtle: #151D2C;
-  --color-bg-tint: rgba(59, 109, 181, 0.18);
-  --color-bg-tint-strong: rgba(77, 129, 205, 0.28);
-  --color-white: #162032;
-  --color-border: #28364C;
-  --color-border-subtle: #1E2B3E;
-  --color-border-hover: #3E516D;
-
-  --color-text-dark: #F8FAFC;
-  --color-text-body: #CBD5E1;
-  --color-text-muted: #94A3B8;
-  --color-text-faint: #64748B;
-
-  --color-primary: #4D81CD;
-  --color-primary-dark: #3B6DB5;
-  --color-primary-light: #6E9AD9;
-  --color-primary-tint: rgba(77, 129, 205, 0.15);
-  --color-primary-tint-strong: rgba(77, 129, 205, 0.25);
-
-  --color-secondary: #38CCDD;
-  --color-secondary-dark: #16B5D9;
-  --color-secondary-light: #6EDCE8;
-
-  --color-teal: #6ED3C3;
-  --color-teal-dark: #4DC0AD;
-  --color-teal-light: #8FDECF;
-
-  --color-navy: #4D81CD;
-  --color-navy-dark: #3B6DB5;
-  --color-navy-surface: #1E293B;
-
-  --color-success-bg: rgba(16, 185, 129, 0.16);
-  --color-success-border: rgba(16, 185, 129, 0.35);
-  --color-warning-bg: rgba(245, 158, 11, 0.16);
-  --color-warning-border: rgba(245, 158, 11, 0.35);
-  --color-danger-bg: rgba(220, 38, 38, 0.16);
-  --color-danger-border: rgba(220, 38, 38, 0.35);
-  --color-info-bg: rgba(22, 181, 217, 0.16);
-  --color-info-border: rgba(22, 181, 217, 0.35);
-
-  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.3);
-  --shadow-sm: 0 2px 6px rgba(0, 0, 0, 0.4);
-  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.5);
-  --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.6);
-}
-
 * { box-sizing: border-box; }
-html { min-height: 100%; }
-body { min-height: 100%; overflow-x: hidden; overflow-y: auto; }
+html, body { height: 100%; }
 
 /* Form controls and buttons don't inherit the page font by default in most
    browsers (they use the OS UI font instead) - without this reset, every

@@ -1,5 +1,4 @@
 (async function () {
-  const API_BASE = window.API_BASE || "/api";
   const OPT = window.VoyagerHardcode.TICKET_FORM_OPTIONS;
   const params = new URLSearchParams(window.location.search);
   const editId = params.get("id");
@@ -38,10 +37,10 @@
     ? "trans-airline-reschedule" : ((cancellationNew || cancellationSavedId) ? "trans-airline-cancellation" : "tickets");
   let activeCompanyId, activeCountry, allCustomers = [], allSuppliers = [], existingTickets = [];
   let voucherTypes = []; // active Voucher Types for the active company - drives the Invoice Type dropdown + Invoice Number auto-numbering
-  const VOUCHER_TYPE_API = `${API_BASE}/voucher-type/`;
+  const VOUCHER_TYPE_API = "http://localhost:8000/api/voucher-type/";
   let fopMasterCards = []; // active FOP Master cards for the active company, refreshed by populateFopOptions
   let pgMasterGateways = []; // PG Master gateways for the active company, refreshed by populatePgOptions
-  const PG_MASTER_EFFECTIVE_API = `${API_BASE}/pg-master/effective/`;
+  const PG_MASTER_EFFECTIVE_API = "http://localhost:8000/api/pg-master/effective/";
   const pgEffectiveCache = new Map(); // `${gatewayName}|${asOfDateISO}` -> resolved snapshot (or null), so re-renders don't refetch
   let passengers = []; // array of passenger objects - source of truth for the register table
   let editingIndex = null;
@@ -246,8 +245,8 @@
   // ============================================================
   // Customers / Suppliers - real backend
   // ============================================================
-  const CUSTOMERS_API = `${API_BASE}/customers/`;
-  const SUPPLIERS_API = `${API_BASE}/suppliers/`;
+  const CUSTOMERS_API = "http://localhost:8000/api/customers/";
+  const SUPPLIERS_API = "http://localhost:8000/api/suppliers/";
 
   async function populateRefs(companyId) {
     const ref = window.VoyagerMock.getReferenceData(companyId);
@@ -290,14 +289,17 @@
   // use (see _compute_jv_lines server-side, and renderPgReceiptsTab below
   // for the PG Receipts tab's own copy of that same comparison).
   let companyState = "";
-  const COMPANY_MASTER_API = `${API_BASE}/company-master/`;
+  let companyMaster = null; // full Company Master record - the printed invoice's letterhead
+  const COMPANY_MASTER_API = "http://localhost:8000/api/company-master/";
   async function populateCompanyState(companyId) {
     try {
       const res = await fetch(`${COMPANY_MASTER_API}?id=${companyId}`);
-      companyState = res.ok ? ((await res.json()).state || "") : "";
+      companyMaster = res.ok ? await res.json() : null;
+      companyState = (companyMaster && companyMaster.state) || "";
     } catch (err) {
       console.error("Could not load Company Master state", err);
       companyState = "";
+      companyMaster = null;
     }
   }
 
@@ -317,7 +319,7 @@
   // rows (see renderPgReceiptsTab), same convention as the backend's
   // mapped_ledger() in views._compute_jv_lines.
   let mappedFieldLedgerName = {};
-  const MASTER_MAPPING_API = `${API_BASE}/master-mapping/`;
+  const MASTER_MAPPING_API = "http://localhost:8000/api/master-mapping/";
   async function populateMappedFieldNames(companyId) {
     try {
       const res = await fetch(`${MASTER_MAPPING_API}?company_id=${companyId}&product_type=Airline`);
@@ -403,7 +405,7 @@
 
   // Gateway Ref dropdown - lists PG Master's active Payment Gateway Names
   // (same idea as the FOP Card Number dropdown pulling from FOP Master).
-  const PG_MASTER_API = `${API_BASE}/pg-master/`;
+  const PG_MASTER_API = "http://localhost:8000/api/pg-master/";
   async function populatePgOptions(companyId) {
     try {
       const res = await fetch(`${PG_MASTER_API}?company_id=${companyId}`);
@@ -478,7 +480,7 @@
   // FOP dropdown starts Cash-only; "Own Card"/"Client Card" are only added
   // when FOP Master (fop-master.html) has at least one ACTIVE card of that
   // type - no active cards at all means the dropdown stays just "Cash".
-  const FOP_MASTER_API = `${API_BASE}/fop-master/`;
+  const FOP_MASTER_API = "http://localhost:8000/api/fop-master/";
   async function populateFopOptions(companyId) {
     const fopSelect = document.getElementById("modal-fop");
     const current = fopSelect.value;
@@ -536,7 +538,7 @@
   // (office ID, airline category, travel type, or a sector's cabin/fare
   // type via Save in the Add Sector popup). No exact match -> the Supplier
   // Commission fields are cleared, not left showing a stale value.
-  const SUPPLIER_RULES_API = `${API_BASE}/supplier-commission-rules/`;
+  const SUPPLIER_RULES_API = "http://localhost:8000/api/supplier-commission-rules/";
   function clearSupplierCommissionAutofill() {
     document.getElementById("modal-supp-comm-on").value = "";
     document.getElementById("modal-supp-comm-type").value = "";
@@ -1170,9 +1172,13 @@
       <tr>
         <td>${row.label}</td>
         <td>${fmtN(p[row.amountField] || 0)}</td>
-        <td style="text-align:center;"><input type="checkbox" class="markup-reversal-check" data-key="${row.key}" ${checked[row.key] ? "checked" : ""} /></td>
+        <td style="text-align:center;"><input type="checkbox" class="markup-reversal-check" data-key="${row.key}" ${checked[row.key] ? "checked" : ""} ${viewMode ? "disabled" : ""} /></td>
       </tr>
     `).join("");
+    // Viewing a saved cancellation (not in Edit) - show what was picked,
+    // read-only, same as every other field in view mode.
+    document.getElementById("markup-reversal-apply-btn").style.display = viewMode ? "none" : "";
+    document.getElementById("markup-reversal-cancel-btn").textContent = viewMode ? "Close" : "Cancel";
     markupReversalModal.classList.add("open");
   }
   function closeMarkupReversalModal() { markupReversalModal.classList.remove("open"); }
@@ -1599,7 +1605,7 @@
     const unique = [...new Set(dates.filter((d) => d))];
     return unique.length <= 1 ? (unique[0] || "") : dates.join(",");
   }
-  function parseSectorsFromPassenger(p) {
+  function sectorsOfPassenger(p) {
     const pairs = (p.sector || "").split(",").map((s) => s.trim()).filter(Boolean);
     const airlineCodes = (p.airline_code || "").split(",");
     const airlineNames = (p.airline_name || "").split(",");
@@ -1608,7 +1614,7 @@
     const classes = (p.travel_class || "").split(",");
     const fareTypes = (p.fare_type || "").split(",");
     const dates = (p.travel_date || "").split(",").map((d) => d.trim());
-    modalSectors = pairs.map((pair, i) => {
+    return pairs.map((pair, i) => {
       const [from, to] = pair.split("-");
       return {
         from: (from || "").trim(), to: (to || "").trim(),
@@ -1618,7 +1624,71 @@
         travelDate: (dates.length === 1 ? dates[0] : (dates[i] || "")).trim(),
       };
     });
+  }
+  function parseSectorsFromPassenger(p) {
+    modalSectors = sectorsOfPassenger(p);
     renderSectorChips();
+  }
+
+  // Reschedule, 2nd+ passenger only: each sector's still-empty Travel Date/
+  // Flight No/Cabin/Class/Fare Type are copied from passenger 1's matching
+  // sector (same From-To) as entered in THIS reschedule. A sector nothing has
+  // been entered for yet also takes passenger 1's Airline Code/Name (it may
+  // have been rescheduled onto a different airline). Values already typed for
+  // this passenger are never overwritten. Passenger 1 itself is untouched -
+  // it still comes from the booking as before. FOP + Card Number follow the
+  // same rule: copied from passenger 1 while this passenger has nothing
+  // entered for the reschedule yet.
+  const RESCHED_SECTOR_FILL_FIELDS = ["travelDate", "flightNo", "cabin", "cls", "fareType"];
+
+  // Reschedule, 2nd+ passenger: while this passenger's fares are still all
+  // zero, copy every fare field (same set Booking's applyFareTemplate copies,
+  // plus the 3 Reschedule penalties) from the FIRST passenger of the same
+  // Pax Type whose Reschedule fares are already entered - 2nd Adult from the
+  // 1st Adult, 2nd Child from the 1st Child, and so on.
+  const FARE_ENTERED_FIELDS = ["basic_fare", "yq", "yr", "k3_tax", "tax_others", "seat", "meal", "baggage", "other_ssr"];
+  const faresEntered = (p) => FARE_ENTERED_FIELDS.some((f) => Number(p[f]) > 0);
+  function prefillRescheduleFaresFromSamePaxType() {
+    const current = passengers[editingIndex];
+    if (!current || faresEntered(current)) return false;
+    const t = passengers.find((p, i) => i !== editingIndex && p.pax_type === current.pax_type && faresEntered(p));
+    if (!t) return false;
+    applyFareTemplate(t);
+    document.getElementById("modal-fare-supplier-penalty").value = fmtN(t.supplier_penalty || 0);
+    document.getElementById("modal-agent-penalty").value = fmtN(t.agent_penalty || 0);
+    document.getElementById("modal-reschedule-penalty").value = fmtN(t.reschedule_penalty || 0);
+    recalcModalTotal();
+    recalcSuppTotal();
+    return true;
+  }
+  function prefillRescheduleSectorsFromFirstPax() {
+    if (!rescheduleMode || viewMode || !editingIndex || !passengers[0]) return;
+    const first = passengers[0];
+    const ref = sectorsOfPassenger(first);
+    const entered = (sectors) => sectors.some((s) => RESCHED_SECTOR_FILL_FIELDS.some((f) => s[f]));
+    if (entered(ref) && !entered(sectorsOfPassenger(passengers[editingIndex])) && first.fop) {
+      document.getElementById("modal-fop").value = first.fop;
+      updateCardNumberField(first.card_number || "");
+    }
+    const faresCopied = prefillRescheduleFaresFromSamePaxType();
+    let changed = false;
+    modalSectors.forEach((s) => {
+      const r = ref.find((x) => x.from === s.from && x.to === s.to);
+      if (!r || !RESCHED_SECTOR_FILL_FIELDS.some((f) => r[f])) return;
+      if (!RESCHED_SECTOR_FILL_FIELDS.some((f) => s[f])) {
+        if (r.airlineCode) s.airlineCode = r.airlineCode;
+        if (r.airlineName) s.airlineName = r.airlineName;
+      }
+      RESCHED_SECTOR_FILL_FIELDS.forEach((f) => {
+        if (!s[f] && r[f]) { s[f] = r[f]; changed = true; }
+      });
+    });
+    if (changed) {
+      renderSectorChips();
+      // Supplier Commission was just copied along with the fares - the rule
+      // lookup would clear it whenever no Supplier Commission rule matches.
+      if (!faresCopied) autofillSupplierCommission();
+    }
   }
 
   function openFareModal(index) {
@@ -1878,6 +1948,12 @@
     // Parent/ancestor levels (see rescheduleParentPassengers/
     // rescheduleAncestorLevels).
     writeModalPassenger(isAncestor ? ancestorLevel.passenger : (isParent ? rescheduleParentPassengers[editingIndex] : passengers[editingIndex]));
+    if (!readOnly) prefillRescheduleSectorsFromFirstPax();
+    // A passenger picked from the booking/previous reschedule keeps that
+    // parent line's Pax Type - it can't change on a reschedule.
+    if (rescheduleParentPassengers[editingIndex] && (passengers[editingIndex] || {}).pax_type) {
+      document.getElementById("modal-pax-type").disabled = true;
+    }
     // Chained (2nd+) reschedule only - writeModalPassenger's own
     // recalcModalTotal/recalcSuppTotal above just derived TDS Amount from
     // Amount x tds_per (0 here, no single rate produced the true sum), so
@@ -2060,16 +2136,15 @@
         lineTotal = r.total + penalties;
       }
       const z = (v) => fmtN(v);
-      // Status column (2026-10-07) - Cancelled wins if a line is somehow
-      // both (the two flags are independent, never mutually exclusive by a
-      // DB constraint). Neither flag set (including New Ticket's own
-      // still-unsaved rows and Reschedule/Cancellation's own passenger
-      // objects, which carry neither at all) reads as "Live" (renamed from
-      // "Confirmed" the same day, to not collide with Booking Status'
-      // own "Confirmed" option - this column is about what's happened to
-      // the LINE itself, not a copy of that header field).
-      const statusLabel = p.canceled ? "Cancelled" : p.rescheduled ? "Rescheduled" : "Live";
-      const statusColor = p.canceled ? "#DC2626" : p.rescheduled ? "#B45309" : "#16A34A";
+      // Status column - the line's NEXT step, not the chain's end status
+      // (2026-10-09): a line that was rescheduled reads "Rescheduled" even
+      // if that reschedule was later cancelled (cancelling a reschedule also
+      // flags the original booking line cancelled). Only a line cancelled
+      // directly reads "Cancelled". Neither flag set (including New
+      // Ticket's own still-unsaved rows and Reschedule/Cancellation's own
+      // passenger objects, which carry neither at all) reads as "Live".
+      const statusLabel = p.rescheduled ? "Rescheduled" : p.canceled ? "Cancelled" : "Live";
+      const statusColor = p.rescheduled ? "#B45309" : p.canceled ? "#DC2626" : "#16A34A";
       return `<tr class="pax-row" data-idx="${i}" title="${viewMode ? "Double-click to view" : "Double-click to edit"}">
         <td style="text-align:center;">${i + 1}</td><td>${p.ticket_no}</td><td>${p.airline_name || p.airline_code || "-"}</td>
         <td>${p.card_number || "-"}</td>
@@ -2184,10 +2259,8 @@
     let pcCancellationTotal = 0, scCancellationTotal = 0;
     // Summary grid's own "Markup Reversal" column (2026-10-06, Cancellation
     // only) - Purchase Cost's own row shows Supplier Markup Reversal alone,
-    // Sales Cost's shows Customer Markup Reversal alone (2026-10-06
-    // correction - NOT combined with Supplier's, unlike the Total
-    // formula's own "+ Customer + Supplier" sum - see pc-markup-reversal/
-    // sc-markup-reversal below).
+    // Sales Cost's shows Supplier + Customer Markup Reversal (2026-10-09) -
+    // see pc-markup-reversal/sc-markup-reversal below.
     let supplierMarkupReversalTotal = 0, customerMarkupReversalTotal = 0;
     passengers.forEach((p) => {
       const r = computeFareLine(p);
@@ -2293,10 +2366,10 @@
         : (serviceFee + suppServiceFee)
     );
     document.getElementById("sc-gst").textContent = z(gst + suppGst);
-    // Sales Cost's own Markup Reversal column is Customer Markup Reversal
-    // ALONE (2026-10-06 correction) - not combined with Supplier's, unlike
-    // the Total formula's own "+ Customer + Supplier" (update 31/32).
-    document.getElementById("sc-markup-reversal").textContent = z(customerMarkupReversalTotal);
+    // Sales Cost's own Markup Reversal column = Supplier Markup Reversal +
+    // Customer Markup Reversal (2026-10-09). Display only - the Sales Cost
+    // Total already adds both.
+    document.getElementById("sc-markup-reversal").textContent = z(supplierMarkupReversalTotal + customerMarkupReversalTotal);
     document.getElementById("sc-total").textContent = z(scTotalDisplay);
 
     // Earnings = Sales Cost Total - Purchase Cost Total - Sales Cost GST
@@ -2600,11 +2673,13 @@
     }
     try {
       let res;
-      if (editId) {
-        res = await fetch(`${API_BASE}/tickets/${editId}/jv-preview/?company_id=${activeCompanyId}`);
+      // Saved voucher only while VIEWING - once Edit is clicked, preview
+      // the on-screen (unsaved) figures live instead.
+      if (editId && viewMode) {
+        res = await fetch(`http://localhost:8000/api/tickets/${editId}/jv-preview/?company_id=${activeCompanyId}`);
       } else {
         if (passengers.length === 0) throw new Error("Add at least one passenger (via Proceed ->) to preview the JV.");
-        res = await fetch(`${API_BASE}/tickets/jv-preview-draft/`, {
+        res = await fetch("http://localhost:8000/api/tickets/jv-preview-draft/", {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify(buildTicketPayload()),
         });
@@ -2759,11 +2834,11 @@
     }
     try {
       let res;
-      if (editingRescheduleId) {
-        res = await fetch(`${API_BASE}/reschedule-tickets/${editingRescheduleId}/jv-preview/?company_id=${activeCompanyId}`);
+      if (editingRescheduleId && viewMode) {
+        res = await fetch(`http://localhost:8000/api/reschedule-tickets/${editingRescheduleId}/jv-preview/?company_id=${activeCompanyId}`);
       } else {
         if (passengers.length === 0) throw new Error("Fill in the Reschedule PNR Details passenger to preview the JV.");
-        res = await fetch(`${API_BASE}/reschedule-tickets/jv-preview-draft/`, {
+        res = await fetch("http://localhost:8000/api/reschedule-tickets/jv-preview-draft/", {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify(buildTicketPayload()),
         });
@@ -2803,11 +2878,11 @@
     }
     try {
       let res;
-      if (cxEditSavedCancellationId) {
-        res = await fetch(`${API_BASE}/cancellation-tickets/${cxEditSavedCancellationId}/jv-preview/?company_id=${activeCompanyId}`);
+      if (cxEditSavedCancellationId && viewMode) {
+        res = await fetch(`http://localhost:8000/api/cancellation-tickets/${cxEditSavedCancellationId}/jv-preview/?company_id=${activeCompanyId}`);
       } else {
         if (passengers.length === 0) throw new Error("Pick a passenger (via New ->) to preview the JV.");
-        res = await fetch("${API_BASE}/cancellation-tickets/jv-preview-draft/", {
+        res = await fetch("http://localhost:8000/api/cancellation-tickets/jv-preview-draft/", {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify(buildCancellationPreviewPayload()),
         });
@@ -2954,10 +3029,10 @@
     // Cancellations instead - the whole point is to show ONLY already-
     // cancelled tickets here, not the full tickets list.
     const findApi = rescheduleMode
-      ? `${API_BASE}/reschedule-tickets/list/?company_id=${activeCompanyId}`
+      ? `http://localhost:8000/api/reschedule-tickets/list/?company_id=${activeCompanyId}`
       : cancellationMode
-      ? `${API_BASE}/cancellation-tickets/list/?company_id=${activeCompanyId}`
-      : `${API_BASE}/tickets/?company_id=${activeCompanyId}`;
+      ? `http://localhost:8000/api/cancellation-tickets/list/?company_id=${activeCompanyId}`
+      : `http://localhost:8000/api/tickets/?company_id=${activeCompanyId}`;
     let rows = [];
     try {
       const res = await fetch(findApi);
@@ -3081,8 +3156,8 @@
     let rows = [];
     try {
       const [tRes, rRes] = await Promise.all([
-        fetch(`${API_BASE}/tickets/?company_id=${activeCompanyId}`),
-        fetch(`${API_BASE}/reschedule-tickets/list/?company_id=${activeCompanyId}`),
+        fetch(`http://localhost:8000/api/tickets/?company_id=${activeCompanyId}`),
+        fetch(`http://localhost:8000/api/reschedule-tickets/list/?company_id=${activeCompanyId}`),
       ]);
       const tRows = tRes.ok ? await tRes.json() : [];
       const rRows = rRes.ok ? await rRes.json() : [];
@@ -3253,6 +3328,15 @@
     document.getElementById("page-title").textContent = "Reschedule";
     document.getElementById("booking_status").value = "Re-Scheduled";
     document.getElementById("booking_status").disabled = true;
+    // Same field layout as once a ticket is picked (enterRescheduleMode) or
+    // a saved reschedule is opened - Rescheduled Ref/Ref Date labels and the
+    // Parent PNR field (blank until a ticket is picked) - so the empty
+    // screen doesn't show the plain Booking layout first.
+    document.getElementById("booking_reference_label").innerHTML = 'Rescheduled Ref<span class="dom-req">*</span>';
+    document.getElementById("booking_ref_date_label").innerHTML = 'Rescheduled Ref Date<span class="dom-req">*</span>';
+    document.getElementById("booking_reference").style.flex = "0 0 120px";
+    document.getElementById("parent-pnr-field").style.display = "";
+    document.getElementById("parent_pnr").textContent = "—";
     // Nothing can actually be entered yet - there's no ticket to attach
     // any of this to until "New" picks one (confirmed 2026-10-07: this
     // was meant to be locked from the start, but the blank shell never
@@ -3344,7 +3428,7 @@
     }
     try {
       const params = new URLSearchParams({ company_id: activeCompanyId, s_pnr: sPnr, airline_pnr: airlinePnr, ticket_no: ticketNo });
-      const res = await fetch(`${API_BASE}/tickets/lookup-for-cancellation/?${params}`);
+      const res = await fetch(`http://localhost:8000/api/tickets/lookup-for-cancellation/?${params}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Ticket not found.");
       cxLookupTicketId = data.ticket_id || null;
@@ -3480,11 +3564,23 @@
   // sourceRescheduleId (optional) - set when the lookup matched a
   // reschedule rather than the original ticket (chaining, any depth) -
   // fetches that record's own live data instead of the stale original.
+  // Payment Mode is only a real choice when the booking or a reschedule in
+  // the cancelled chain was paid by Payment Gateway (chain_payment_gateway,
+  // from the backend); otherwise it's frozen at Top-up.
+  function applyCxPaymentModeLock() {
+    const pm = document.getElementById("payment_mode");
+    if (passengers.some((p) => p.chain_payment_gateway)) return;
+    pm.value = "Top-up";
+    pm.disabled = true;
+    document.getElementById("payment_gateway_ref").value = "";
+    updateGatewayRefField();
+  }
+
   async function enterCancellationMode(ticketId, pickedPax, sourceRescheduleId) {
     try {
       const url = sourceRescheduleId
-        ? `${API_BASE}/reschedule-tickets/${sourceRescheduleId}/?company_id=${activeCompanyId}`
-        : `${API_BASE}/tickets/${ticketId}/?company_id=${activeCompanyId}`;
+        ? `http://localhost:8000/api/reschedule-tickets/${sourceRescheduleId}/?company_id=${activeCompanyId}`
+        : `http://localhost:8000/api/tickets/${ticketId}/?company_id=${activeCompanyId}`;
       const res = await fetch(url);
       const t = await res.json();
       if (!res.ok) throw new Error(t.error || "Ticket not found.");
@@ -3551,7 +3647,7 @@
           original_ticket_line_id: sourceRescheduleId ? p.original_ticket_line_id : p.id,
           reschedule_line_id: sourceRescheduleId ? p.id : null,
         }));
-        const totalsRes = await fetch("${API_BASE}/cancellation-tickets/fare-totals/", {
+        const totalsRes = await fetch("http://localhost:8000/api/cancellation-tickets/fare-totals/", {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ company_id: activeCompanyId, lines: totalsReq }),
         });
@@ -3576,6 +3672,7 @@
               // themselves are reset to 0 below, same as a fresh entry.
               chain_markup: tot.markup, chain_addl_markup: tot.addl_markup, chain_ssr_markup: tot.ssr_markup,
               chain_supp_markup: tot.supp_markup, chain_supp_addl_markup: tot.supp_addl_markup,
+              chain_payment_gateway: !!tot.chain_payment_gateway,
             };
           });
         }
@@ -3627,6 +3724,7 @@
       });
       document.querySelector("#invoice_date .dg-native").disabled = false;
       document.querySelector("#booking_ref_date .dg-native").disabled = false;
+      applyCxPaymentModeLock();
 
       cxSaveTicketId = ticketId;
       cxSaveSourceRescheduleId = sourceRescheduleId || null;
@@ -3667,7 +3765,7 @@
         lines: passengers.map((p) => ({ ...p, id: p.id, ...markupReversalComponents(p) })),
       };
       try {
-        const res = await fetch(`${API_BASE}/cancellation-tickets/${cxEditSavedCancellationId}/update/`, {
+        const res = await fetch(`http://localhost:8000/api/cancellation-tickets/${cxEditSavedCancellationId}/update/`, {
           method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
         });
         const result = await res.json();
@@ -3708,12 +3806,14 @@
     };
 
     try {
-      const res = await fetch("${API_BASE}/cancellation-tickets/create/", {
+      const res = await fetch("http://localhost:8000/api/cancellation-tickets/create/", {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
       });
       const result = await res.json();
       if (!res.ok) throw new Error(result.error || "Could not save this cancellation.");
-      window.VoyagerEntry.showToast(result.message || "Cancellation saved.", "ticket-entry.html");
+      // Lands on the just-saved cancellation in its view state (Edit button
+      // again), same as a Reschedule save - not a blank screen.
+      window.VoyagerEntry.showToast(result.message || "Cancellation saved.", `ticket-entry.html?cancellation_saved_id=${result.id}`);
     } catch (err) {
       voyagerAlert(err.message || "Could not save this cancellation. Is the Django backend running?", { icon: "error" });
     }
@@ -3753,7 +3853,29 @@
     setDateGroupValue(document.getElementById("booking_ref_date"), ct.cancellation_ref_date ? isoToDDMMYYYY(ct.cancellation_ref_date) : "");
     document.getElementById("customer").dispatchEvent(new Event("input"));
 
-    passengers = ct.lines.map((l) => ({ ...blankPassenger(), ...l, supplier_penalty: 0 }));
+    // The backend returns each Markup Reversal COMPONENT as saved (e.g.
+    // cust_markup_reversal = just the Markup row's amount) plus the full chain
+    // amounts (chain_*). Rebuild the popup's ticked rows from the saved
+    // components, and the passenger's combined Customer/Supplier totals (what
+    // cust_markup_reversal/supp_markup_reversal mean on the screen).
+    passengers = ct.lines.map((l) => {
+      const saved = {
+        markup: l.cust_markup_reversal || 0, addl_markup: l.cust_addl_markup_reversal || 0, ssr_markup: l.cust_ssr_markup_reversal || 0,
+        supp_markup: l.supp_markup_reversal || 0, supp_addl_markup: l.supp_addl_markup_reversal || 0,
+      };
+      return {
+        ...blankPassenger(), ...l,
+        chain_markup: l.chain_markup != null ? l.chain_markup : saved.markup,
+        chain_addl_markup: l.chain_addl_markup != null ? l.chain_addl_markup : saved.addl_markup,
+        chain_ssr_markup: l.chain_ssr_markup != null ? l.chain_ssr_markup : saved.ssr_markup,
+        chain_supp_markup: l.chain_supp_markup != null ? l.chain_supp_markup : saved.supp_markup,
+        chain_supp_addl_markup: l.chain_supp_addl_markup != null ? l.chain_supp_addl_markup : saved.supp_addl_markup,
+        cust_markup_reversal_checked: { markup: saved.markup > 0, addl_markup: saved.addl_markup > 0, ssr_markup: saved.ssr_markup > 0 },
+        supp_markup_reversal_checked: { supp_markup: saved.supp_markup > 0, supp_addl_markup: saved.supp_addl_markup > 0 },
+        cust_markup_reversal: saved.markup + saved.addl_markup + saved.ssr_markup,
+        supp_markup_reversal: saved.supp_markup + saved.supp_addl_markup,
+      };
+    });
     if (!passengers.length) passengers = [blankPassenger()];
     renderPaxTable();
 
@@ -3811,7 +3933,7 @@
     }
     try {
       const params = new URLSearchParams({ company_id: activeCompanyId, s_pnr: sPnr, airline_pnr: airlinePnr, ticket_no: ticketNo });
-      const res = await fetch(`${API_BASE}/tickets/lookup-for-reschedule/?${params}`);
+      const res = await fetch(`http://localhost:8000/api/tickets/lookup-for-reschedule/?${params}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Ticket not found.");
       rsLookupTicketId = data.ticket_id || null;
@@ -4068,7 +4190,7 @@
       let ancestorLevels = [];
       try {
         const chainUrl =
-          `${API_BASE}/reschedule-tickets/parent-chain-line/?company_id=${activeCompanyId}&original_ticket_line_id=${pickedLineId}` +
+          `http://localhost:8000/api/reschedule-tickets/parent-chain-line/?company_id=${activeCompanyId}&original_ticket_line_id=${pickedLineId}` +
           (pickedBasedOnId ? `&based_on_reschedule_line_id=${pickedBasedOnId}` : "");
         const chainRes = await fetch(chainUrl);
         if (chainRes.ok) {
@@ -4181,7 +4303,7 @@
       // fallback above.
       try {
         const chainUrl =
-          `${API_BASE}/reschedule-tickets/parent-chain-line/?company_id=${activeCompanyId}&original_ticket_line_id=${savedLine.original_ticket_line_id}` +
+          `http://localhost:8000/api/reschedule-tickets/parent-chain-line/?company_id=${activeCompanyId}&original_ticket_line_id=${savedLine.original_ticket_line_id}` +
           (savedLine.reschedule_line_id ? `&based_on_reschedule_line_id=${savedLine.reschedule_line_id}` : "");
         const chainRes = await fetch(chainUrl);
         if (chainRes.ok) {
@@ -4226,6 +4348,7 @@
       });
       document.querySelector("#invoice_date .dg-native").disabled = false;
       document.querySelector("#booking_ref_date .dg-native").disabled = false;
+      applyCxPaymentModeLock();
     } else {
       document.querySelectorAll(".dom-form-grid input, .dom-form-grid select").forEach((el) => (el.disabled = false));
       document.getElementById("booking_mode").disabled = true; // stays frozen at Manual regardless of mode
@@ -4296,11 +4419,11 @@
     const payload = buildTicketPayload();
     const url = rescheduleMode
       ? (editingRescheduleId
-          ? `${API_BASE}/reschedule-tickets/${editingRescheduleId}/update/`
-          : `${API_BASE}/reschedule-tickets/create/`)
+          ? `http://localhost:8000/api/reschedule-tickets/${editingRescheduleId}/update/`
+          : "http://localhost:8000/api/reschedule-tickets/create/")
       : editId
-      ? `${API_BASE}/tickets/${editId}/update/`
-      : `${API_BASE}/tickets/create/`;
+      ? `http://localhost:8000/api/tickets/${editId}/update/`
+      : "http://localhost:8000/api/tickets/create/";
 
     try {
       const res = await fetch(url, {
@@ -4320,6 +4443,213 @@
     } catch (err) {
       voyagerAlert(err.message || "Could not save this ticket. Is the Django backend running?", { icon: "error" });
     }
+  });
+
+  // ============================================================
+  // Print - Tax Invoice (Booking / Reschedule) or Credit Note
+  // (Cancellation), saved records only. Built from the same per-passenger
+  // figures the Passenger grid shows, so the printed Amount column always
+  // equals the grid's Total. Per line:
+  //   Service Fee = Service Fee + Addl + SSR Service Fee (the taxable value)
+  //   SSR         = Seat + Meal + Baggage + Other SSR
+  //   GST         = Customer GST, as CGST+SGST (customer in Company Master's
+  //                 State) or IGST (other / unknown State) - same rule as
+  //                 the JV's Output GST
+  //   Other Taxes = Amount - Basic Fare - SSR - Service Fee - GST
+  // ============================================================
+  const isSavedRecord = !!(editId || rescheduleSavedId || cancellationSavedId);
+  document.getElementById("print-btn").style.display = isSavedRecord ? "" : "none";
+
+  function amountInWords(amount) {
+    const ones = ["", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten", "Eleven", "Twelve",
+      "Thirteen", "Fourteen", "Fifteen", "Sixteen", "Seventeen", "Eighteen", "Nineteen"];
+    const tens = ["", "", "Twenty", "Thirty", "Forty", "Fifty", "Sixty", "Seventy", "Eighty", "Ninety"];
+    const twoDigits = (n) => (n < 20 ? ones[n] : `${tens[Math.floor(n / 10)]}${n % 10 ? " " + ones[n % 10] : ""}`);
+    const threeDigits = (n) => {
+      const h = Math.floor(n / 100), rest = n % 100;
+      return [h ? `${ones[h]} Hundred` : "", rest ? twoDigits(rest) : ""].filter(Boolean).join(" ");
+    };
+    // Indian grouping: Crore, Lakh, Thousand, Hundred.
+    const words = (n) => {
+      if (n === 0) return "Zero";
+      const parts = [];
+      const crore = Math.floor(n / 10000000); n %= 10000000;
+      const lakh = Math.floor(n / 100000); n %= 100000;
+      const thousand = Math.floor(n / 1000); n %= 1000;
+      if (crore) parts.push(`${words(crore)} Crore`);
+      if (lakh) parts.push(`${twoDigits(lakh)} Lakh`);
+      if (thousand) parts.push(`${twoDigits(thousand)} Thousand`);
+      if (n) parts.push(threeDigits(n));
+      return parts.join(" ");
+    };
+    const abs = Math.abs(Math.round(amount * 100));
+    const rupees = Math.floor(abs / 100), paise = abs % 100;
+    const ccy = (document.getElementById("currency").textContent || "INR").trim();
+    return `${ccy} ${words(rupees)}${paise ? ` and ${twoDigits(paise)} paise` : ""} Only.`;
+  }
+
+  // dd/mm/yyyy, like every other date shown in the app.
+  function fmtInvoiceDate(ddmmyyyy) {
+    const d = parseDDMMYYYY(ddmmyyyy);
+    if (!d) return ddmmyyyy || "";
+    return `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}`;
+  }
+
+  function buildInvoiceHtml() {
+    const esc = (s) => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const n2 = (v) => (Number(v) || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const co = companyMaster || {};
+    const customerName = document.getElementById("customer").value;
+    const cust = allCustomers.find((c) => c.name === customerName) || {};
+    const custState = (cust.state_name || "").trim();
+    const intraState = !!custState && !!companyState && custState.toLowerCase() === companyState.trim().toLowerCase();
+    const gstRate = fieldLedgerGstPct["Service Fee A/c"] || 0;
+
+    const lines = passengers.map((p, i) => {
+      const r = computeFareLine(p);
+      const penalties = (p.supplier_penalty || 0) + (p.reschedule_penalty || 0) + (p.agent_penalty || 0) + (p.cancellation_penalty || 0);
+      const amount = cancellationMode ? computeCancellationTotal(p) : r.total + penalties;
+      const ssr = (p.seat || 0) + (p.meal || 0) + (p.baggage || 0) + (p.other_ssr || 0);
+      const serviceFee = (p.service_fee || 0) + (p.addl_service_fee || 0) + (p.ssr_service_fee || 0);
+      const gst = Math.round(r.gst * 100) / 100;
+      const cgst = intraState ? Math.round((gst / 2) * 100) / 100 : 0;
+      const sgst = intraState ? Math.round((gst - cgst) * 100) / 100 : 0;
+      const igst = intraState ? 0 : gst;
+      return {
+        no: i + 1, pax: p.passenger_name, basic: p.basic_fare || 0, ssr, serviceFee, igst, cgst, sgst, gst, amount,
+        other: amount - (p.basic_fare || 0) - ssr - serviceFee - gst,
+      };
+    });
+    const sum = (k) => lines.reduce((s, l) => s + l[k], 0);
+    const grandTotal = sum("amount"), taxable = sum("serviceFee");
+    const totIgst = sum("igst"), totCgst = sum("cgst"), totSgst = sum("sgst"), totTax = totIgst + totCgst + totSgst;
+
+    const travelDates = [...new Set(passengers.flatMap((p) => (p.travel_date || "").split(",").map((d) => d.trim()).filter(Boolean)))];
+    const sectors = [...new Set(passengers.flatMap((p) => (p.sector || "").split(",").map((s) => s.trim()).filter(Boolean)))];
+    const phone = co.mobile || co.telephone || "";
+    const title = cancellationMode ? "CREDIT NOTE" : "TAX INVOICE";
+    const custAddress = (cust.address || "").split("\n").map(esc).join("<br/>");
+    // Company Master's own uploaded logo if there is one, else the project
+    // logo (absolute URL - the print frame has no base URL of its own).
+    const logoSrc = co.logo_base64 || new URL("assets/img/travel-agency-logo.png", window.location.href).href;
+    const logo = `<img src="${logoSrc}" alt="" style="max-height:52px; max-width:170px;" />`;
+    const rate = (r) => (intraState === null ? "" : `${Number(r.toFixed(2))}%`);
+
+    return `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${esc(document.getElementById("invoice_number").value || title)}</title>
+      <style>
+        @page { size: A4; margin: 12mm; }
+        * { box-sizing: border-box; }
+        body { font-family: Arial, Helvetica, sans-serif; font-size: 11px; color: #000; margin: 0; }
+        table, th, td { font-size: 11px; font-family: inherit; }
+        .inv { border: 1px solid #000; }
+        .sec { border-bottom: 1px solid #000; padding: 6px 8px; }
+        .head { text-align: center; position: relative; min-height: 96px; }
+        .head .logo { position: absolute; left: 8px; top: 24px; }
+        .title { font-weight: bold; font-size: 13px; margin-bottom: 8px; }
+        .cname { font-weight: bold; font-size: 17px; }
+        .grid2 { display: flex; } .grid2 > div { flex: 1; }
+        .kv td { padding: 2px 4px 6px 0; vertical-align: top; }
+        table { border-collapse: collapse; width: 100%; }
+        .items th, .items td { border-left: 1px solid #000; padding: 3px 5px; }
+        .items th:first-child, .items td:first-child { border-left: none; }
+        .items th { border-bottom: 1px solid #000; font-weight: normal; }
+        .items td.r, .items th.r, .tax td.r { text-align: right; }
+        .items tbody td { height: 16px; vertical-align: top; }
+        .items tr.fill td { height: ${Math.max(140 - lines.length * 16, 30)}px; }
+        .items tr.gt td { border-top: 1px solid #000; font-weight: bold; }
+        .tax th, .tax td { border: 1px solid #000; padding: 2px 4px; }
+        .tax { margin-top: 0; }
+        .words { padding: 4px 8px; border-bottom: 1px solid #000; }
+        .foot { display: flex; min-height: 90px; }
+        .foot .terms { flex: 1; padding: 6px 8px; border-right: 1px solid #000; font-weight: bold; }
+        .foot .sign { width: 230px; padding: 6px 8px; text-align: center; font-weight: bold; display: flex; flex-direction: column; justify-content: space-between; }
+        .foot .sign span { font-weight: normal; }
+      </style></head><body>
+      <div class="inv">
+        <div class="sec head">
+          <div class="title">${title}</div>
+          <div class="logo">${logo}</div>
+          <div class="cname">${esc(co.company_name)}</div>
+          <div>${[esc(co.address || "").replace(/\n/g, "<br/>"), [co.state, co.pincode].filter(Boolean).map(esc).join(" - ")].filter(Boolean).join(", ")}</div>
+          ${co.gst_no ? `<div style="font-weight:bold; margin-top:6px;">GSTIN : ${esc(co.gst_no)}</div>` : ""}
+          <div style="font-weight:bold;">${phone ? `Tel : ${esc(phone)}` : ""}${phone && co.email ? "&nbsp; " : ""}${co.email ? `Email : ${esc(co.email)}` : ""}</div>
+        </div>
+        <div class="sec grid2">
+          <div><table class="kv">
+            <tr><td style="width:110px; white-space:nowrap;">${cancellationMode ? "Credit Note No" : "Invoice No"}</td><td>: ${esc(document.getElementById("invoice_number").value)}</td></tr>
+            <tr><td>${cancellationMode ? "Credit Note Date" : "Invoice Date"}</td><td>: ${esc(fmtInvoiceDate(getDateGroupValue(document.getElementById("invoice_date"))))}</td></tr>
+            <tr><td>Booking ID</td><td>: ${esc(document.getElementById("booking_reference").value)}</td></tr>
+            <tr><td>Place of Supply</td><td>: ${esc(custState)}</td></tr>
+          </table></div>
+          <div><b>Billed To :</b><br/>${esc(customerName)}<br/>${custAddress}<br/><br/>${esc(custState)}${cust.gst_no ? ` - ${esc(cust.gst_no)}` : ""}</div>
+        </div>
+        <div class="sec"><table class="kv" style="width:auto;">
+          <tr><td style="width:110px; white-space:nowrap; padding-bottom:0;">Date of Travel</td><td style="padding-bottom:0;">: ${esc(travelDates.join(", "))}</td></tr>
+          <tr><td style="padding-bottom:0;">Airline PNR</td><td style="padding-bottom:0;">: ${esc(document.getElementById("airline_pnr_header").value)}</td></tr>
+          <tr><td style="padding-bottom:0;">Sector</td><td style="padding-bottom:0;">: ${esc(sectors.join(", "))}</td></tr>
+        </table></div>
+        <table class="items">
+          <thead><tr><th style="width:30px;"># No</th><th style="width:55px;">Ser. Type</th><th>Pax Name</th><th class="r">Basic Fare</th>
+            <th class="r">Other Taxes</th><th class="r">SSR</th><th class="r">Service Fee</th><th class="r">IGST</th><th class="r">CGST</th><th class="r">SGST</th><th class="r">Amount</th></tr></thead>
+          <tbody>
+            ${lines.map((l) => `<tr><td style="text-align:center;">${l.no}</td><td style="text-align:center;">Airline</td><td>${esc(l.pax)}</td>
+              <td class="r">${n2(l.basic)}</td><td class="r">${n2(l.other)}</td><td class="r">${n2(l.ssr)}</td><td class="r">${n2(l.serviceFee)}</td>
+              <td class="r">${n2(l.igst)}</td><td class="r">${n2(l.cgst)}</td><td class="r">${n2(l.sgst)}</td><td class="r">${n2(l.amount)}</td></tr>`).join("")}
+            <tr class="fill">${"<td></td>".repeat(11)}</tr>
+            <tr class="gt"><td colspan="10" style="border-left:none;">&nbsp;&nbsp;&nbsp;Grand Total</td><td class="r">${n2(grandTotal)}</td></tr>
+          </tbody>
+        </table>
+        <div class="words" style="border-top:1px solid #000;">Total Amount (In Words): ${esc(amountInWords(grandTotal))}</div>
+        <table class="tax">
+          <thead>
+            <tr><th rowspan="2">HSN/SAC</th><th>Taxable</th><th colspan="2">IGST</th><th colspan="2">CGST</th><th colspan="2">SGST/UTGST</th><th rowspan="2">Total<br/>Tax Amount</th></tr>
+            <tr><th>Value</th><th>Rate</th><th>Amount</th><th>Rate</th><th>Amount</th><th>Rate</th><th>Amount</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>${esc(co.hsn_sac || "998551")}</td><td class="r">${n2(taxable)}</td>
+              <td class="r">${intraState ? "" : rate(gstRate)}</td><td class="r">${n2(totIgst)}</td>
+              <td class="r">${intraState ? rate(gstRate / 2) : ""}</td><td class="r">${n2(totCgst)}</td>
+              <td class="r">${intraState ? rate(gstRate / 2) : ""}</td><td class="r">${n2(totSgst)}</td><td class="r">${n2(totTax)}</td></tr>
+            <tr><td class="r"><b>Total</b></td><td class="r">${n2(taxable)}</td><td></td><td class="r">${n2(totIgst)}</td><td></td><td class="r">${n2(totCgst)}</td><td></td><td class="r">${n2(totSgst)}</td><td class="r">${n2(totTax)}</td></tr>
+          </tbody>
+        </table>
+        <div class="words">Tax Amount (In Words): ${esc(amountInWords(totTax))}</div>
+        <div class="foot">
+          <div class="terms">Terms and Conditions:</div>
+          <div class="sign">${esc(co.company_name)}<span>Authorised Signatory</span></div>
+        </div>
+      </div></body></html>`;
+  }
+
+  // Printed through a hidden iframe - no popup window to get blocked, and
+  // the ticket screen itself stays exactly as it is.
+  document.getElementById("print-btn").addEventListener("click", () => {
+    if (!isSavedRecord || !passengers.length) return;
+    let frame = document.getElementById("invoice-print-frame");
+    if (frame) frame.remove();
+    frame = document.createElement("iframe");
+    frame.id = "invoice-print-frame";
+    frame.style.cssText = "position:fixed; right:0; bottom:0; width:0; height:0; border:0; visibility:hidden;";
+    document.body.appendChild(frame);
+    const doc = frame.contentWindow.document;
+    doc.open();
+    doc.write(buildInvoiceHtml());
+    doc.close();
+    // "Save as PDF" names the file from the page title - the invoice number
+    // (the browser swaps "/" for "_"). Set on this page too, since some
+    // browsers take the name from the top window rather than the frame.
+    const pageTitle = document.title;
+    document.title = document.getElementById("invoice_number").value || pageTitle;
+    const restoreTitle = () => { document.title = pageTitle; };
+    frame.contentWindow.addEventListener("afterprint", restoreTitle);
+    // Wait for the logo to load, or it can print blank.
+    const imgs = Array.from(doc.images);
+    Promise.all(imgs.map((img) => (img.complete ? null : new Promise((res) => { img.onload = img.onerror = res; }))))
+      .then(() => {
+        frame.contentWindow.focus();
+        frame.contentWindow.print();
+        setTimeout(restoreTitle, 1000);
+      });
   });
 
   // ============================================================
@@ -4350,7 +4680,7 @@
       try {
         const [, res] = await Promise.all([
           populateRefs(activeCompanyId),
-          fetch(`${API_BASE}/tickets/${editId}/?company_id=${activeCompanyId}`),
+          fetch(`http://localhost:8000/api/tickets/${editId}/?company_id=${activeCompanyId}`),
         ]);
         const ticket = await res.json();
         if (!res.ok) throw new Error(ticket.error || "Ticket not found.");
@@ -4368,16 +4698,16 @@
       try {
         const [, res] = await Promise.all([
           populateRefs(activeCompanyId),
-          fetch(`${API_BASE}/tickets/?company_id=${activeCompanyId}`),
+          fetch(`http://localhost:8000/api/tickets/?company_id=${activeCompanyId}`),
         ]);
         existingTickets = res.ok ? await res.json() : [];
       } catch (_) { existingTickets = []; }
       if (rescheduleSavedId) {
         try {
-          const res = await fetch(`${API_BASE}/reschedule-tickets/${rescheduleSavedId}/?company_id=${activeCompanyId}`);
+          const res = await fetch(`http://localhost:8000/api/reschedule-tickets/${rescheduleSavedId}/?company_id=${activeCompanyId}`);
           const rt = await res.json();
           if (!res.ok) throw new Error(rt.error || "Saved reschedule ticket not found.");
-          const origRes = await fetch(`${API_BASE}/tickets/${rt.original_ticket_id}/?company_id=${activeCompanyId}`);
+          const origRes = await fetch(`http://localhost:8000/api/tickets/${rt.original_ticket_id}/?company_id=${activeCompanyId}`);
           const originalTicket = await origRes.json();
           if (!origRes.ok) throw new Error(originalTicket.error || "Original ticket not found.");
           await enterSavedRescheduleMode(rt, originalTicket);
@@ -4388,12 +4718,12 @@
       } else if (rescheduleTicketId) {
         try {
           const [res, parentRes] = await Promise.all([
-            fetch(`${API_BASE}/tickets/${rescheduleTicketId}/?company_id=${activeCompanyId}`),
+            fetch(`http://localhost:8000/api/tickets/${rescheduleTicketId}/?company_id=${activeCompanyId}`),
             // Chaining - also fetch the PREVIOUS reschedule this one was
             // found via, so "Parent PNR Details" reflects its data instead
             // of the several-steps-back original ticket's.
             parentRescheduleId
-              ? fetch(`${API_BASE}/reschedule-tickets/${parentRescheduleId}/?company_id=${activeCompanyId}`)
+              ? fetch(`http://localhost:8000/api/reschedule-tickets/${parentRescheduleId}/?company_id=${activeCompanyId}`)
               : Promise.resolve(null),
           ]);
           const ticket = await res.json();
@@ -4436,7 +4766,7 @@
         enterBlankCancellationShell();
       } else if (cancellationSavedId) {
         try {
-          const res = await fetch(`${API_BASE}/cancellation-tickets/${cancellationSavedId}/?company_id=${activeCompanyId}`);
+          const res = await fetch(`http://localhost:8000/api/cancellation-tickets/${cancellationSavedId}/?company_id=${activeCompanyId}`);
           const ct = await res.json();
           if (!res.ok) throw new Error(ct.error || "Saved cancellation not found.");
           enterSavedCancellationMode(ct);

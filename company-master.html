@@ -9,7 +9,6 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
 <link href="assets/css/design-system.css" rel="stylesheet" />
 <link href="assets/css/app.css" rel="stylesheet" />
-<link href="assets/css/loader.css" rel="stylesheet" />
 <link rel="icon" type="image/png" href="assets/img/favicon.png" />
 <style>
   /* Page-scoped tokens (cmx- prefix) - a self-contained ERP master-screen
@@ -28,7 +27,7 @@
 
   .cmx-main {
     max-width: 100%; padding: 14px 24px; box-sizing: border-box;
-    display: flex; flex-direction: column; align-items: center; justify-content: safe center;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
     height: calc(100vh - var(--topnav-height) - var(--menubar-height, 0px)); overflow: hidden;
   }
 
@@ -51,10 +50,7 @@
   }
   .cmx-titlebar-edit-btn:hover { background: rgba(255, 255, 255, 0.28); }
 
-  /* On a short laptop screen the form scrolls inside the card (title bar
-     and Save/Cancel stay visible) instead of the bottom rows - Upload
-     Logo/Seal - being cut off. Tall screens still show it all, no scroll. */
-  .cmx-body { padding: 12px 18px 6px; overflow-y: auto; flex: 1 1 auto; min-height: 0; box-sizing: border-box; }
+  .cmx-body { padding: 12px 18px 6px; overflow: hidden; box-sizing: border-box; }
 
   /* Desktop: 3 columns. Tightened row/column gaps keep the whole form
      short enough to fit 100vh without scrolling. */
@@ -152,7 +148,6 @@
   }
 </style>
 </head><body>
-<script src="assets/js/loader.js?v=2"></script>
 <header class="app-topnav" id="shell-topnav"></header>
 <div class="app-body" style="height: calc(100vh - var(--topnav-height) - var(--menubar-height, 0px)); overflow: hidden;">
   <main class="app-main cmx-main">
@@ -294,9 +289,9 @@
 </div>
 <script src="assets/js/hardcode.js"></script>
 <script src="assets/js/mock-data.js"></script>
-<script src="assets/js/api.js"></script>
-<script src="assets/js/util.js"></script>
+<script src="assets/js/api.js?v=3"></script>
+<script src="assets/js/util.js?v=2"></script>
 <script src="assets/js/entry-common.js"></script>
-<script src="assets/js/shell.js?v=13"></script>
+<script src="assets/js/shell.js?v=21"></script>
 <script src="assets/js/page-company-master.js?v=3"></script>
 </body></html>

@@ -1,6 +1,6 @@
 /* ==========================================================================
    Voyager ERP — App Shell & Page Layout
-   Spruce Green Theme + Light/Dark Mode + Topbar Profile/Bell/Toggle Ordering
+   Spruce Green Theme + Topbar Profile/Bell Ordering
    ========================================================================== */
 
 /* Login ---------------------------------------------------------------- */
@@ -171,10 +171,10 @@
 .flag-dropdown-item:hover { background: var(--color-bg-subtle); }
 .flag-dropdown-item.active { background: var(--color-bg-tint); color: var(--color-primary); }
 .flag-dropdown-icon svg { display: block; border-radius: 2px; }
-[data-theme="dark"] .flag-current-btn { background: var(--color-bg-subtle); }
-[data-theme="dark"] .flag-dropdown { background: #1E293B; border-color: #334155; }
-[data-theme="dark"] .flag-dropdown-item { color: #E2E8F0; }
-[data-theme="dark"] .flag-dropdown-item:hover { background: #263449; }
+
+
+
+
 
 .user-chip {
   display: flex; align-items: center; gap: 0.6rem;
@@ -209,25 +209,11 @@
 }
 
 /* Theme Toggle Button */
-.theme-toggle-btn {
-  color: var(--color-text-muted);
-}
-.theme-toggle-btn svg {
-  width: 18px;
-  height: 18px;
-  stroke: currentColor;
-}
-.theme-icon-sun, .theme-icon-moon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-.theme-toggle-btn:hover {
-  color: #F59E0B;
-}
-[data-theme="dark"] .theme-toggle-btn:hover {
-  color: #FBBF24;
-}
+
+
+
+
+
 
 .app-body { display: flex; margin-top: var(--topnav-height); }
 
@@ -367,9 +353,7 @@
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%230F766E' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='M21 21l-4.35-4.35'/%3E%3C/svg%3E");
   background-size: contain; background-repeat: no-repeat;
 }
-[data-theme="dark"] .dataTables_wrapper .dataTables_filter label::before {
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2314B8A6' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='M21 21l-4.35-4.35'/%3E%3C/svg%3E");
-}
+
 .dataTables_wrapper .dataTables_filter input {
   flex: 1; height: 38px; padding: 0 0.5rem; margin: 0 !important;
   border: none !important; border-bottom: 2px solid var(--color-primary) !important; border-radius: 0 !important;
@@ -719,7 +703,7 @@ select.form-control-custom,
 .pax-cards-wrap::-webkit-scrollbar-thumb:hover { background: var(--color-teal); }
 .pax-cards-wrap { scrollbar-width: thin; scrollbar-color: #CBD5E1 var(--color-bg-canvas); }/* ==========================================================================
    Voyager ERP — App Shell & Page Layout
-   Spruce Green Theme + Light/Dark Mode + Topbar Profile/Bell/Toggle Ordering
+   Spruce Green Theme + Topbar Profile/Bell Ordering
    ========================================================================== */
 
 /* Login ---------------------------------------------------------------- */
@@ -890,10 +874,10 @@ select.form-control-custom,
 .flag-dropdown-item:hover { background: var(--color-bg-subtle); }
 .flag-dropdown-item.active { background: var(--color-bg-tint); color: var(--color-primary); }
 .flag-dropdown-icon svg { display: block; border-radius: 2px; }
-[data-theme="dark"] .flag-current-btn { background: var(--color-bg-subtle); }
-[data-theme="dark"] .flag-dropdown { background: #1E293B; border-color: #334155; }
-[data-theme="dark"] .flag-dropdown-item { color: #E2E8F0; }
-[data-theme="dark"] .flag-dropdown-item:hover { background: #263449; }
+
+
+
+
 
 .user-chip {
   display: flex; align-items: center; gap: 0.6rem;
@@ -928,25 +912,11 @@ select.form-control-custom,
 }
 
 /* Theme Toggle Button */
-.theme-toggle-btn {
-  color: var(--color-text-muted);
-}
-.theme-toggle-btn svg {
-  width: 18px;
-  height: 18px;
-  stroke: currentColor;
-}
-.theme-icon-sun, .theme-icon-moon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-.theme-toggle-btn:hover {
-  color: #F59E0B;
-}
-[data-theme="dark"] .theme-toggle-btn:hover {
-  color: #FBBF24;
-}
+
+
+
+
+
 
 .app-body { display: flex; margin-top: var(--topnav-height); }
 
@@ -1086,9 +1056,7 @@ select.form-control-custom,
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%230F766E' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='M21 21l-4.35-4.35'/%3E%3C/svg%3E");
   background-size: contain; background-repeat: no-repeat;
 }
-[data-theme="dark"] .dataTables_wrapper .dataTables_filter label::before {
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2314B8A6' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='M21 21l-4.35-4.35'/%3E%3C/svg%3E");
-}
+
 .dataTables_wrapper .dataTables_filter input {
   flex: 1; height: 38px; padding: 0 0.5rem; margin: 0 !important;
   border: none !important; border-bottom: 2px solid var(--color-primary) !important; border-radius: 0 !important;
@@ -1452,11 +1420,7 @@ select.form-control-custom,
   font-family: var(--font-body);
   color: #1E293B;
 }
-[data-theme="dark"] .dom-window {
-  background: #151D2A;
-  border-color: #2E3E52;
-  color: #E2E8F0;
-}
+
 
 /* 1. Title Bar */
 .dom-titlebar {
@@ -1515,29 +1479,21 @@ select.form-control-custom,
   font-weight: 500;
   flex-shrink: 0;
 }
-[data-theme="dark"] .dom-tabs {
-  background: #151D2A;
-  border-color: #243042;
-}
+
 .dom-tab {
   color: #4B5563;
   cursor: pointer;
   padding-bottom: 3px;
   text-decoration: none;
 }
-[data-theme="dark"] .dom-tab {
-  color: #94A3B8;
-}
+
 .dom-tab.active {
   color: #3B6DB5;
   font-weight: 700;
   border-bottom: 2.5px solid #3B6DB5;
   margin-bottom: -4px;
 }
-[data-theme="dark"] .dom-tab.active {
-  color: #4D81CD;
-  border-color: #4D81CD;
-}
+
 
 /* 3. Main Form Scrollable Content */
 .dom-main-content {
@@ -1559,9 +1515,7 @@ select.form-control-custom,
   padding: 4px 2px 6px;
   flex-shrink: 0;
 }
-[data-theme="dark"] .dom-form-grid {
-  background: #151D2A;
-}
+
 .dom-field {
   display: flex;
   align-items: center;
@@ -1577,9 +1531,7 @@ select.form-control-custom,
   white-space: nowrap;
   flex-shrink: 0;
 }
-[data-theme="dark"] .dom-label {
-  color: #CBD5E1;
-}
+
 .dom-req {
   color: #EF4444;
   font-weight: 700;
@@ -1600,11 +1552,7 @@ select.form-control-custom,
 input.dom-input[type="number"], input.dom-input.dom-amount {
   text-align: right;
 }
-[data-theme="dark"] .dom-input, [data-theme="dark"] .dom-select {
-  background: #0F172A;
-  border-color: #334155;
-  color: #F8FAFC;
-}
+
 /* Read-only vs editable — several fields (Discount %, Cust Discount On,
    Commission %, Supplier Commission On, Card Number, Gateway Ref) always
    stay visible now, toggling between disabled (read-only, not relevant to
@@ -1620,12 +1568,7 @@ input.dom-input[type="number"], input.dom-input.dom-amount {
   border-color: #E2E8F0 !important;
   cursor: not-allowed;
 }
-[data-theme="dark"] .dom-input:disabled, [data-theme="dark"] .dom-select:disabled {
-  background: #1E293B !important;
-  color: #CBD5E1 !important;
-  -webkit-text-fill-color: #CBD5E1 !important;
-  border-color: #334155 !important;
-}
+
 .dom-input:focus, .dom-select:focus {
   outline: none;
   border-color: #3B6DB5;
@@ -1646,11 +1589,7 @@ input.dom-input[type="number"], input.dom-input.dom-amount {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-[data-theme="dark"] .dom-input-readonly {
-  background: #1E293B;
-  color: #94A3B8;
-  border-color: #334155;
-}
+
 
 /* Customer Address multi-line box: neatly and properly fits address inside box borders without spilling */
 .dom-field.field-address {
@@ -1681,10 +1620,7 @@ input.dom-input[type="number"], input.dom-input.dom-amount {
   flex-direction: column;
   flex-shrink: 0;
 }
-[data-theme="dark"] .dom-grid-container {
-  background: #111827;
-  border-color: #334155;
-}
+
 .dom-grid-scroll {
   overflow-x: auto;
   overflow-y: auto;
@@ -1717,19 +1653,12 @@ input.dom-input[type="number"], input.dom-input.dom-amount {
   cursor: pointer;
   background: #FFFFFF;
 }
-[data-theme="dark"] .dom-grid-table tbody tr {
-  background: #162032;
-  border-color: #243046;
-}
-[data-theme="dark"] .dom-grid-table tbody tr td {
-  border-right-color: #243046;
-}
+
+
 .dom-grid-table tbody tr:hover {
   background: #F1F5F9;
 }
-[data-theme="dark"] .dom-grid-table tbody tr:hover {
-  background: #1E2D44;
-}
+
 
 /* Selected row in Voyager ERP Brand Teal */
 .dom-grid-table tbody tr.active-row {
@@ -1783,11 +1712,7 @@ input.dom-input[type="number"], input.dom-input.dom-amount {
   color: #334155;
   flex-shrink: 0;
 }
-[data-theme="dark"] .dom-grid-statusbar {
-  background: #151D2A;
-  border-color: #243042;
-  color: #94A3B8;
-}
+
 .dom-mini-btn-group {
   display: flex;
   gap: 4px;
@@ -1859,10 +1784,7 @@ input.dom-input[type="number"], input.dom-input.dom-amount {
   background: #FFFFFF;
   border: 1px solid #CBD5E1;
 }
-[data-theme="dark"] .dom-dtls-table {
-  background: #111827;
-  border-color: #334155;
-}
+
 .dom-dtls-table th {
   background: #6D7F93;
   color: #FFFFFF;
@@ -1885,18 +1807,13 @@ input.dom-input[type="number"], input.dom-input.dom-amount {
   font-variant-numeric: tabular-nums;
   color: #0F172A;
 }
-[data-theme="dark"] .dom-dtls-table td {
-  border-color: #243046;
-  color: #E2E8F0;
-}
+
 .dom-dtls-table td:first-child {
   text-align: left;
   font-weight: 700;
   color: #334155;
 }
-[data-theme="dark"] .dom-dtls-table td:first-child {
-  color: #94A3B8;
-}
+
 
 /* 8. Bottom Action Toolbar */
 .dom-bottom-toolbar {
@@ -1909,10 +1826,7 @@ input.dom-input[type="number"], input.dom-input.dom-amount {
   border-top: 1px solid #D2D8E2;
   flex-shrink: 0;
 }
-[data-theme="dark"] .dom-bottom-toolbar {
-  background: #151D2A;
-  border-color: #243042;
-}
+
 .dom-nav-btn {
   height: 26px;
   padding: 0 12px;
@@ -1929,11 +1843,7 @@ input.dom-input[type="number"], input.dom-input.dom-amount {
   align-items: center;
   justify-content: center;
 }
-[data-theme="dark"] .dom-nav-btn {
-  background: #1E293B;
-  border-color: #334155;
-  color: #CBD5E1;
-}
+
 .dom-nav-btn:hover {
   background: #F1F5F9;
   border-color: #64748B;
@@ -1989,13 +1899,8 @@ input.dom-input[type="number"], input.dom-input.dom-amount {
   background: #3B6DB5;
   color: #FFFFFF;
 }
-[data-theme="dark"] .dom-date-type-toggle {
-  border-color: #CBD5E1;
-}
-[data-theme="dark"] .dom-date-type-btn {
-  background: #1E293B;
-  color: #F8FAFC;
-}
+
+
 
 /* Sector chip box — click to add a sector via the Add Sector popup, one
    chip per multi-city segment (e.g. BOM-DXB), removable with the x. */
@@ -2016,10 +1921,7 @@ input.dom-input[type="number"], input.dom-input.dom-amount {
   box-sizing: border-box;
   scrollbar-width: thin;
 }
-[data-theme="dark"] .dom-chip-box-inner {
-  background: #0F172A;
-  border-color: #334155;
-}
+
 .dom-chip-box-inner::-webkit-scrollbar {
   height: 3px;
 }
@@ -2027,9 +1929,7 @@ input.dom-input[type="number"], input.dom-input.dom-amount {
   background: #CBD5E1;
   border-radius: 2px;
 }
-[data-theme="dark"] .dom-chip-box-inner::-webkit-scrollbar-thumb {
-  background: #334155;
-}
+
 .dom-chip-placeholder {
   color: #94A3B8;
   font-size: 11px;
@@ -2048,10 +1948,7 @@ input.dom-input[type="number"], input.dom-input.dom-amount {
   flex-shrink: 0;
   white-space: nowrap;
 }
-[data-theme="dark"] .dom-sector-chip {
-  background: #0B3B37;
-  color: #6E9AD9;
-}
+
 .dom-sector-chip .dom-chip-remove {
   border: 0;
   background: transparent;
@@ -2135,10 +2032,7 @@ input.dom-input[type="number"], input.dom-input.dom-amount {
   overflow: hidden;
   font-family: var(--font-body);
 }
-[data-theme="dark"] .dom-modal-window {
-  background: #151D2A;
-  border-color: #3B6DB5;
-}
+
 #voyager-alert-modal,
 #voyager-confirm-modal {
   z-index: 2000;
@@ -2159,9 +2053,7 @@ input.dom-input[type="number"], input.dom-input.dom-amount {
 }
 .voyager-alert-icon { flex-shrink: 0; display: flex; margin-top: 1px; }
 .voyager-alert-text { white-space: pre-line; }
-[data-theme="dark"] .voyager-alert-body {
-  color: #E2E8F0;
-}
+
 .voyager-alert-actions {
   display: flex;
   justify-content: flex-end;
@@ -2208,10 +2100,7 @@ input.dom-input[type="number"], input.dom-input.dom-amount {
   border: 1px solid #CBD5E1;
   border-radius: 3px;
 }
-[data-theme="dark"] .dom-modal-col-left {
-  background: #1E293B;
-  border-color: #334155;
-}
+
 .dom-modal-col-right {
   flex: 1;
   display: flex;
@@ -2263,10 +2152,7 @@ input.dom-input[type="number"], input.dom-input.dom-amount {
   border-bottom: 1px solid #CBD5E1;
   margin-bottom: 2px;
 }
-[data-theme="dark"] .dom-modal-section-title {
-  color: #4D81CD;
-  border-color: #334155;
-}
+
 .dom-modal-form-grid {
   display: grid;
   grid-template-columns: 82px 1fr;
@@ -2281,19 +2167,14 @@ input.dom-input[type="number"], input.dom-input.dom-amount {
   white-space: nowrap;
   font-size: 11px;
 }
-[data-theme="dark"] .dom-modal-form-grid label {
-  color: #94A3B8;
-}
+
 .dom-modal-fares-card {
   background: #FFFFFF;
   border: 1px solid #CBD5E1;
   padding: 5px 8px;
   border-radius: 3px;
 }
-[data-theme="dark"] .dom-modal-fares-card {
-  background: #1E293B;
-  border-color: #334155;
-}
+
 .dom-modal-fares-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -2313,9 +2194,7 @@ input.dom-input[type="number"], input.dom-input.dom-amount {
   white-space: nowrap;
   font-size: 11px;
 }
-[data-theme="dark"] .dom-modal-fares-grid .fare-item label {
-  color: #94A3B8;
-}
+
 .dom-modal-accounting-row {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -2330,10 +2209,7 @@ input.dom-input[type="number"], input.dom-input.dom-amount {
   display: flex;
   flex-direction: column;
 }
-[data-theme="dark"] .dom-acct-box {
-  background: #1E293B;
-  border-color: #334155;
-}
+
 .dom-acct-header-full {
   grid-column: 1 / -1;
 }
@@ -2357,9 +2233,7 @@ input.dom-input[type="number"], input.dom-input.dom-amount {
   font-size: 10.5px;
   white-space: nowrap;
 }
-[data-theme="dark"] .dom-acct-field label {
-  color: #94A3B8;
-}
+
 /* Dual rows (Markup/Addl Markup, TDS %/TDS Amount, Discount Type/Discount %,
    etc.) use a fixed grid instead of flex so every such row's second label
    and second value box line up in the same column, regardless of how long
@@ -2390,9 +2264,7 @@ input.dom-input[type="number"], input.dom-input.dom-amount {
   color: #334155;
   font-size: 10px;
 }
-[data-theme="dark"] .dom-acct-field-triple label {
-  color: #94A3B8;
-}
+
 /* type=number's native up/down spinner eats ~16px of an already-tight
    box in this 3-pair-per-row layout — drop it so that width goes to the
    digits themselves instead. */
@@ -2491,9 +2363,7 @@ input.dom-input[type="number"], input.dom-input.dom-amount {
   padding: 6px;
   border-top: 1px solid #CBD5E1;
 }
-[data-theme="dark"] .dom-acct-box-actions {
-  border-color: #334155;
-}
+
 .dom-modal-footer {
   height: 36px;
   padding: 0 12px;
@@ -2504,10 +2374,7 @@ input.dom-input[type="number"], input.dom-input.dom-amount {
   justify-content: space-between;
   flex-shrink: 0;
 }
-[data-theme="dark"] .dom-modal-footer {
-  background: #151D2A;
-  border-color: #243042;
-}
+
 .dom-modal-total-bar {
   display: flex;
   align-items: center;
@@ -2516,9 +2383,7 @@ input.dom-input[type="number"], input.dom-input.dom-amount {
   font-weight: 700;
   color: #3B6DB5;
 }
-[data-theme="dark"] .dom-modal-total-bar {
-  color: #4D81CD;
-}
+
 
 /* Modal Input overrides — comfortable ERP presentation */
 .dom-modal-window input,
@@ -2822,37 +2687,15 @@ input.dom-input[type="number"], input.dom-input.dom-amount {
   z-index: 970;
 }
 
-/* Dark mode support for menubar dropdowns and submenus */
-[data-theme="dark"] .menubar-dropdown,
-[data-theme="dark"] .menubar-subdropdown {
-  background: #1E293B;
-  border-color: #334155;
-  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.45);
-}
 
-[data-theme="dark"] .menubar-dropdown a,
-[data-theme="dark"] .menubar-subdropdown a,
-[data-theme="dark"] .menubar-submenu-trigger {
-  color: #E2E8F0;
-}
 
-[data-theme="dark"] .menubar-dropdown a:hover,
-[data-theme="dark"] .menubar-subdropdown a:hover,
-[data-theme="dark"] .menubar-submenu-trigger:hover,
-[data-theme="dark"] .menubar-submenu.open > .menubar-submenu-trigger {
-  background: #263449;
-}
 
-[data-theme="dark"] .menubar-dropdown a.active,
-[data-theme="dark"] .menubar-subdropdown a.active,
-[data-theme="dark"] .menubar-submenu.has-active > .menubar-submenu-trigger {
-  background: rgba(59, 109, 181, 0.3);
-  color: #60A5FA;
-}
 
-[data-theme="dark"] .menubar-subcaret {
-  color: #94A3B8;
-}
+
+
+
+
+
 
 @media (max-width: 900px) {
   .menubar-subdropdown {
@@ -2902,4 +2745,15 @@ input.dom-input[type="number"], input.dom-input.dom-amount {
 .sm-table-lg .form-control-custom {
   font-size: 13px;
   height: 36px;
+}
+/* Reports - a hovered / keyboard-selected row is solid blue, so ALL its
+   text turns white, including muted rows (e.g. a month with no activity)
+   and inner tags/links (Dr/Cr, particulars) that set their own colour. */
+.table-custom tbody tr[class*="-row-selected"] td,
+.table-custom tbody tr[class*="-row-selected"] td *,
+tr.tb-row-selected td, tr.tb-row-selected td *,
+.pl-click:hover td, .pl-click:hover td *,
+.bs-click:hover td, .bs-click:hover td *,
+.tb-diff-row:hover td, .tb-diff-row:hover td * {
+  color: #FFFFFF !important;
 }

@@ -34,6 +34,7 @@ MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.middleware.common.CommonMiddleware",
+    "accounting.permissions.MenuPermissionMiddleware",
 ]
 
 ROOT_URLCONF = "config.urls"

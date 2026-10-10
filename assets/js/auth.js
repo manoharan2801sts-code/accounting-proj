@@ -1,8 +1,11 @@
 ﻿(function () {
   const { Store, post } = window.VoyagerAPI;
 
-  // Already signed in? Skip straight to the dashboard.
-  if (Store.getToken()) {
+  // Already signed in? Skip straight to the dashboard. A leftover demo
+  // session no longer counts as signed in - clear it and show the form.
+  if (Store.getToken() === "demo-token") {
+    Store.clear();
+  } else if (Store.getToken()) {
     window.location.href = "dashboard.html";
     return;
   }
@@ -30,6 +33,13 @@
     Store.setToken(data.access_token);
     Store.setRefresh(data.refresh_token);
     Store.setUser(data.user);
+    // Data layer stays exactly as before (pages read real data via their
+    // own fetch calls; VoyagerAPI.get keeps serving mock data) - only the
+    // token + permissions are new.
+    Store.setMockMode(true);
+    try {
+      sessionStorage.setItem("voyager_permissions", JSON.stringify({ is_super_admin: data.is_super_admin, menus: data.menus || {} }));
+    } catch (_) {}
     window.location.href = "dashboard.html";
   }
 
@@ -44,19 +54,20 @@
     pendingEmail = email;
 
     try {
-      const data = await post("/auth/login", { email, password }, { auth: false });
-      if (data.requires_otp) {
-        stepCredentials.style.display = "none";
-        stepOtp.style.display = "block";
-        if (data.dev_otp_hint) {
-          otpHint.style.display = "inline-flex";
-          otpHint.textContent = `Dev mode - OTP is ${data.dev_otp_hint} (no SMS/email provider configured)`;
-        }
-      } else {
-        completeSession(data);
-      }
+      // Straight to the backend, not VoyagerAPI.post - that one answers from
+      // mock data whenever nobody is signed in yet, so it never reached here.
+      const res = await fetch(`${window.VoyagerAPI.API_BASE}/auth/login/`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Unable to sign in");
+      completeSession(data);
     } catch (err) {
-      showError(loginError, err.message || "Unable to sign in");
+      showError(loginError, err.message === "Failed to fetch"
+        ? "Cannot reach the server. Is the Django backend running on localhost:8000?"
+        : (err.message || "Unable to sign in"));
     } finally {
       loginBtn.disabled = false;
       loginBtn.textContent = "Sign in";
@@ -78,15 +89,6 @@
   document.getElementById("back-to-login").addEventListener("click", () => {
     stepOtp.style.display = "none";
     stepCredentials.style.display = "block";
-  });
-
-  document.getElementById("demo-link").addEventListener("click", (e) => {
-    e.preventDefault();
-    Store.setMockMode(true);
-    Store.setToken("demo-token");
-    Store.setRefresh("demo-refresh");
-    Store.setUser(window.VoyagerMock.USER);
-    window.location.href = "dashboard.html";
   });
 
   document.getElementById("forgot-link").addEventListener("click", async (e) => {

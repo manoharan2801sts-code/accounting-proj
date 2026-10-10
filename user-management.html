@@ -9,9 +9,22 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
   <link href="assets/css/design-system.css" rel="stylesheet" />
   <link href="assets/css/app.css" rel="stylesheet" />
-<link href="assets/css/loader.css" rel="stylesheet" />
   <link rel="icon" type="image/png" href="assets/img/favicon.png" />
   <style>
+    /* Locked to the viewport - only the user list scrolls, not the whole
+       page (same pattern as report-day-book.html). */
+    html, body { height: 100%; overflow: hidden; margin: 0; }
+    .um-main {
+      display: flex; flex-direction: column;
+      height: calc(100vh - var(--topnav-height) - var(--menubar-height, 0px));
+      box-sizing: border-box;
+    }
+    .um-main .page-header-row { flex-shrink: 0; }
+    .um-main .table-container { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+    .um-main .table-toolbar { flex-shrink: 0; }
+    .um-list-scroll { flex: 1; min-height: 0; overflow: auto; }
+    .um-list-scroll .table-custom thead th { position: sticky; top: 0; z-index: 1; }
+
     .page-header-row { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 1.25rem; flex-wrap: wrap; }
     .page-title-group h1 { font-size: 1.25rem; font-weight: 700; margin: 0; display: flex; align-items: center; gap: 0.5rem; }
     .page-title-group .breadcrumb { font-size: 0.8rem; color: var(--color-text-muted); margin-bottom: 0.25rem; display: flex; gap: 0.4rem; align-items: center; }
@@ -35,22 +48,53 @@
     .table-custom tbody tr:hover { background: #F8FAFC; }
     .table-custom tbody tr:last-child td { border-bottom: none; }
     .status-badge { display: inline-flex; align-items: center; padding: 0.2rem 0.55rem;
-      border-radius: 4px; font-size: 11.5px; font-weight: 700; }
+      border-radius: 4px; font-size: 11.5px; font-weight: 700; white-space: nowrap; }
     .badge-active, .badge-success { background: #DCFCE7; color: #166534; }
     .badge-inactive, .badge-danger { background: #FEE2E2; color: #991B1B; }
+    .badge-info { background: #E0E7FF; color: #3730A3; }
     .row-actions { display: flex; gap: 0.4rem; }
     .row-actions button {
       background: none; border: none; cursor: pointer; padding: 0.3rem;
       color: var(--color-text-muted); border-radius: 4px;
     }
     .row-actions button:hover { background: #F1F5F9; color: var(--color-primary); }
+    .row-actions button.um-delete-btn:hover { color: var(--color-danger, #DC2626); }
+
+    /* User modal form */
+    .um-form { display: grid; grid-template-columns: 110px 1fr; gap: 10px 10px; align-items: center; }
+    .um-form label { font-size: 12px; font-weight: 600; color: var(--color-text-muted); }
+    .um-form .dom-input { width: 100%; }
+    .um-check { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--color-text); }
+    .um-check input { accent-color: var(--color-primary); width: 16px; height: 16px; }
+
+    /* Access modal */
+    .ua-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+    .ua-head-name { font-weight: 700; font-size: 13.5px; color: var(--color-text-dark); }
+    .ua-head-sub { font-size: 11.5px; color: var(--color-text-muted); }
+    .ua-scroll { overflow: auto; max-height: 56vh; border: 1px solid var(--color-border); border-radius: var(--radius-sm); }
+    .ua-table { width: 100%; min-width: 480px; border-collapse: collapse; }
+    .ua-table th { position: sticky; top: 0; z-index: 1; background: #F8FAFC; padding: 0.5rem 0.75rem;
+      font-size: 11px; font-weight: 700; color: var(--color-text-muted); letter-spacing: 0.03em;
+      border-bottom: 1px solid var(--color-border); text-align: center; }
+    .ua-table th:first-child { text-align: left; }
+    .ua-table td { padding: 0 0.75rem; border-bottom: 1px solid var(--color-border-subtle); font-size: 12.5px; text-align: center; }
+    .ua-table td:first-child { text-align: left; padding: 0.4rem 0.75rem 0.4rem 1.75rem; }
+    .ua-table tr.ua-module-row td { background: var(--color-primary-tint); font-weight: 700; color: var(--color-text-dark); }
+    .ua-table tr.ua-module-row td:first-child { padding-left: 0.75rem; }
+    .ua-menu-key { display: block; font-size: 10.5px; color: var(--color-text-faint); font-family: var(--font-mono); }
+    /* 44px touch target around each checkbox */
+    .ua-cell { display: inline-flex; align-items: center; justify-content: center; min-width: 44px; min-height: 44px; cursor: pointer; }
+    .ua-cell input { accent-color: var(--color-primary); width: 16px; height: 16px; cursor: pointer; }
+    .ua-cell input:disabled { cursor: not-allowed; }
+    .ua-note { font-size: 11.5px; color: var(--color-text-muted); margin-top: 8px; }
+    .ua-super-note { display: none; padding: 8px 10px; margin-bottom: 10px; border-radius: var(--radius-sm);
+      background: #E0E7FF; color: #3730A3; font-size: 12px; font-weight: 600; }
   </style>
 </head>
 <body>
-<script src="assets/js/loader.js?v=2"></script>
   <header class="app-topnav" id="shell-topnav"></header>
   <div class="app-body">
-    <main class="app-main" style="max-width: 1440px; margin: 0 auto; padding: 1.5rem 2rem;">
+    <main class="app-main um-main" style="max-width: 1440px; margin: 0 auto; padding: 1.5rem 2rem; width: 100%;">
       <div class="page-header-row">
         <div class="page-title-group">
           <div class="breadcrumb">Control Panel &rsaquo; User Management</div>
@@ -65,9 +109,9 @@
       <div class="table-container">
         <div class="table-toolbar">
           <div style="font-weight:700; font-size:0.92rem; color:var(--color-text-dark);">System Users</div>
-          <input type="text" class="form-control-custom table-search" placeholder="Search users..." oninput="filterTable(this.value)" />
+          <input type="text" class="form-control-custom table-search" id="um-search" placeholder="Search users..." />
         </div>
-        <div style="overflow-x:auto;">
+        <div class="um-list-scroll">
           <table class="table-custom" id="user-table">
             <thead>
               <tr>
@@ -75,48 +119,13 @@
                 <th>Email</th>
                 <th>Role</th>
                 <th>Branch / Office</th>
+                <th>Access</th>
                 <th>Status</th>
-                <th>Last Login</th>
                 <th></th>
               </tr>
             </thead>
             <tbody id="user-tbody">
-              <tr>
-                <td>Ananya Krishnan</td>
-                <td>ananya.krishnan@travelagency.com</td>
-                <td>Administrator</td>
-                <td>Delhi HQ</td>
-                <td><span class="status-badge badge-active">Active</span></td>
-                <td>2026-09-21 09:12</td>
-                <td class="row-actions">
-                  <button type="button" title="Edit"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.85 2.85 0 114 4L7.5 20.5 2 22l1.5-5.5z"/></svg></button>
-                  <button type="button" title="Deactivate"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><line x1="8" y1="8" x2="16" y2="16"/></svg></button>
-                </td>
-              </tr>
-              <tr>
-                <td>Rahul Mehta</td>
-                <td>rahul.mehta@travelagency.com</td>
-                <td>Accountant</td>
-                <td>Mumbai Branch</td>
-                <td><span class="status-badge badge-active">Active</span></td>
-                <td>2026-09-20 17:45</td>
-                <td class="row-actions">
-                  <button type="button" title="Edit"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.85 2.85 0 114 4L7.5 20.5 2 22l1.5-5.5z"/></svg></button>
-                  <button type="button" title="Deactivate"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><line x1="8" y1="8" x2="16" y2="16"/></svg></button>
-                </td>
-              </tr>
-              <tr>
-                <td>Fatima Al Suwaidi</td>
-                <td>fatima.alsuwaidi@travelagency.com</td>
-                <td>Travel Desk</td>
-                <td>Dubai Branch</td>
-                <td><span class="status-badge badge-inactive">Inactive</span></td>
-                <td>2026-08-30 11:02</td>
-                <td class="row-actions">
-                  <button type="button" title="Edit"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.85 2.85 0 114 4L7.5 20.5 2 22l1.5-5.5z"/></svg></button>
-                  <button type="button" title="Activate"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg></button>
-                </td>
-              </tr>
+              <tr><td colspan="7" style="text-align:center; padding:2rem; color:var(--color-text-muted);">Loading...</td></tr>
             </tbody>
           </table>
         </div>
@@ -124,25 +133,83 @@
     </main>
   </div>
 
-  <script src="assets/js/api.js"></script>
+  <!-- Add / Edit User -->
+  <div class="dom-modal-backdrop spa-extra-content" id="um-user-modal">
+    <div class="dom-modal-window" style="max-width: 460px; width: 95%;">
+      <div class="dom-modal-titlebar">
+        <div id="um-user-modal-title">Add User</div>
+        <button type="button" class="dom-titlebar-btn btn-close" id="um-user-close-btn" title="Close">&times;</button>
+      </div>
+      <div class="dom-modal-body" style="display:block; padding:14px;">
+        <div class="um-form">
+          <label for="um-full-name">Full Name<span class="dom-req">*</span></label>
+          <input class="dom-input" type="text" id="um-full-name" maxlength="150" />
+          <label for="um-email">Email<span class="dom-req">*</span></label>
+          <input class="dom-input" type="email" id="um-email" maxlength="200" />
+          <label for="um-password">Password<span class="dom-req" id="um-password-req">*</span></label>
+          <input class="dom-input" type="password" id="um-password" maxlength="128" autocomplete="new-password" />
+          <label for="um-role">Role</label>
+          <input class="dom-input" type="text" id="um-role" maxlength="50" placeholder="e.g. Accountant" />
+          <label for="um-branch">Branch / Office</label>
+          <input class="dom-input" type="text" id="um-branch" maxlength="100" />
+          <label></label>
+          <label class="um-check"><input type="checkbox" id="um-is-super-admin" /> Super Admin (full access to every menu)</label>
+          <label></label>
+          <label class="um-check"><input type="checkbox" id="um-is-active" checked /> Active</label>
+        </div>
+      </div>
+      <div class="dom-modal-footer">
+        <div></div>
+        <div style="display:flex; gap:6px;">
+          <button type="button" class="dom-nav-btn" id="um-user-cancel-btn">Cancel</button>
+          <button type="button" class="dom-nav-btn btn-primary" id="um-user-save-btn" style="font-weight:700;">Save</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Menu Access -->
+  <div class="dom-modal-backdrop spa-extra-content" id="um-access-modal">
+    <div class="dom-modal-window" style="max-width: 680px; width: 95%;">
+      <div class="dom-modal-titlebar">
+        <div>Menu Access</div>
+        <button type="button" class="dom-titlebar-btn btn-close" id="um-access-close-btn" title="Close">&times;</button>
+      </div>
+      <div class="dom-modal-body" style="display:block; padding:14px;">
+        <div class="ua-head">
+          <div>
+            <div class="ua-head-name" id="ua-user-name"></div>
+            <div class="ua-head-sub" id="ua-user-sub"></div>
+          </div>
+          <div style="display:flex; gap:6px;">
+            <button type="button" class="dom-nav-btn" id="ua-select-all-btn">Select all</button>
+            <button type="button" class="dom-nav-btn" id="ua-clear-all-btn">Clear all</button>
+          </div>
+        </div>
+        <div class="ua-super-note" id="ua-super-note">Super Admin always has full access to every menu - no individual flags needed.</div>
+        <div class="ua-scroll">
+          <table class="ua-table">
+            <thead>
+              <tr><th>MODULE / MENU</th><th>VIEW</th><th>ADD</th><th>EDIT</th><th>DELETE</th></tr>
+            </thead>
+            <tbody id="ua-tbody"></tbody>
+          </table>
+        </div>
+        <div class="ua-note">Ticking Add, Edit or Delete also ticks View.</div>
+      </div>
+      <div class="dom-modal-footer">
+        <div></div>
+        <div style="display:flex; gap:6px;">
+          <button type="button" class="dom-nav-btn" id="um-access-cancel-btn">Cancel</button>
+          <button type="button" class="dom-nav-btn btn-primary" id="um-access-save-btn" style="font-weight:700;">Save changes</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="assets/js/api.js?v=3"></script>
   <script src="assets/js/hardcode.js"></script>
-  <script src="assets/js/shell.js"></script>
-  <script>
-    document.addEventListener("DOMContentLoaded", () => {
-      VoyagerShell.init({ activeKey: "user-management" });
-    });
-
-    document.getElementById("add-user-btn").addEventListener("click", () => {
-      voyagerAlert("This module is part of the Phase 2 build.");
-    });
-
-    function filterTable(query) {
-      const q = query.toLowerCase();
-      const rows = document.querySelectorAll("#user-table tbody tr");
-      rows.forEach((r) => {
-        r.style.display = r.textContent.toLowerCase().includes(q) ? "" : "none";
-      });
-    }
-  </script>
+  <script src="assets/js/shell.js?v=21"></script>
+  <script src="assets/js/page-user-management.js?v=2"></script>
 </body>
 </html>

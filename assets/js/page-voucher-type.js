@@ -1,6 +1,5 @@
 (function () {
-  const API_BASE = window.API_BASE || "/api";
-  const VOUCHER_TYPE_API = `${API_BASE}/voucher-type/`;
+  const VOUCHER_TYPE_API = "http://localhost:8000/api/voucher-type/";
   let activeCompanyId;
   let editingId = null; // null = creating new, number = editing that Voucher Type's id
 

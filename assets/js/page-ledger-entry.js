@@ -1,18 +1,16 @@
 ﻿(async function () {
-  const API_BASE = window.API_BASE || "/api";
   const { showToast } = window.VoyagerEntry;
   let activeCompanyId, activeCountry, groupsFlat = [];
   const editId = new URLSearchParams(window.location.search).get("id");
   const returnTo = new URLSearchParams(window.location.search).get("returnTo") || "accounts.html";
 
   // States now load from a real XML file at runtime instead of a
-  // hardcoded JS array - assets/data/india-states.xml. Feeds both the
-  // Debtor's State Name dropdown and the Creditor's Place of Supply dropdown.
+  // hardcoded JS array - assets/data/india-states.xml. Feeds the Debtor's
+  // and Creditor's State Name dropdowns.
   async function loadStatesFromXml() {
     const selects = [
       document.getElementById("in_state_name"),
-      document.getElementById("in_place_of_supply"),
-      document.getElementById("cr_place_of_supply"),
+      document.getElementById("cr_state_name"),
     ];
     try {
       const res = await fetch("assets/data/india-states.xml");
@@ -31,7 +29,7 @@
   await loadStatesFromXml();
   document.getElementById("cancel-link").href = returnTo;
 
-  const API = `${API_BASE}`;
+  const API = "http://localhost:8000/api";
 
   const SECTIONS = ["section-bank", "section-debtor-in", "section-debtor-ae", "section-creditor", "section-taxledger", "section-duties-taxes"];
   function hideAllSections() { SECTIONS.forEach((id) => (document.getElementById(id).style.display = "none")); }
@@ -199,13 +197,23 @@
       || ((ledger.balance ?? ledger.opening_balance ?? 0) >= 0 ? "Debit" : "Credit");
     updateVisibility();
 
-    const set = (id, val) => { const el = document.getElementById(id); if (el && val !== undefined && val !== null) el.value = val; };
+    const set = (id, val) => {
+      const el = document.getElementById(id);
+      if (!el || val === undefined || val === null) return;
+      // A saved value that isn't in a dropdown's list (e.g. a state typed in
+      // before State Name became an XML dropdown) is added as an option, so
+      // it still shows and isn't blanked on the next save.
+      if (el.tagName === "SELECT" && val !== "" && ![...el.options].some((o) => o.value === String(val))) {
+        el.add(new Option(val, val));
+      }
+      el.value = val;
+    };
     set("bank_account_no", ledger.bank_account_no); set("bank_branch", ledger.bank_branch);
     set("ifsc_code", ledger.ifsc_code); set("swift_code", ledger.swift_code);
     set("in_alias_name", ledger.alias_name); set("in_address_line1", ledger.address_line1); set("in_address_line2", ledger.address_line2);
     set("in_city", ledger.city); set("in_pincode", ledger.pincode); set("in_state_name", ledger.state_name);
     set("in_gst_no", ledger.gst_no); set("in_gst_type", ledger.gst_registration_type); set("in_pan_no", ledger.pan_no);
-    set("in_bill_wise", ledger.maintain_balance_bill_wise); set("in_place_of_supply", ledger.place_of_supply);
+    set("in_bill_wise", ledger.maintain_balance_bill_wise);
     set("ae_alias_name", ledger.alias_name); set("ae_address_line1", ledger.address_line1); set("ae_address_line2", ledger.address_line2);
     set("ae_emirate", ledger.emirate); set("ae_po_box_no", ledger.po_box_no); set("ae_vat_trn_no", ledger.vat_trn_no);
     set("ae_trade_license_no", ledger.trade_license_no); set("ae_trade_license_expiry", ledger.trade_license_expiry);
@@ -214,7 +222,6 @@
     set("cr_alias_name", ledger.alias_name); set("cr_address_line1", ledger.address_line1); set("cr_address_line2", ledger.address_line2);
     set("cr_city", ledger.city); set("cr_pincode", ledger.pincode); set("cr_state_name", ledger.state_name);
     set("cr_gst_no", ledger.gst_no); set("cr_gst_type", ledger.gst_registration_type); set("cr_pan_no", ledger.pan_no);
-    set("cr_place_of_supply", ledger.place_of_supply);
     set("agent_id", ledger.agent_id);
     set("tax_category", ledger.tax_category); set("tax_type", ledger.tax_type);
     if (ledger.tax_category === "GST") document.getElementById("tax-type-wrap").style.display = "block";
@@ -313,7 +320,7 @@
         gst_registration_type: val("in_gst_type"),
         pan_no: val("in_pan_no") ? val("in_pan_no").toUpperCase() : null,
         agent_id: val("agent_id"),
-        maintain_balance_bill_wise: val("in_bill_wise"), place_of_supply: val("in_place_of_supply"),
+        maintain_balance_bill_wise: val("in_bill_wise"),
       });
     } else if (cat === "DEBTOR" && activeCountry === "AE") {
       Object.assign(payload, {
@@ -321,7 +328,7 @@
         emirate: val("ae_emirate"), po_box_no: val("ae_po_box_no"), vat_trn_no: val("ae_vat_trn_no"),
         trade_license_no: val("ae_trade_license_no"), trade_license_expiry: val("ae_trade_license_expiry") || null,
         agent_id: val("agent_id"),
-        maintain_balance_bill_wise: val("in_bill_wise"), place_of_supply: val("in_place_of_supply"),
+        maintain_balance_bill_wise: val("in_bill_wise"),
       });
     } else if (cat === "CREDITOR") {
       Object.assign(payload, {
@@ -332,7 +339,6 @@
         gst_no: val("cr_gst_no") ? val("cr_gst_no").toUpperCase() : null,
         gst_registration_type: val("cr_gst_type"),
         pan_no: val("cr_pan_no") ? val("cr_pan_no").toUpperCase() : null,
-        place_of_supply: val("cr_place_of_supply"),
       });
     } else if (cat === "INCOME" || cat === "EXPENSE") {
       Object.assign(payload, {

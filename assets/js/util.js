@@ -10,7 +10,7 @@
   async function loadDecimalPlaces(companyId) {
     if (!companyId) return decimalPlaces;
     try {
-      const res = await fetch(`${window.API_BASE || "/api"}/company-master/?id=${companyId}`);
+      const res = await fetch(`http://localhost:8000/api/company-master/?id=${companyId}`);
       if (res.ok) {
         const data = await res.json();
         if (data.decimal_places != null) decimalPlaces = Number(data.decimal_places);
@@ -34,10 +34,19 @@
     const n = Number(value) || 0;
     return `${ccy} ${n.toLocaleString(undefined, { minimumFractionDigits: decimalPlaces, maximumFractionDigits: decimalPlaces })}`;
   }
-  function fmtDate(iso) {
-    if (!iso) return "—";
-    const d = new Date(iso);
-    return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+  // Every date shown in the app is dd/mm/yyyy. An ISO "yyyy-mm-dd..." string
+  // is reformatted directly (no Date/timezone round-trip that could shift
+  // the day); an already dd/mm/yyyy value passes through unchanged.
+  function fmtDate(value) {
+    if (!value) return "—";
+    if (typeof value === "string") {
+      const iso = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
+      if (iso) return `${iso[3]}/${iso[2]}/${iso[1]}`;
+      if (/^\d{2}\/\d{2}\/\d{4}$/.test(value)) return value;
+    }
+    const d = new Date(value);
+    if (isNaN(d)) return String(value);
+    return `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}`;
   }
   // Short-form abbreviations that must stay fully capitalized when a raw
   // backend code (e.g. "SALES_INVOICE", "ASSET") is formatted for display —

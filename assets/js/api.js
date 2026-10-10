@@ -25,12 +25,45 @@
     setUser: (u) => localStorage.setItem(USER_KEY, JSON.stringify(u)),
     getCompanyId: () => localStorage.getItem(COMPANY_KEY),
     setCompanyId: (id) => localStorage.setItem(COMPANY_KEY, id),
-    isMockMode: () => localStorage.getItem(MOCK_KEY) === "1",
+    isMockMode: () => localStorage.getItem(MOCK_KEY) === "1" || localStorage.getItem(TOKEN_KEY) === "demo-token" || !localStorage.getItem(TOKEN_KEY),
     setMockMode: (on) => (on ? localStorage.setItem(MOCK_KEY, "1") : localStorage.removeItem(MOCK_KEY)),
     clear: () => {
       [TOKEN_KEY, REFRESH_KEY, USER_KEY, MOCK_KEY].forEach((k) => localStorage.removeItem(k));
       apiCache.clear();
     },
+  };
+
+  // Every page calls the backend with fetch - rewrite hardcoded localhost URLs
+  // to API_BASE so live deployments on Render work seamlessly. Also attach
+  // the signed-in user's Bearer token to API calls.
+  const nativeFetch = window.fetch.bind(window);
+  window.fetch = function (input, init) {
+    let url = typeof input === "string" ? input : (input && input.url) || "";
+    if (url.startsWith("http://localhost:8000/api")) {
+      url = API_BASE + url.slice("http://localhost:8000/api".length);
+      if (typeof input !== "string" && input) input = url;
+      else input = url;
+    } else if (url.startsWith("http://127.0.0.1:8000/api")) {
+      url = API_BASE + url.slice("http://127.0.0.1:8000/api".length);
+      if (typeof input !== "string" && input) input = url;
+      else input = url;
+    }
+
+    const token = localStorage.getItem(TOKEN_KEY);
+    const isApi = url.startsWith(API_BASE) || url.startsWith("/api") || url.includes("/api/");
+    if (!isApi || !token || token === "demo-token") return nativeFetch(input, init);
+    const opts = { ...(init || {}) };
+    const headers = new Headers(opts.headers || (typeof input !== "string" && input.headers) || {});
+    if (!headers.has("Authorization")) headers.set("Authorization", `Bearer ${token}`);
+    opts.headers = headers;
+    return nativeFetch(input, opts).then((res) => {
+      if (res.status === 401 && !url.includes("/auth/login")) {
+        Store.clear();
+        try { sessionStorage.removeItem("voyager_permissions"); } catch (_) {}
+        window.location.href = "index.html";
+      }
+      return res;
+    });
   };
 
   // Ultra-fast in-memory cache for instant GET requests
@@ -59,11 +92,9 @@
     }
 
     try {
-      // Generous timeout: on Render + TiDB Cloud a normal report takes 2-5s
-      // and a cold start (free plan waking from sleep) 30-50s. The old 2.5s
-      // limit aborted those real requests and silently showed mock data.
+      // Generous timeout for remote database calls (Render + TiDB Cloud)
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 90000);
+      const timeoutId = setTimeout(() => controller.abort(), 60000);
 
       const res = await fetch(`${API_BASE}${path}`, {
         method,
@@ -82,9 +113,6 @@
       }
 
       if (!res.ok) {
-        // Only a route the backend doesn't have yet (404 - auth, hotels/visa
-        // etc.) falls back to mock data; a real server error must surface
-        // instead of being hidden behind fake numbers.
         if (res.status === 404 && window.VoyagerMock) {
           const mockResult = window.VoyagerMock.handle(path, { method, body });
           if (method === "GET") apiCache.set(cacheKey, mockResult);
@@ -94,7 +122,7 @@
         let detail = "Request failed";
         try {
           const data = await res.json();
-          detail = data.detail || JSON.stringify(data);
+          detail = data.error || data.detail || JSON.stringify(data);
         } catch (_) {}
         throw new Error(detail);
       }
@@ -105,9 +133,6 @@
       else apiCache.clear();
       return data;
     } catch (err) {
-      // Mock data on network error/timeout only for the standalone frontend
-      // (opened from disk, no backend) - against a real backend, show the
-      // error rather than fake data.
       if (window.VoyagerMock && window.location.protocol === "file:") {
         const mockResult = window.VoyagerMock.handle(path, { method, body });
         if (method === "GET") apiCache.set(cacheKey, mockResult);

@@ -1,11 +1,10 @@
 ﻿(async function () {
-  const API_BASE = window.API_BASE || "/api";
   const OPT = window.VoyagerHardcode.TICKET_FORM_OPTIONS;
   let activeCompanyId, allSuppliers = [];
 
   // Office ID: loaded from Sundry Creditors (suppliers) for the active
   // company; picking/typing a matching Office ID auto-fills Supplier Name.
-  const SUPPLIERS_API = `${API_BASE}/suppliers/`;
+  const SUPPLIERS_API = "http://localhost:8000/api/suppliers/";
   async function populateSuppliers(companyId) {
     try {
       const res = await fetch(`${SUPPLIERS_API}?company_id=${companyId}`);
@@ -113,7 +112,7 @@
   // up by Office ID. `savedRules` is a local cache of the last GET, kept
   // in sync after every create/delete.
   // ============================================================
-  const RULES_API = `${API_BASE}/supplier-commission-rules/`;
+  const RULES_API = "http://localhost:8000/api/supplier-commission-rules/";
   const listTbody = document.getElementById("sm-list-tbody");
   const emptyRow = document.getElementById("sm-list-empty-row");
   let savedRules = [];
@@ -142,7 +141,7 @@
         <td>${r.comm_on || ""}</td>
         <td>${r.calc_type || ""}</td>
         <td class="num">${Number(r.calc_type === "Flat" ? r.flat_amt : r.calc_pct).toFixed(2)}${r.calc_type === "Percentage" ? "%" : ""}</td>
-        <td>${r.valid_upto || ""}</td>
+        <td>${r.valid_upto ? window.VoyagerUtil.fmtDate(r.valid_upto) : ""}</td>
         <td>
           <div class="dom-action-btn-group">
             <button type="button" class="dom-action-btn btn-edit sm-list-edit-btn" data-id="${r.id}">Edit</button>

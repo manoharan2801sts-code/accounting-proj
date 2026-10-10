@@ -38,7 +38,7 @@ class _ConvError(SPThrow):
 
 def _p_int(v):
     if v is None:
-        return None
+        return None                    
     if isinstance(v, bool):
         return int(v)
     if isinstance(v, int):
@@ -718,10 +718,13 @@ def _rt_save(p):
                 [jv_branch, invoice_date, jv_narration, jv_total_debit, jv_total_credit, _utcnow(), result_id],
             )
         else:
-            next_num = query_one(
-                "SELECT COUNT(*) AS n FROM `JournalVoucher` WHERE `company_id` = %s "
-                "AND LOWER(TRIM(`category`)) = 'airline_reschedule'", [company_id]
-            )["n"] + 1
+            max_vch = query_one(
+                "SELECT COALESCE(MAX(CAST(SUBSTRING(voucher_no, 5) AS UNSIGNED)), 0) AS m "
+                "FROM `JournalVoucher` WHERE `company_id` = %s "
+                "AND LOWER(TRIM(`category`)) = 'airline_reschedule' AND `voucher_no` LIKE 'ALR-%%'",
+                [company_id],
+            )
+            next_num = int((max_vch and max_vch.get("m")) or 0) + 1
             now2 = _utcnow()
             execute(
                 "INSERT INTO `JournalVoucher` (company_id, branch_name, voucher_type, voucher_date, narration, category, voucher_no, "
@@ -809,6 +812,7 @@ def _ct_get_lines(p):
                cl.supplier_penalty, cl.cancellation_penalty, cl.agent_penalty,
                cl.cust_markup_reversal, cl.cust_addl_markup_reversal, cl.cust_ssr_markup_reversal,
                cl.supp_markup_reversal, cl.supp_addl_markup_reversal,
+               cl.tds_amount_override, cl.supp_tds_amount_override,
                cl.total_billed, cl.status, cl.office_id, cl.fop, cl.card_number,
                cl.supplier_ledger_id, supp.name AS supplier_name
         FROM `Cancellation_Al_TicketLines` cl
@@ -824,6 +828,7 @@ _CX_PENALTY_COLS = [
     "supplier_penalty", "cancellation_penalty", "agent_penalty",
     "cust_markup_reversal", "cust_addl_markup_reversal", "cust_ssr_markup_reversal",
     "supp_markup_reversal", "supp_addl_markup_reversal",
+    "tds_amount_override", "supp_tds_amount_override",
 ]
 
 _CT_LINE_SCHEMA = [
@@ -854,6 +859,8 @@ _CT_LINE_SCHEMA = [
     ("cust_ssr_markup_reversal", "dec", 14, 2),
     ("supp_markup_reversal", "dec", 14, 2),
     ("supp_addl_markup_reversal", "dec", 14, 2),
+    ("tds_amount_override", "dec", 14, 2),
+    ("supp_tds_amount_override", "dec", 14, 2),
     ("supplier_name", "str", 150),
 ]
 
@@ -887,6 +894,8 @@ _CT_UPDATE_SCHEMA = [
     ("cust_ssr_markup_reversal", "dec", 14, 2),
     ("supp_markup_reversal", "dec", 14, 2),
     ("supp_addl_markup_reversal", "dec", 14, 2),
+    ("tds_amount_override", "dec", 14, 2),
+    ("supp_tds_amount_override", "dec", 14, 2),
 ]
 
 _CT_UPDATE_PLAIN_COLS = [

@@ -9,7 +9,6 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
   <link href="assets/css/design-system.css" rel="stylesheet" />
   <link href="assets/css/app.css" rel="stylesheet" />
-<link href="assets/css/loader.css" rel="stylesheet" />
   <link rel="icon" type="image/png" href="assets/img/favicon.png" />
   <style>
     /* Locked to the viewport - only the table body scrolls, not the whole
@@ -135,7 +134,6 @@
   </style>
 </head>
 <body>
-<script src="assets/js/loader.js?v=2"></script>
   <header class="app-topnav" id="shell-topnav"></header>
   <div class="app-body">
     <main class="app-main db-main" style="max-width: 1440px; margin: 0 auto; padding: 1.5rem 2rem; width: 100%;">
@@ -235,10 +233,10 @@
   </div>
 
   <script src="assets/js/mock-data.js"></script>
-  <script src="assets/js/api.js"></script>
+  <script src="assets/js/api.js?v=3"></script>
   <script src="assets/js/hardcode.js"></script>
-  <script src="assets/js/util.js"></script>
-  <script src="assets/js/shell.js"></script>
+  <script src="assets/js/util.js?v=2"></script>
+  <script src="assets/js/shell.js?v=21"></script>
   <script>
     // Not gated on DOMContentLoaded - this page's <script> can be injected
     // by the app's SPA navigation (shell.js's navigateTo) into a document
@@ -284,7 +282,7 @@
       if (!iso) return "-";
       const d = new Date(iso + "T00:00:00");
       if (isNaN(d)) return iso;
-      return d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "2-digit" }).replace(/ /g, "-");
+      return `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}`;
     }
 
     async function loadDayBook() {
@@ -298,7 +296,7 @@
       if (toDate) params += `&to_date=${toDate}`;
 
       try {
-        const res = await fetch(`${window.API_BASE || "/api"}/day-book/?${params}`);
+        const res = await fetch(`http://localhost:8000/api/day-book/?${params}`);
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || `Server returned ${res.status}`);
 
@@ -486,6 +484,10 @@
     });
 
     function navigateToTicket(row) {
+      if (row.dataset.cancellationTicketId) {
+        window.location.href = `ticket-entry.html?cancellation_saved_id=${row.dataset.cancellationTicketId}`;
+        return;
+      }
       window.location.href = row.dataset.rescheduleTicketId
         ? `ticket-entry.html?reschedule_saved_id=${row.dataset.rescheduleTicketId}`
         : `ticket-entry.html?id=${row.dataset.ticketId}`;
@@ -505,7 +507,7 @@
       const totalCredit = txns.reduce((sum, t) => sum + (Number(t.credit) || 0), 0);
 
       const rows = txns.map((t, idx) => `
-        <tr class="${(t.ticket_id || t.reschedule_ticket_id) ? "txn-row" : ""}" data-ticket-id="${t.ticket_id || ""}" data-reschedule-ticket-id="${t.reschedule_ticket_id || ""}" title="${(t.ticket_id || t.reschedule_ticket_id) ? "Click to open this ticket" : ""}">
+        <tr class="${(t.ticket_id || t.reschedule_ticket_id || t.cancellation_ticket_id) ? "txn-row" : ""}" data-ticket-id="${t.ticket_id || ""}" data-reschedule-ticket-id="${t.reschedule_ticket_id || ""}" data-cancellation-ticket-id="${t.cancellation_ticket_id || ""}" title="${(t.ticket_id || t.reschedule_ticket_id || t.cancellation_ticket_id) ? "Click to open this ticket" : ""}">
           <td class="rownum">${idx + 1}</td>
           <td>${fmtDateDisplay(t.date)}</td>
           <td class="particulars">${t.particulars || "-"}</td>

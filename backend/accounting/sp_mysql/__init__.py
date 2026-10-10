@@ -167,4 +167,4 @@ def exec_sp(proc_name, params=None):
 
 
 # Register every procedure's handlers.
-from . import ledger_masters, setup_masters, tickets_vouchers, reschedule_cancellation  # noqa: E402,F401
+from . import ledger_masters, setup_masters, tickets_vouchers, reschedule_cancellation, user_management  # noqa: E402,F401

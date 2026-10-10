@@ -809,3 +809,87 @@ def cancellation_ticket_update(cancellation_id, company_id, header_fields, lines
     if row and row.get("status") == "Error":
         raise StoredProcedureError(row.get("error") or "Could not update this cancellation.")
     return {"id": row["id"], "voucher_id": row.get("voucher_id"), "voucher_no": row.get("voucher_no")}
+
+
+
+# ==========================================================================
+# User Management (dbo.sp_AppUser / sp_MenuMaster / sp_UserMenuAccess) -
+# see StoredProcedures.sql. No login/session system exists yet - these
+# only back the User Management page's own CRUD + per-menu Access modal.
+# ==========================================================================
+
+def app_user_get(user_id):
+    """One user by id - views.app_user_list's ?id= branch. None if not found."""
+    return exec_sp_one("dbo.sp_AppUser", {"Action": "LIST", "Id": user_id})
+
+
+def app_user_get_by_email(email):
+    """One user by email, including password_hash - views.auth_login only. None if not found."""
+    return exec_sp_one("dbo.sp_AppUser", {"Action": "GET_BY_EMAIL", "Email": email})
+
+
+def app_user_list():
+    """Every user, ordered by name - views.app_user_list's bare GET."""
+    return exec_sp("dbo.sp_AppUser", {"Action": "LIST"})
+
+
+def app_user_save(fields, user_id=None):
+    """
+    Upserts an AppUsers row - views.app_user_save. `fields` is the
+    already-normalized dict views.py builds (full_name, email, role, ...).
+    Raises StoredProcedureError on validation/duplicate-email failure, or
+    if this would leave zero active Super Admins.
+    """
+    params = {
+        "Action": "SAVE", "Id": user_id,
+        "FullName": fields.get("full_name"), "Email": fields.get("email"),
+        "Role": fields.get("role"), "BranchName": fields.get("branch_name"),
+        "IsSuperAdmin": fields.get("is_super_admin"), "IsActive": fields.get("is_active"),
+        "PasswordHash": fields.get("password_hash"),
+    }
+    row = exec_sp_one("dbo.sp_AppUser", params)
+    if row and row.get("status") == "Error":
+        raise StoredProcedureError(row.get("error") or "Could not save this user.")
+    return row
+
+
+def app_user_delete(user_id):
+    """Deletes an AppUsers row - views.app_user_delete. Raises StoredProcedureError if not found or last Super Admin."""
+    row = exec_sp_one("dbo.sp_AppUser", {"Action": "DELETE", "Id": user_id})
+    if row and row.get("status") == "Error":
+        raise StoredProcedureError(row.get("error") or "Could not delete this user.")
+    return row
+
+
+def menu_master_list():
+    """Every active menu, ordered for grouped rendering - views.menu_master_list."""
+    return exec_sp("dbo.sp_MenuMaster", {"Action": "LIST"})
+
+
+def user_menu_access_get(user_id):
+    """
+    Every active menu for one user, each with its can_view/add/edit/delete
+    flags (false for any menu never explicitly granted) - views.user_menu_access_get.
+    Raises StoredProcedureError if the user doesn't exist.
+    """
+    rows = exec_sp("dbo.sp_UserMenuAccess", {"Action": "GET", "UserId": user_id})
+    if rows and rows[0].get("status") == "Error":
+        raise StoredProcedureError(rows[0].get("error") or "Could not load this user's access.")
+    return rows
+
+
+def user_menu_access_save(user_id, access_list, created_by=None):
+    """
+    Upserts every {menu_key, can_view, can_add, can_edit, can_delete} row
+    in `access_list` for this user, in one transaction - views.user_menu_access_save.
+    Raises StoredProcedureError if the user doesn't exist.
+    """
+    import json as _json
+    params = {
+        "Action": "SAVE", "UserId": user_id, "CreatedBy": created_by,
+        "AccessJson": _json.dumps(access_list, default=str),
+    }
+    row = exec_sp_one("dbo.sp_UserMenuAccess", params)
+    if row and row.get("status") == "Error":
+        raise StoredProcedureError(row.get("error") or "Could not save this user's access.")
+    return row

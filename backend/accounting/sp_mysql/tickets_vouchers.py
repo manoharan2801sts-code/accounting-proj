@@ -438,7 +438,7 @@ def ticket_list_invoice_numbers_by_type(p):
     inv_type = _p_str(p.get("InvoiceType"), 100)
     from_date = _p_date(p.get("FromDate"))
     rows = []
-    for table in ("AL_Tickets", "Rescheduled_Al_Ticket"):
+    for table in ("AL_Tickets", "Rescheduled_Al_Ticket", "Cancellation_AL_Tickets"):
         rows += query(f"""
             SELECT invoice_number, invoice_date FROM `{table}`
             WHERE company_id = %s AND {_ci('invoice_type')}
@@ -914,16 +914,18 @@ def voucher_save(p):
                 """, [branch_name, vtype, voucher_date, narration, total_debit, total_credit, resolved_json, vid])
                 result_id = vid
             else:
-                n = query_one(
-                    f"SELECT COUNT(*) AS n FROM `Vouchers` WHERE company_id = %s AND {_ci_lit('category', 'MANUAL')}", [cid]
-                )["n"]
+                max_vch = query_one(
+                    f"SELECT COALESCE(MAX(CAST(SUBSTRING(voucher_no, 5) AS UNSIGNED)), 0) AS m "
+                    f"FROM `Vouchers` WHERE company_id = %s AND {_ci_lit('category', 'MANUAL')} AND voucher_no LIKE 'VCH-%%'", [cid]
+                )
+                next_num = int((max_vch and max_vch.get("m")) or 0) + 1
                 now = _now()
                 _, result_id = execute("""
                     INSERT INTO `Vouchers`
                         (company_id, branch_name, voucher_type, voucher_date, narration, category, voucher_no,
                          total_debit, total_credit, lines_json, created_at, updated_at)
                     VALUES (%s, %s, %s, %s, %s, 'MANUAL', %s, %s, %s, %s, %s, %s)
-                """, [cid, branch_name, vtype, voucher_date, narration, f"VCH-{int(n) + 1}",
+                """, [cid, branch_name, vtype, voucher_date, narration, f"VCH-{next_num}",
                       total_debit, total_credit, resolved_json, now, now])
                 result_id = int(result_id)
         rows = _text(query(f"SELECT {_VOUCHER_COLS}, 'Success' AS status FROM `Vouchers` WHERE id = %s", [result_id]))

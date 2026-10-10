@@ -1,9 +1,12 @@
 (function () {
   const { Store, get } = window.VoyagerAPI;
 
-  // No login backend is wired up yet — VoyagerShell.init() (called below)
-  // assigns every first-time visitor a real session token, so there is
-  // nothing to gate here.
+  // --- Auth guard ---
+  if (!Store.getToken()) {
+    window.location.href = "index.html";
+    return;
+  }
+
   const user = Store.getUser();
   const currency = (companyCountry) => (companyCountry === "AE" ? "AED" : "INR");
 
@@ -68,7 +71,7 @@
 
   async function loadDashboard(companyId, country) {
     document.getElementById("scope-label").textContent = "Loading dashboard for the selected entity…";
-    const data = await get(`/dashboard/?company_id=${companyId}`);
+    const data = await get(`/dashboard?company_id=${companyId}`);
     const ccy = currency(country);
     document.getElementById("scope-label").textContent =
       `Real-time CFO dashboard — ${country === "AE" ? "UAE entity, AED" : "India entity, INR"}`;

@@ -1,0 +1,208 @@
+===================================================================
+TESEPR BOOK / TRAVEL AGENCY ERP - TECHNICAL ARCHITECTURE / FLOW
+===================================================================
+
+OVERALL FLOW
+------------
+Browser (static HTML/JS pages)
+   --HTTP fetch()--> Django REST-style JSON endpoints (views.py)
+   --Django ORM-->   SQL Server (via mssql-django + pyodbc)
+
+No SPA framework (no React/Vue/Angular) - every page is a plain .html
+file with its own <script> block, sharing common JS helpers.
+
+-------------------------------------------------------------------
+1. FRONTEND
+-------------------------------------------------------------------
+Stack        : Plain HTML5 + vanilla JavaScript (ES6+), no build step,
+               no bundler/transpiler - files are served and run as-is.
+Styling      : assets/css/design-system.css (tokens/base) +
+               assets/css/app.css (components/pages), Google Fonts
+               (Inter / Plus Jakarta Sans / IBM Plex Mono).
+Structure    : One .html file per screen at the repo root
+               (ticket-entry.html, report-day-book.html,
+               company-master.html, etc). Each page:
+                 - Includes the shared topnav shell via shell.js
+                 - Loads 1+ page-specific JS files from assets/js/
+                   (e.g. page-ticket-entry.js, page-company-master.js)
+
+Shared JS files (assets/js/):
+  shell.js            - Topnav, menu bar, company/country flag switcher,
+                         theme toggle, voyagerAlert/voyagerConfirm popups,
+                         SPA-style navigateTo() for in-page nav without a
+                         full reload (re-fetches a page's HTML and swaps
+                         .app-main content; topnav persists).
+  hardcode.js          - Static menu tree (NAV_SECTIONS) + dropdown
+                         option lists (TICKET_FORM_OPTIONS etc).
+  api.js / util.js     - Small fetch/formatting helpers.
+  entry-common.js      - Shared helpers for data-entry pages.
+  page-<name>.js        - One file per screen's own logic: builds the
+                         DOM, wires events, calls backend endpoints,
+                         validates input, renders tables/modals.
+
+Page <-> Backend connection pattern:
+  - Every page-*.js file calls `fetch("http://localhost:8000/api/...")`
+    directly (hardcoded host - this is a local-dev setup, not yet
+    behind a reverse proxy/env-based config).
+  - company_id is sent as a query param on almost every call - it comes
+    from the topnav's company switcher (Store.getCompanyId(), backed by
+    localStorage) and is the multi-tenant scoping key everywhere.
+  - No authentication token flow currently wired into real requests
+    (VoyagerShell.init() still has leftover "demo-token"/mock-mode
+    scaffolding) - this is a trust-the-browser local setup today.
+
+Cache-busting convention (important, bit this project hard this
+session): shared scripts are included with a `?v=N` query string
+(e.g. `shell.js?v=10`, `page-ticket-entry.js?v=30`). ANY edit to one of
+these shared files must bump its version in every HTML file that
+includes it, or browsers can keep serving a stale cached copy
+indefinitely even after a hard refresh.
+
+-------------------------------------------------------------------
+2. BACKEND
+-------------------------------------------------------------------
+Framework    : Django 5.0.x (backend/config/settings.py is the project,
+               backend/accounting/ is the single app holding everything).
+Key files    :
+  backend/manage.py            - Django entrypoint (`runserver 8000`)
+  backend/config/settings.py   - Project settings, DB config, apps
+  backend/config/urls.py       - Root URL conf (mounts accounting app)
+  backend/accounting/models.py - All ORM models (Ledger, Ticket,
+                                  RescheduleAirlineTicket, JournalVoucher,
+                                  CompanyMaster, VoucherType, etc.)
+  backend/accounting/views.py  - ALL business logic + API endpoints live
+                                  here as plain Django function views
+                                  (no DRF/serializers - hand-built
+                                  JsonResponse dicts throughout). This
+                                  file is large (3000+ lines) and holds:
+                                    - CRUD views per entity
+                                    - Shared computation helpers
+                                      (_compute_jv_lines,
+                                      _ledger_balance_deltas,
+                                      _ledger_transactions, etc.)
+                                    - Report endpoints (Day Book, Trial
+                                      Balance, Profit & Loss, DSR, ...)
+  backend/accounting/urls.py   - Maps /api/... paths to view functions
+  backend/accounting/jv_hardcode.py - JV_LINE_MAP (Booking's fixed
+                                  Journal Voucher ledger mapping table)
+  backend/accounting/migrations/ - Django's own migration history
+  backend/Schema.sql           - Hand-maintained mirror of the live DB
+                                  schema (every migration's DDL is
+                                  copied here too, by convention)
+
+Request handling pattern (no DRF, intentionally simple):
+  - GET endpoints: read query params via request.GET.get(...), return
+    JsonResponse({...}) or JsonResponse({"error": "..."}, status=4xx).
+  - POST endpoints (@csrf_exempt): read json.loads(request.body), build/
+    validate, usually wrapped in @transaction.atomic so a mid-way
+    failure rolls back everything in that request.
+  - Validation is always server-side first (never trusts the frontend
+    alone) - e.g. checking a ledger name actually resolves to a real
+    Ledger row, checking uniqueness, checking eligibility flags - even
+    though the frontend also does its own pre-checks for UX.
+
+-------------------------------------------------------------------
+3. FRONTEND <-> BACKEND CONNECTION
+-------------------------------------------------------------------
+  Browser fetch()  --HTTP GET/POST, JSON body/query params-->
+  http://localhost:8000/api/<resource>/...
+  --Django URL router (accounting/urls.py)-->
+  View function (accounting/views.py)
+  --JsonResponse(...)-->
+  Browser reads res.json(), updates the DOM directly (no virtual DOM -
+  plain innerHTML/createElement calls).
+
+  No separate "API client" abstraction layer - each page-*.js file
+  builds its own fetch URLs/params inline. CORS is implicitly same-
+  origin-friendly since both are on localhost during dev (files are
+  opened as plain file:// or served by a lightweight static server
+  alongside the Django dev server on :8000).
+
+-------------------------------------------------------------------
+4. BACKEND <-> DATABASE INTERACTION
+-------------------------------------------------------------------
+  Database    : Microsoft SQL Server
+  Driver      : mssql-django (Django DB backend) + pyodbc underneath
+  ORM         : Standard Django ORM - Model.objects.filter(...），
+                select_related()/prefetch_related() used deliberately
+                in hot paths (Chart of Accounts, Trial Balance, Cash &
+                Bank Book) to avoid N+1 query storms across hundreds of
+                tickets.
+  Migrations  : Django's own migration system (makemigrations /
+                migrate) - EVERY migration is also hand-mirrored into
+                backend/Schema.sql (CREATE TABLE/ALTER statements,
+                constraints, indexes, and the django_migrations INSERT
+                list) so the schema can be reconstructed/audited from
+                one file without running Django at all.
+  Transactions: @transaction.atomic decorator on every multi-step write
+                (e.g. creating a Ticket + its TicketLines + its
+                JournalVoucher all together) - if any step raises, the
+                whole thing rolls back, never a half-saved ticket.
+  Company     : Almost every model has a plain `company_id` IntegerField
+  scoping       (not even always a real FK) - multi-company/multi-
+                country support is just "filter by this id everywhere",
+                no row-level security at the DB layer.
+
+Key model relationships (the core accounting chain):
+  LedgerGroup (tree: Assets/Liabilities/Income/Expenses/Equity and their
+    children, e.g. "Purchase Accounts", "Indirect Expenses")
+    -> Ledger (one row per named account, e.g. a specific customer,
+       supplier, or GL head - belongs to one LedgerGroup)
+  Ticket (one Airline booking) -> TicketLine (one row per passenger)
+    -> JournalVoucher (auto-posted on save, source_ticket FK)
+  RescheduleAirlineTicket -> RescheduleAirlineTicketLine
+    -> JournalVoucher (source_reschedule_ticket FK, entirely additive -
+       never edits/reverses the original ticket's own JV)
+    -> chains to a previous reschedule via based_on_reschedule_line
+       (self-FK) when a ticket is rescheduled more than once
+  Voucher (manual Journal Voucher entry, separate table from the
+    ticket-driven JournalVoucher, has its own lines_json field)
+  CompanyMaster (one row per company/branch - country, financial year
+    start, currency, GST details - drives most reports' date ranges and
+    the topnav's flag/FY label)
+
+How a ledger's "current balance" gets computed (no running-balance
+column is kept up to date on save):
+  Ledger.opening_balance (static, entered once)
+    + _ledger_balance_deltas(company_id, ...) - a function that walks
+      EVERY Voucher, Ticket (+ its JV/FOP/PG tabs), and
+      RescheduleAirlineTicket (+ its own JV/FOP/PG tabs) for that
+      company and sums debit-minus-credit per ledger_id, live, on every
+      report request (Chart of Accounts, Trial Balance, Day Book,
+      Ledger Book, Profit & Loss, Cash & Bank Book all call this or a
+      close variant). This is recomputed fresh every time rather than
+      cached/materialized - simpler and always correct, at the cost of
+      walking more rows as data grows.
+
+-------------------------------------------------------------------
+5. TYPICAL REQUEST LIFECYCLE (worked example: saving a new Airline
+   Ticket from ticket-entry.html)
+-------------------------------------------------------------------
+  1. User fills the form in the browser; page-ticket-entry.js builds a
+     payload object (buildTicketPayload()).
+  2. fetch POST http://localhost:8000/api/tickets/create/ with that
+     JSON body.
+  3. Django routes to views.ticket_create.
+  4. ticket_create (inside @transaction.atomic):
+       - Validates header fields, resolves Customer/Supplier Ledger
+         rows by name.
+       - Checks Invoice Number / Booking Reference / Ticket No
+         uniqueness (across both Ticket AND RescheduleAirlineTicket).
+       - Creates the Ticket row, then one TicketLine per passenger.
+       - Computes the Journal Voucher lines (_compute_jv_lines) and
+         creates a JournalVoucher row, auto-numbered via
+         _next_voucher_no().
+       - Returns JsonResponse({"id":..., "voucher_no":..., "message":...}).
+  5. Frontend reads the response, shows a success/error alert, and
+     either redirects to view-mode or shows the error inline.
+
+-------------------------------------------------------------------
+6. RUNNING IT LOCALLY
+-------------------------------------------------------------------
+  Backend : cd backend && python manage.py runserver 8000
+            (also auto-started via .vscode/tasks.json on folder open)
+  Frontend: open the .html files directly, or serve the repo root with
+            any static file server - they all assume the backend is
+            reachable at http://localhost:8000.
+  DB       : SQL Server must be reachable per backend/config/settings.py's
+            DATABASES config (ODBC connection via pyodbc).

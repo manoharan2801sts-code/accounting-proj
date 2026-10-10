@@ -9,7 +9,6 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
   <link href="assets/css/design-system.css" rel="stylesheet" />
   <link href="assets/css/app.css" rel="stylesheet" />
-<link href="assets/css/loader.css" rel="stylesheet" />
   <link rel="icon" type="image/png" href="assets/img/favicon.png" />
   <style>
     /* Hides the page's own vertical scrollbar track - still scrollable
@@ -18,6 +17,21 @@
        chrome down the right edge. */
     html { scrollbar-width: none; }
     html::-webkit-scrollbar { display: none; }
+
+    /* Locked to the viewport - the page itself never scrolls (same pattern
+       as report-day-book.html). The account box fills the remaining height,
+       each side's Total sits at the very bottom of the grid, and only the
+       rows between scroll if they ever run taller than the screen. */
+    html, body { height: 100%; overflow: hidden; margin: 0; }
+    .pl-main {
+      display: flex; flex-direction: column;
+      height: calc(100vh - var(--topnav-height) - var(--menubar-height, 0px));
+      box-sizing: border-box;
+    }
+    .pl-main .filter-card { flex-shrink: 0; }
+    .pl-main .pl-box { flex: 1; min-height: 0; grid-template-rows: minmax(0, 1fr); }
+    .pl-main .pl-col { min-height: 0; }
+    .pl-main .pl-col-body { min-height: 0; overflow-y: auto; }
 
     /* Flat - no card background/border, sits directly on the page like
        the reference screenshot, not boxed in its own white card. */
@@ -50,7 +64,7 @@
     .pl-table { width: 100%; border-collapse: collapse; }
     .pl-table th {
       padding: 0.5rem 0.9rem; background: #F8FAFC; border-bottom: 1px solid var(--color-border);
-      font-size: 11px; font-weight: 700; color: var(--color-text-muted); letter-spacing: 0.03em; text-align: left;
+      font-size: 12px; font-weight: 800; color: var(--color-text-dark); letter-spacing: 0.03em; text-align: left;
     }
     .pl-table th.pl-amt-head { text-align: right; }
     .pl-table td {
@@ -72,13 +86,37 @@
     }
     .pl-empty-row td { padding: 1.25rem 0.9rem; text-align: center; color: var(--color-text-muted); font-size: 12px; }
     .pl-detailed-toggle { display: flex; align-items: center; gap: 0.35rem; font-size: 12px; font-weight: 600; color: var(--color-text-dark); cursor: pointer; }
+
+    /* Zoom-in: group and ledger rows are clickable (same as Trial Balance). */
+    .pl-click { cursor: pointer; }
+    /* Same hover as Trial Balance / Day Book rows: blue row, white text. */
+    .pl-click:hover td { background: var(--color-primary); color: #FFFFFF; }
+    /* Trading section subtotal (Tally's ruled figure under Gross Profit c/o) -
+       the same figure on both sides, so the two sections line up. */
+    .pl-subtotal-row td { padding-top: 0.3rem; padding-bottom: 0.5rem; }
+    .pl-subtotal-row td.pl-amt span {
+      display: inline-block; min-width: 9rem; padding: 0.2rem 0; font-weight: 700;
+      border-top: 1px solid var(--color-text-muted); border-bottom: 1px solid var(--color-text-muted);
+    }
+    .pl-spacer-row td { height: 1.75rem; }
+
+    /* Group zoom-in view (Trial-Balance-style Debit/Credit breakdown). */
+    .pl-drill { display: none; flex: 1; min-height: 0; flex-direction: column; background: var(--color-white); border: 1px solid var(--color-border); border-radius: var(--radius-md); overflow: hidden; }
+    .pl-drill-head { flex-shrink: 0; padding: 0.75rem 1rem; border-bottom: 1px solid var(--color-border); font-weight: 700; font-size: 0.92rem; color: var(--color-text-dark); }
+    .pl-drill-scroll { flex: 1; min-height: 0; overflow-y: auto; }
+    .pl-drill-scroll thead th { position: sticky; top: 0; z-index: 1; }
+    .pl-drill-total td { position: sticky; bottom: 0; }
+    .pl-drill .pl-table td.pl-amt, .pl-drill .pl-table th.pl-amt-head { width: 160px; }
+    .pl-drill-total td { font-weight: 800; border-top: 1px solid var(--color-border); background: #F8FAFC; }
+    .pl-back-row { flex-shrink: 0; padding: 0.85rem 1rem; border-top: 1px solid var(--color-border); background: #FAFBFD; }
+    .pl-back-link { display: inline-flex; align-items: center; gap: 0.4rem; font-size: 13px; font-weight: 600; color: var(--color-primary); text-decoration: none; cursor: pointer; }
+    .pl-back-link:hover { text-decoration: underline; }
   </style>
 </head>
 <body>
-<script src="assets/js/loader.js?v=2"></script>
   <header class="app-topnav" id="shell-topnav"></header>
   <div class="app-body">
-    <main class="app-main" style="max-width: 1440px; margin: 0 auto; padding: 1.5rem 2rem;">
+    <main class="app-main pl-main" style="max-width: 1440px; margin: 0 auto; padding: 1.5rem 2rem; width: 100%;">
       <!-- Single compact toolbar row (From/To/Apply on the left, Print/
            Export CSV pushed to the far right via the margin-left:auto
            spacer) - same structure as report-dsr-airline-booking.html's
@@ -108,7 +146,7 @@
         <div class="pl-col pl-col-left">
           <table class="pl-table">
             <thead>
-              <tr><th>Particulars</th><th class="pl-amt-head" id="pl-left-period">FY</th></tr>
+              <tr><th>Particulars</th><th class="pl-amt-head"></th></tr>
             </thead>
           </table>
           <div class="pl-col-body">
@@ -119,7 +157,7 @@
         <div class="pl-col pl-col-right">
           <table class="pl-table">
             <thead>
-              <tr><th>Particulars</th><th class="pl-amt-head" id="pl-right-period">FY</th></tr>
+              <tr><th>Particulars</th><th class="pl-amt-head"></th></tr>
             </thead>
           </table>
           <div class="pl-col-body">
@@ -128,13 +166,31 @@
           <table class="pl-table"><tbody id="pl-right-total"></tbody></table>
         </div>
       </div>
+
+      <!-- Zoom-in: one group's sub-groups/ledgers for the same period. -->
+      <div class="pl-drill" id="pl-drill">
+        <div class="pl-drill-head" id="pl-drill-head"></div>
+        <div class="pl-drill-scroll">
+          <table class="pl-table">
+            <thead><tr><th>Particulars</th><th class="pl-amt-head">Debit</th><th class="pl-amt-head">Credit</th></tr></thead>
+            <tbody id="pl-drill-body"></tbody>
+            <tfoot id="pl-drill-total"></tfoot>
+          </table>
+        </div>
+        <div class="pl-back-row">
+          <a href="#" class="pl-back-link" id="pl-back-link">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+            <span id="pl-back-label">Back</span>
+          </a>
+        </div>
+      </div>
     </main>
   </div>
 
   <script src="assets/js/mock-data.js"></script>
-  <script src="assets/js/api.js"></script>
+  <script src="assets/js/api.js?v=3"></script>
   <script src="assets/js/hardcode.js"></script>
-  <script src="assets/js/shell.js?v=13"></script>
+  <script src="assets/js/shell.js?v=21"></script>
   <script>
     // Not gated on DOMContentLoaded - this page's <script> can be injected
     // by the app's SPA navigation (shell.js's navigateTo) into a document
@@ -142,6 +198,9 @@
     // and this would silently never run except on a hard refresh.
     (function () {
     let activeCompanyId = null;
+    // Group being zoomed into (?group_id=) - null = the main account.
+    const urlParams = new URLSearchParams(window.location.search);
+    let currentGroupId = urlParams.get("group_id") || null;
 
     (async function init() {
       try {
@@ -152,12 +211,38 @@
       }
       // Defaults to today only, not a wide static range - same reasoning
       // as every other report page here (this project posts a lot of
-      // data per day).
+      // data per day). From/To come back from the URL when returning from
+      // a drilled-into ledger.
       const today = new Date().toISOString().slice(0, 10);
-      document.getElementById("filter-from").value = document.getElementById("filter-from").value || today;
-      document.getElementById("filter-to").value = document.getElementById("filter-to").value || today;
+      document.getElementById("filter-from").value = urlParams.get("from") || document.getElementById("filter-from").value || today;
+      document.getElementById("filter-to").value = urlParams.get("to") || document.getElementById("filter-to").value || today;
       loadReport();
     })();
+
+    // From/To/group in the address bar, so Back from a ledger (document.
+    // referrer / from_url) lands on this exact view again.
+    function syncUrl(push) {
+      const url = new URL(window.location.href);
+      url.searchParams.set("from", document.getElementById("filter-from").value);
+      url.searchParams.set("to", document.getElementById("filter-to").value);
+      if (currentGroupId) url.searchParams.set("group_id", currentGroupId);
+      else url.searchParams.delete("group_id");
+      if (push) window.history.pushState({}, "", url);
+      else window.history.replaceState({}, "", url);
+    }
+
+    function openLedger(ledgerId) {
+      syncUrl(false);
+      const from = encodeURIComponent("Profit and Loss");
+      const fromUrl = encodeURIComponent(window.location.href);
+      window.location.href = `report-ledger-monthly.html?ledger_id=${ledgerId}&from=${from}&from_url=${fromUrl}`;
+    }
+
+    function zoomInto(groupId) {
+      currentGroupId = groupId ? String(groupId) : null;
+      syncUrl(true);
+      loadReport();
+    }
 
     function fmtN(v) {
       return (Number(v) || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -168,94 +253,113 @@
       return `${d}/${m}/${y}`;
     }
 
-    // Builds one side's <tbody> rows - group header + (only in Detailed
-    // View) its own itemised ledgers, for however many groups this side
-    // has (Trading section groups first, then - after the divider - the
-    // P&L section's one group), plus whichever "carry" lines apply
-    // (Gross Profit/Loss c/o or b/f, Net Profit/Loss). Collapsed
-    // (default) view shows just the group's own rolled-up total on its
-    // one header row - Detailed View (the checkbox) additionally lists
-    // every ledger under it.
-    function sectionRows(groups, detailed) {
-      let html = "";
-      groups.forEach((g) => {
-        if (!g.items.length) return;
-        html += detailed
-          ? `<tr class="pl-group-row"><td colspan="2">${g.name}</td></tr>`
-          : `<tr class="pl-group-row"><td>${g.name}</td><td class="pl-amt">${fmtN(g.total)}</td></tr>`;
-        if (detailed) {
-          g.items.forEach((it) => {
-            html += `<tr class="pl-item-row"><td>${it.name}</td><td class="pl-amt">${fmtN(it.amount)}</td></tr>`;
-          });
-        }
-      });
+    // Tally-style Trading & Profit and Loss Account. Every one of the six
+    // groups is always listed (blank amount when nothing was posted), each
+    // clickable to zoom into it; Detailed View also lists its ledgers
+    // (each clickable to its own statement).
+    const amtCell = (v) => `<td class="pl-amt">${v ? fmtN(v) : ""}</td>`;
+    function groupRows(g, detailed) {
+      let html = `<tr class="pl-group-row pl-click" data-group-id="${g.id || ""}" title="Click to view this group's breakdown"><td>${g.name}</td>${detailed ? "<td></td>" : amtCell(g.total)}</tr>`;
+      if (detailed) {
+        g.items.forEach((it) => {
+          html += `<tr class="pl-item-row pl-click" data-ledger-id="${it.ledger_id}" title="Click to view this ledger's statement"><td>${it.name}</td>${amtCell(it.amount)}</tr>`;
+        });
+        if (g.items.length) html += `<tr class="pl-group-row"><td></td>${amtCell(g.total)}</tr>`;
+      }
       return html;
     }
-    function carryRow(label, amount) {
-      return `<tr class="pl-carry-row"><td>${label}</td><td class="pl-amt">${amount != null ? fmtN(amount) : ""}</td></tr>`;
-    }
-    function totalRow(amount) {
-      return `<tr class="pl-total-row"><td>Total</td><td class="pl-amt">${fmtN(amount)}</td></tr>`;
-    }
+    const carryRow = (label, amount) => `<tr class="pl-carry-row"><td>${label}</td>${amtCell(amount)}</tr>`;
+    // Same class/height as a carry row, so both sides' subtotals line up.
+    const spacerRow = () => `<tr class="pl-carry-row"><td>&nbsp;</td><td class="pl-amt"></td></tr>`;
+    const subtotalRow = (amount) => `<tr class="pl-subtotal-row"><td></td><td class="pl-amt"><span>${fmtN(amount)}</span></td></tr>`;
+    const totalRow = (amount) => `<tr class="pl-total-row"><td>Total</td><td class="pl-amt">${fmtN(amount)}</td></tr>`;
 
     let lastData = null;
     function render(data) {
       lastData = data;
+      document.getElementById("pl-box").style.display = "";
+      document.getElementById("pl-drill").style.display = "none";
       const detailed = document.getElementById("pl-detailed-view").checked;
-      const period = `FY ${ddmmyyyy(data.from_date)} - ${ddmmyyyy(data.to_date)}`;
-      document.getElementById("pl-left-period").textContent = period;
-      document.getElementById("pl-right-period").textContent = period;
 
       const t = data.trading, p = data.pl;
       const grossProfit = t.gross_profit;   // > 0 profit, < 0 loss
       const netProfit = p.net_profit;       // > 0 profit, < 0 loss
 
-      // LEFT (Debit) side: Purchase Accounts + Direct Expenses, Gross
-      // Profit c/o if the Trading Account made a profit (balances this
-      // side up to match Credit), divider, Indirect Expenses, Gross Loss
-      // b/f if it made a loss instead, Net Profit if the P&L Account made
-      // one (balances this side up to match Credit). Total is now its
-      // own separate footer table (see pl-col-body in the markup) so it
-      // always sits flush at the bottom of the box, not wherever this
-      // side's own content happens to end.
-      let left = sectionRows([t.debit.purchase, t.debit.direct_expense], detailed);
-      if (grossProfit > 0) left += carryRow("Gross Profit c/o", grossProfit);
-      left += `<tr class="pl-divider-row"><td colspan="2"></td></tr>`;
-      left += sectionRows([p.debit.indirect_expense], detailed);
+      // Trading section - same row count on both sides (the carry line or a
+      // blank spacer), so the two ruled subtotals line up across the divider.
+      // LEFT (Dr): Purchase Accounts, Direct Expenses, Gross Profit c/o.
+      // RIGHT (Cr): Sales Accounts, Direct Income(s), Gross Loss c/o.
+      let left = groupRows(t.debit.purchase, detailed) + groupRows(t.debit.direct_expense, detailed);
+      left += grossProfit > 0 ? carryRow("Gross Profit c/o", grossProfit) : spacerRow();
+      let right = groupRows(t.credit.sales, detailed) + groupRows(t.credit.direct_income, detailed);
+      right += grossProfit < 0 ? carryRow("Gross Loss c/o", -grossProfit) : spacerRow();
+      // Detailed View can list more ledgers on one side - pad the shorter
+      // side with blank rows so the two subtotals stay level.
+      const rowCount = (html) => (html.match(/<tr/g) || []).length;
+      while (rowCount(left) < rowCount(right)) left += spacerRow();
+      while (rowCount(right) < rowCount(left)) right += spacerRow();
+      left += subtotalRow(t.total_debit);
+      right += subtotalRow(t.total_credit);
+
+      // Profit & Loss section.
+      // LEFT (Dr): Gross Loss b/f, Indirect Expenses, Nett Profit.
+      // RIGHT (Cr): Gross Profit b/f, Indirect Income(s), Nett Loss.
       if (grossProfit < 0) left += carryRow("Gross Loss b/f", -grossProfit);
-      if (netProfit > 0) left += carryRow("Net Profit", netProfit);
-
-      // RIGHT (Credit) side: Sales Accounts + Direct Income, Gross Loss
-      // c/o if the Trading Account made a loss, divider, Indirect Income,
-      // Gross Profit b/f if it made a profit instead, Net Loss if the
-      // P&L Account made one.
-      let right = sectionRows([t.credit.sales, t.credit.direct_income], detailed);
-      if (grossProfit < 0) right += carryRow("Gross Loss c/o", -grossProfit);
-      right += `<tr class="pl-divider-row"><td colspan="2"></td></tr>`;
-      right += sectionRows([p.credit.indirect_income], detailed);
+      left += groupRows(p.debit.indirect_expense, detailed);
+      if (netProfit > 0) left += carryRow("Nett Profit", netProfit);
       if (grossProfit > 0) right += carryRow("Gross Profit b/f", grossProfit);
-      if (netProfit < 0) right += carryRow("Net Loss", -netProfit);
+      right += groupRows(p.credit.indirect_income, detailed);
+      if (netProfit < 0) right += carryRow("Nett Loss", -netProfit);
 
-      const noActivity = !t.debit.purchase.items.length && !t.debit.direct_expense.items.length
-        && !t.credit.sales.items.length && !t.credit.direct_income.items.length
-        && !p.debit.indirect_expense.items.length && !p.credit.indirect_income.items.length;
-      document.getElementById("pl-left-body").innerHTML = noActivity
-        ? `<tr class="pl-empty-row"><td colspan="2">No activity in this period.</td></tr>` : left;
-      document.getElementById("pl-right-body").innerHTML = noActivity
-        ? `<tr class="pl-empty-row"><td colspan="2">No activity in this period.</td></tr>` : right;
-      // The P&L Account's own balanced total already equals indirect
-      // items + whichever carry-forward/Net Profit figure was just added
-      // above (see profit_loss_report's own total_debit = max(pl_dr,
-      // pl_cr)) - the one Total shown at the bottom of the whole combined
-      // account, same as the reference screenshot (no separate sub-total
-      // for the Trading Account section above the divider).
+      document.getElementById("pl-left-body").innerHTML = left;
+      document.getElementById("pl-right-body").innerHTML = right;
       document.getElementById("pl-left-total").innerHTML = totalRow(p.total_debit);
       document.getElementById("pl-right-total").innerHTML = totalRow(p.total_credit);
     }
+
+    // Zoom-in view: one group's sub-groups (click to go deeper) and ledgers
+    // (click for the ledger's statement), Debit/Credit for the period.
+    function renderDrill(data) {
+      lastData = data;
+      document.getElementById("pl-box").style.display = "none";
+      document.getElementById("pl-drill").style.display = "flex";
+      document.getElementById("pl-drill-head").textContent =
+        `${data.context.name}  (${ddmmyyyy(data.from_date)} to ${ddmmyyyy(data.to_date)})`;
+      const cell = (v) => `<td class="pl-amt">${v ? fmtN(v) : ""}</td>`;
+      document.getElementById("pl-drill-body").innerHTML = data.rows.length
+        ? data.rows.map((r) => r.type === "group"
+          ? `<tr class="pl-group-row pl-click" data-group-id="${r.id}" title="Click to view this group's breakdown"><td>${r.name}</td>${cell(r.debit)}${cell(r.credit)}</tr>`
+          : `<tr class="pl-item-row pl-click" data-ledger-id="${r.id}" title="Click to view this ledger's statement" style="font-style:italic;"><td>${r.name}</td>${cell(r.debit)}${cell(r.credit)}</tr>`).join("")
+        : `<tr class="pl-empty-row"><td colspan="3">Nothing posted under this group in this period.</td></tr>`;
+      document.getElementById("pl-drill-total").innerHTML =
+        `<tr class="pl-drill-total"><td>Grand Total</td>${cell(data.total_debit)}${cell(data.total_credit)}</tr>`;
+      document.getElementById("pl-back-label").textContent = `Back to ${data.back ? data.back.label : "Profit and Loss"}`;
+    }
+
+    // One click handler for both views (rows are re-rendered every load).
+    document.getElementById("pl-box").addEventListener("click", rowClick);
+    document.getElementById("pl-drill").addEventListener("click", rowClick);
+    function rowClick(e) {
+      const row = e.target.closest("tr.pl-click");
+      if (!row) return;
+      if (row.dataset.ledgerId) openLedger(row.dataset.ledgerId);
+      else if (row.dataset.groupId) zoomInto(row.dataset.groupId);
+    }
+    document.getElementById("pl-back-link").addEventListener("click", (e) => {
+      e.preventDefault();
+      zoomInto(lastData && lastData.back ? lastData.back.group_id : null);
+    });
+    // Browser Back/Forward between zoom levels.
+    window.addEventListener("popstate", () => {
+      if (!document.getElementById("pl-box")) return;
+      currentGroupId = new URLSearchParams(window.location.search).get("group_id") || null;
+      loadReport();
+    });
+
     // Detailed View toggles without a network round-trip - the last
     // response already has everything needed to re-render either way.
     function rerender() {
-      if (lastData) render(lastData);
+      if (lastData && !currentGroupId) render(lastData);
     }
     window.rerender = rerender;
 
@@ -263,12 +367,15 @@
       if (!activeCompanyId) return;
       const fromDate = document.getElementById("filter-from").value;
       const toDate = document.getElementById("filter-to").value;
+      syncUrl(false);
       try {
         const params = new URLSearchParams({ company_id: activeCompanyId, from_date: fromDate, to_date: toDate });
-        const res = await fetch(`${API_BASE}/profit-loss/?${params}`);
+        if (currentGroupId) params.set("group_id", currentGroupId);
+        const res = await fetch(`http://localhost:8000/api/profit-loss/?${params}`);
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || "Could not load the Profit and Loss Account.");
-        render(data);
+        if (currentGroupId) renderDrill(data);
+        else render(data);
       } catch (err) {
         voyagerAlert(err.message || "Could not load the Profit and Loss Account. Is the Django backend running?", { icon: "error" });
       }
@@ -277,6 +384,18 @@
 
     function exportCSV() {
       let csv = [];
+      if (currentGroupId) {
+        document.querySelectorAll("#pl-drill tr").forEach((row) => {
+          const cols = Array.from(row.querySelectorAll("th, td")).map((td) => `"${td.innerText.replace(/"/g, '""')}"`);
+          if (cols.length) csv.push(cols.join(","));
+        });
+        const blob = new Blob([csv.join("\n")], { type: "text/csv;charset=utf-8;" });
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(blob);
+        link.download = "profit-and-loss-group.csv";
+        link.click();
+        return;
+      }
       // Each side is now 3 separate <table>s (header/body/total footer -
       // see pl-col-body in the markup, which keeps the Total pinned to
       // the bottom) - grouped by .pl-col here, not by raw table index.

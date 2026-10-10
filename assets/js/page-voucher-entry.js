@@ -1,5 +1,4 @@
 (async function () {
-  const API_BASE = window.API_BASE || "/api";
   const { fillSelect, todayISO, showToast, getEditId, getReturnTo } = window.VoyagerEntry;
   let activeCompanyId, activeCountry, accounts = [], originalVoucherNo = null;
   let allAccountRows = []; // unfiltered /api/accounts/ rows (ledgers + groups) - used to check a line's ledger group
@@ -17,7 +16,7 @@
   async function enterTicketVoucherViewMode(id) {
     let jv;
     try {
-      const res = await fetch(`${API_BASE}/tickets/${id}/jv-preview/?company_id=${activeCompanyId}`);
+      const res = await fetch(`http://localhost:8000/api/tickets/${id}/jv-preview/?company_id=${activeCompanyId}`);
       jv = await res.json();
       if (!res.ok) throw new Error(jv.error || "Could not compute this ticket's JV.");
     } catch (err) {
@@ -128,7 +127,7 @@
     }
   }
 
-  const ACCOUNTS_API = `${API_BASE}/accounts/`;
+  const ACCOUNTS_API = "http://localhost:8000/api/accounts/";
   async function populateRefs(companyId) {
     const ref = window.VoyagerMock.getReferenceData(companyId);
     fillSelect(document.getElementById("branch"), ref.branches, (b) => b.name, (b) => b.name);
@@ -238,8 +237,8 @@
     const saveBtn = document.getElementById("save-btn");
     saveBtn.disabled = true;
     const url = editId
-      ? `${API_BASE}/vouchers/${editId}/update/`
-      : `${API_BASE}/vouchers/create/`;
+      ? `http://localhost:8000/api/vouchers/${editId}/update/`
+      : "http://localhost:8000/api/vouchers/create/";
     try {
       const res = await fetch(url, {
         method: "POST",
@@ -274,7 +273,7 @@
         // Real backend fetch - never mock-routed, since this is a real
         // ledger posting that only exists in the Voucher table.
         try {
-          const res = await fetch(`${API_BASE}/vouchers/${editId}/?company_id=${activeCompanyId}`);
+          const res = await fetch(`http://localhost:8000/api/vouchers/${editId}/?company_id=${activeCompanyId}`);
           const v = await res.json();
           if (!res.ok) throw new Error(v.error || "Could not load this voucher.");
           prefill(v);

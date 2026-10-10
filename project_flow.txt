@@ -1,0 +1,170 @@
+===================================================================
+TESEPR BOOK / TRAVEL AGENCY ERP - PROJECT FLOW (01-Sep to 18-Sep)
+===================================================================
+
+OVERALL FLOW
+------------
+Prototype Analysis  ->  UI Design  ->  Python Logic (Django Backend)
+   ->  DB Connection (SQL Server)  ->  Page-by-Page Integration & Testing
+
+-------------------------------------------------------------------
+PHASE 1: PROTOTYPE ANALYSIS (01-Sep to 03-Sep)
+-------------------------------------------------------------------
+Day 1 (01-Sep) - Requirement study: travel agency accounting workflow
+                 (Airline / Hotel / Bus / Train / Tour / Visa / Insurance
+                 booking, cancellation, reschedule), identified core
+                 modules: Masters, Transactions, Accounts, Reports.
+Day 2 (02-Sep) - Mapped accounting requirements to standard double-entry
+                 structure: Ledger Groups, Ledgers, Voucher Types,
+                 Journal Voucher rules per transaction type.
+Day 3 (03-Sep) - Finalized module list and page inventory (list below),
+                 decided tech stack: Django 5.x + mssql-django/pyodbc
+                 backend, static HTML/JS frontend (no SPA framework),
+                 shared topnav/shell (shell.js) across all pages.
+
+-------------------------------------------------------------------
+PHASE 2: UI DESIGN (04-Sep to 08-Sep)
+-------------------------------------------------------------------
+Day 4 (04-Sep) - Shell/topnav design: logo, company/flag switcher,
+                 notifications, theme toggle, menu bar (dashboard.html,
+                 shell.js skeleton).
+Day 5 (05-Sep) - Masters UI: Ledger Groups (groups.html), Chart of
+                 Accounts (accounts.html), Customers/Suppliers
+                 (customers.html, suppliers.html, supplier-master.html).
+Day 6 (06-Sep) - Masters UI continued: Company Master, FOP Master,
+                 PG Master, Master Mapping, Voucher Type
+                 (company-master.html, fop-master.html, pg-master.html,
+                 master-mapping.html, voucher-type.html).
+Day 7 (07-Sep) - Transaction entry screens layout: Ticket Entry (Airline
+                 booking/cancellation/reschedule/SSR), Hotel, Bus, Train,
+                 Tour, Visa, Insurance, Misc entry forms.
+Day 8 (08-Sep) - Reports UI layout: Day Book, Ledger Book, Trial Balance,
+                 Cash & Bank Book, Balance Sheet, Profit & Loss, GST
+                 (GSTR-1/2B/3B), TDS, DSR Airline Booking.
+
+-------------------------------------------------------------------
+PHASE 3: PYTHON LOGIC (DJANGO BACKEND) (09-Sep to 13-Sep)
+-------------------------------------------------------------------
+Day 9  (09-Sep) - Django project scaffolding (backend/accounting app),
+                  models for Ledger Groups, Ledgers, Voucher Types,
+                  Company Master, FOP/PG Master.
+Day 10 (10-Sep) - Ticket/TicketLine models + Journal Voucher posting
+                  logic (JV_LINE_MAP, auto category/prefix numbering).
+Day 11 (11-Sep) - Reschedule flow logic: RescheduleAirlineTicket /
+                  RescheduleAirlineTicketLine models, reschedule-only JV
+                  rules, eligibility/chain-link handling.
+Day 12 (12-Sep) - Reports logic: Day Book, Ledger Book, Trial Balance,
+                  Cash & Bank Book, Monthly Summary - ledger balance/
+                  transaction aggregation functions.
+Day 13 (13-Sep) - GST/TDS/Balance Sheet/Profit & Loss report logic,
+                  Invoice Number auto-numbering (Voucher Type Number
+                  Method: Manual / Automatic / Automatic & Manual
+                  Override).
+
+-------------------------------------------------------------------
+PHASE 4: DB CONNECTION (SQL SERVER) (14-Sep to 15-Sep)
+-------------------------------------------------------------------
+Day 14 (14-Sep) - mssql-django/pyodbc connection setup, initial
+                  migrations for Masters (Ledger Groups, Ledgers,
+                  Company Master, FOP/PG Master, Voucher Type).
+Day 15 (15-Sep) - Migrations for Tickets/TicketLines, Journal Voucher,
+                  Reschedule tables; Schema.sql mirrored to match every
+                  migration (tables, FKs, indexes, constraints).
+
+-------------------------------------------------------------------
+PHASE 5: PAGE-BY-PAGE INTEGRATION & TESTING (16-Sep to 18-Sep)
+-------------------------------------------------------------------
+Day 16 (16-Sep) - Wired Masters pages to live APIs (Ledger Groups,
+                  Accounts, Customers, Suppliers, Company Master, FOP/PG
+                  Master, Master Mapping, Voucher Type, User Management).
+Day 17 (17-Sep) - Wired Transaction pages to live APIs (Ticket Entry +
+                  Airline Reschedule/Cancellation/SSR, Hotel, Bus, Train,
+                  Tour, Visa, Insurance, Misc) end to end with save/edit/
+                  view flows.
+Day 18 (18-Sep) - Wired Reports pages to live APIs (Day Book, Ledger
+                  Book, Trial Balance, Cash & Bank Book, Ledger Monthly,
+                  Balance Sheet, Profit & Loss, GSTR-1/1-Recon/2B-Recon/
+                  3B, TDS, DSR Airline Booking) and full end-to-end
+                  regression pass across all pages below.
+
+===================================================================
+FULL PAGE COVERAGE LIST (53 pages)
+===================================================================
+
+MASTERS (12)
+  1. dashboard.html
+  2. groups.html                  - Ledger Groups
+  3. accounts.html                - Chart of Accounts
+  4. customers.html
+  5. suppliers.html
+  6. supplier-master.html
+  7. company-master.html
+  8. fop-master.html              - Form of Payment Master
+  9. pg-master.html               - Payment Gateway Master
+ 10. master-mapping.html
+ 11. voucher-type.html
+ 12. user-management.html
+
+TRANSACTIONS (18)
+ 13. ticket-entry.html            - Airline Booking / Reschedule / View
+ 14. trans-airline-reschedule.html
+ 15. trans-airline-cancellation.html
+ 16. trans-airline-ssr.html
+ 17. hotels.html
+ 18. hotel-entry.html
+ 19. trans-hotels-booking.html
+ 20. trans-hotels-cancellation.html
+ 21. trans-hotels-reschedule.html
+ 22. trans-bus-booking.html
+ 23. trans-bus-cancellation.html
+ 24. trans-bus-reschedule.html
+ 25. trans-train-booking.html
+ 26. trans-train-cancellation.html
+ 27. trans-train-reschedule.html
+ 28. tours.html
+ 29. tour-entry.html
+ 30. trans-tour-packages.html
+
+TRANSACTIONS - OTHER (3)
+ 31. trans-visa.html
+ 32. visa.html
+ 33. visa-entry.html
+
+TRANSACTIONS - MISC (2)
+ 34. trans-insurance.html
+ 35. insurance.html
+ 36. insurance-entry.html
+ 37. trans-misc.html
+
+ACCOUNTS / VOUCHERS (3)
+ 38. ledger-entry.html
+ 39. voucher-entry.html
+ 40. vouchers.html
+
+REPORTS (13)
+ 41. report-day-book.html
+ 42. report-ledger-book.html
+ 43. report-ledger-monthly.html
+ 44. report-trial-balance.html
+ 45. report-cash-bank-book.html
+ 46. report-balance-sheet.html
+ 47. report-profit-loss.html
+ 48. report-gstr-1.html
+ 49. report-gstr-1-recon.html
+ 50. report-gstr-2b-recon.html
+ 51. report-gstr-3b.html
+ 52. report-tds.html
+ 53. report-dsr-airline-booking.html
+
+MISC
+ 54. index.html                   - Login / entry point
+
+===================================================================
+TECH STACK SUMMARY
+===================================================================
+Backend  : Python / Django 5.x, mssql-django + pyodbc
+Database : Microsoft SQL Server
+Frontend : Static HTML + vanilla JavaScript (assets/js/*.js),
+           shared shell.js for topnav/menu/company-flag across pages
+Pattern  : Multi-page app, server-rendered data via REST-style JSON
+           endpoints (/api/...), no SPA framework

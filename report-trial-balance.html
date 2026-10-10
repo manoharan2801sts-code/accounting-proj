@@ -9,7 +9,6 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
   <link href="assets/css/design-system.css" rel="stylesheet" />
   <link href="assets/css/app.css" rel="stylesheet" />
-<link href="assets/css/loader.css" rel="stylesheet" />
   <link rel="icon" type="image/png" href="assets/img/favicon.png" />
   <style>
     /* Locked to the viewport - only the grid's own body scrolls, with the
@@ -93,7 +92,6 @@
   </style>
 </head>
 <body>
-<script src="assets/js/loader.js?v=2"></script>
   <header class="app-topnav" id="shell-topnav"></header>
   <div class="app-body">
     <main class="app-main tb-main" style="max-width: 1440px; margin: 0 auto; padding: 1.5rem 2rem; width: 100%;">
@@ -162,10 +160,10 @@
   </div>
 
   <script src="assets/js/mock-data.js"></script>
-  <script src="assets/js/api.js"></script>
+  <script src="assets/js/api.js?v=3"></script>
   <script src="assets/js/hardcode.js"></script>
-  <script src="assets/js/util.js"></script>
-  <script src="assets/js/shell.js"></script>
+  <script src="assets/js/util.js?v=2"></script>
+  <script src="assets/js/shell.js?v=21"></script>
   <script>
     // Not gated on DOMContentLoaded - this page's <script> can be injected
     // by the app's SPA navigation (shell.js's navigateTo) into a document
@@ -245,7 +243,7 @@
       document.getElementById("tb-detailed-toggle-wrap").style.display = currentGroupId ? "none" : "";
 
       try {
-        const res = await fetch(`${window.API_BASE || "/api"}/trial-balance/?${params}`);
+        const res = await fetch(`http://localhost:8000/api/trial-balance/?${params}`);
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || `Server returned ${res.status}`);
         lastLoadedData = data;
@@ -328,6 +326,18 @@
     function renderTotals(totalDebit, totalCredit) {
       const diff = Math.round((totalDebit - totalCredit) * 100) / 100;
       const diffRow = document.getElementById("tb-diff-row");
+      // Inside a group (e.g. Sundry Debtors) there's no Difference row - a
+      // single group isn't meant to balance on its own, so Grand Total shows
+      // the group's real Debit and Credit totals. The Difference row + equal
+      // Grand Total are only for the main (top-level) Trial Balance.
+      if (currentGroupId) {
+        diffRow.style.display = "none";
+        document.getElementById("tb-diff-debit").textContent = "";
+        document.getElementById("tb-diff-credit").textContent = "";
+        document.getElementById("tb-grand-debit").textContent = fmtAmt(totalDebit);
+        document.getElementById("tb-grand-credit").textContent = fmtAmt(totalCredit);
+        return;
+      }
       if (diff === 0) {
         diffRow.style.display = "none";
         document.getElementById("tb-diff-debit").textContent = "";

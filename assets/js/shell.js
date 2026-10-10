@@ -10,15 +10,6 @@
  * the view and data without a full page reload!
  */
 (function (window) {
-  // Apply saved theme immediately on load to prevent flicker
-  const savedTheme = localStorage.getItem("voyager-theme") || "light";
-  document.documentElement.setAttribute("data-theme", savedTheme);
-
-  // Tag any existing <style> tags in <head> so SPA navigation can swap them cleanly
-  document.querySelectorAll("head style:not([data-page-style])").forEach((s) => {
-    s.setAttribute("data-page-style", "1");
-  });
-
   const { Store, get } = window.VoyagerAPI;
   const NAV_SECTIONS = window.VoyagerHardcode.NAV_SECTIONS;
 
@@ -235,9 +226,249 @@
     </a>`;
   }
 
+  // ============================================================
+  // Per-user menu access (User Management). Super Admin sees everything;
+  // anyone else sees Home plus only the menus with
+  // View ticked for them. Re-fetched on every full page load, so a change
+  // by the Super Admin (or deactivating the user) applies on next load.
+  // ============================================================
+  const PERMS_KEY = "voyager_permissions";
+  let currentPerms = null;
+
+  async function loadPermissions() {
+    const token = Store.getToken();
+    try {
+      const res = await fetch(`${window.VoyagerAPI.API_BASE}/auth/my-permissions/`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.status === 401) {
+        Store.clear();
+        try { sessionStorage.removeItem(PERMS_KEY); } catch (_) {}
+        window.location.href = "index.html";
+        return null;
+      }
+      if (res.ok) {
+        const data = await res.json();
+        const perms = { is_super_admin: !!data.is_super_admin, menus: data.menus || {} };
+        try { sessionStorage.setItem(PERMS_KEY, JSON.stringify(perms)); } catch (_) {}
+        if (data.user) Store.setUser(data.user);
+        return perms;
+      }
+    } catch (_) {}
+    // Backend unreachable - last known set for this tab, else Home only.
+    try {
+      const cached = JSON.parse(sessionStorage.getItem(PERMS_KEY) || "null");
+      if (cached) return cached;
+    } catch (_) {}
+    return { is_super_admin: false, menus: {} };
+  }
+
+  function canView(key) {
+    if (!currentPerms || currentPerms.is_super_admin) return true;
+    if (key === "dashboard") return true;
+    const m = currentPerms.menus[key];
+    return !!(m && m.view);
+  }
+
+  function filterNavItems(items) {
+    return items
+      .map((it) => (it.children && it.children.length ? { ...it, children: filterNavItems(it.children) } : it))
+      .filter((it) => (it.children ? it.children.length > 0 : canView(it.key)));
+  }
+
+  function visibleSections() {
+    if (!currentPerms || currentPerms.is_super_admin) return NAV_SECTIONS;
+    return NAV_SECTIONS
+      .map((section) => ({ ...section, items: filterNavItems(section.items) }))
+      .filter((section) => section.items.length);
+  }
+
+  // ------------------------------------------------------------
+  // Add / Edit / Delete on each page. Keyed by page file (Booking/
+  // Reschedule/Cancellation share ticket-entry.html, Accounts and its
+  // ledger screen share the "accounts" key), applied against the user's
+  // flags for that page's activeKey. The server enforces the same rules
+  // (accounting/permissions.py) - this just keeps the screen honest.
+  //   add / edit / delete : hidden when that flag is off
+  //   addOrEdit           : hidden when both add and edit are off
+  //   save + saveNeeds()  : hidden when the flag the CURRENT mode needs is off
+  //   lock                : fields not focusable when the user can't save here
+  //   editTriggers        : [selector, event] blocked when edit is off
+  // ------------------------------------------------------------
+  const savedRecordInUrl = (...params) => () => {
+    const q = new URLSearchParams(window.location.search);
+    return params.some((p) => q.get(p)) ? "edit" : "add";
+  };
+  const PAGE_PERMISSION_UI = {
+    "ticket-entry.html": {
+      add: ["#add-line-btn", "#add-line-btn-bot", "#pax-add-row-btn", ".pax-add-row", "#reschedule-new-btn", "#cancellation-new-btn", "#rs-reschedule-btn", "#cx-cancel-btn", "#proceed-btn"],
+      edit: ["#edit-ticket-btn"],
+      save: ["#submit-btn", "#cancellation-save-btn", "#modal-save-btn", "#modal-sector-add-btn", "#sector-save-btn", ".pax-remove-btn", ".dom-chip-remove"],
+      saveNeeds: savedRecordInUrl("id", "reschedule_saved_id", "cancellation_saved_id"),
+      lock: ["#ticket-form", "#fare-breakdown-modal", "#sector-modal"],
+    },
+    "company-master.html": {
+      edit: ["#cm-edit-btn", "#cm-save-btn"],
+    },
+    "groups.html": {
+      add: ["#new-group-btn"],
+      edit: [".edit-btn"],
+      delete: [".delete-btn"],
+      addOrEdit: ["#submit-form-btn"],
+      editTriggers: [[".grp-name", "click"]],
+    },
+    "accounts.html": {
+      add: ['a.btn-brand[href="ledger-entry.html"]'],
+      delete: [".delete-ledger-btn"],
+    },
+    "ledger-entry.html": {
+      save: ["#submit-btn"],
+      saveNeeds: savedRecordInUrl("id"),
+      lock: ["#ledger-form"],
+    },
+    "voucher-type.html": {
+      add: ["#vt-new-btn"],
+      addOrEdit: ["#vt-save-btn", "#addl-numbering-save-btn"],
+      lock: [".vt-card"],
+    },
+    "supplier-master.html": {
+      add: [".sm-rule-save-btn"],
+      // Edit removes the rule and re-adds it on save - needs all three.
+      edit: [".sm-list-edit-btn"],
+      delete: [".sm-list-del-btn", ".sm-list-edit-btn"],
+      lockNeeds: "add",
+      lock: ["#sm-rule-tbody"],
+    },
+    "master-mapping.html": {
+      edit: [".mm-row-edit-btn"],
+      delete: [".mm-row-del-btn"],
+      addOrEdit: [".mm-row-save-btn"],
+      lock: [".mm-ledger-select", ".mm-effective-from"],
+    },
+    "fop-master.html": {
+      delete: [".fm-btn-minus"],
+      addOrEdit: ["#fm-btn-save"],
+      editTriggers: [["tr.fm-grid-row", "dblclick"]],
+      lock: [".fm-form-card"],
+    },
+    "pg-master.html": {
+      delete: [".pg-btn-minus"],
+      addOrEdit: ["#pg-btn-save"],
+      editTriggers: [["tr.pg-grid-row", "dblclick"]],
+      lock: [".pg-form-card"],
+    },
+  };
+  // supplier-master's Edit also needs add (it re-creates the rule).
+  PAGE_PERMISSION_UI["supplier-master.html"].add.push(".sm-list-edit-btn");
+
+  let pagePerm = { view: true, add: true, edit: true, delete: true };
+  let pageRule = null;
+  let lockedSelectors = [];
+  let blockedTriggers = [];
+
+  function permFor(key) {
+    if (!currentPerms || currentPerms.is_super_admin) return { view: true, add: true, edit: true, delete: true };
+    const m = currentPerms.menus[key] || {};
+    return { view: !!m.view, add: !!m.add, edit: !!m.edit, delete: !!m.delete };
+  }
+
+  function applyPagePermissions(activeKey) {
+    const page = window.location.pathname.split("/").pop() || "dashboard.html";
+    pagePerm = permFor(activeKey);
+    pageRule = PAGE_PERMISSION_UI[page] || null;
+    const hide = [];
+    lockedSelectors = [];
+    blockedTriggers = [];
+    if (pageRule) {
+      const p = pagePerm;
+      if (!p.add) hide.push(...(pageRule.add || []));
+      if (!p.edit) hide.push(...(pageRule.edit || []));
+      if (!p.delete) hide.push(...(pageRule.delete || []));
+      if (!p.add && !p.edit) hide.push(...(pageRule.addOrEdit || []));
+      const canSaveHere = pageRule.saveNeeds ? p[pageRule.saveNeeds()] : (pageRule.lockNeeds ? p[pageRule.lockNeeds] : (p.add || p.edit));
+      if (pageRule.save && !canSaveHere) hide.push(...pageRule.save);
+      if (pageRule.lock && !canSaveHere) lockedSelectors = pageRule.lock.slice();
+      if (!p.edit) blockedTriggers = (pageRule.editTriggers || []).slice();
+    }
+    let style = document.getElementById("perm-ui-style");
+    if (!style) {
+      style = document.createElement("style");
+      style.id = "perm-ui-style";
+      document.head.appendChild(style);
+    }
+    const lockCss = lockedSelectors.map((s) => `${s} input, ${s} select, ${s} textarea, input${s}, select${s}, textarea${s}`).join(", ");
+    style.textContent =
+      (hide.length ? `${hide.join(", ")} { display: none !important; }\n` : "") +
+      (lockCss ? `${lockCss} { pointer-events: none !important; background-color: var(--color-bg-subtle) !important; }\n` : "");
+    watchLockedFields();
+  }
+
+  function isLockedField(el) {
+    return lockedSelectors.length && el && el.matches && el.matches("input, select, textarea")
+      && lockedSelectors.some((s) => el.matches(s) || el.closest(s));
+  }
+
+  // Locked text fields get the real readonly attribute (the only thing
+  // every input method respects); selects can't be readonly, so they rely
+  // on the pointer-events CSS + key blocking below. Re-applied whenever the
+  // page re-renders or flips readonly back off (e.g. its own mode changes).
+  function enforceLockedFields() {
+    if (!lockedSelectors.length) return;
+    lockedSelectors.forEach((s) => {
+      document.querySelectorAll(`${s} input, ${s} textarea, input${s}, textarea${s}`).forEach((el) => {
+        if (!el.readOnly) el.readOnly = true;
+      });
+    });
+  }
+  let lockObserver = null;
+  function watchLockedFields() {
+    if (lockObserver) { lockObserver.disconnect(); lockObserver = null; }
+    if (!lockedSelectors.length) return;
+    enforceLockedFields();
+    let queued = false;
+    lockObserver = new MutationObserver(() => {
+      if (queued) return;
+      queued = true;
+      requestAnimationFrame(() => { queued = false; enforceLockedFields(); });
+    });
+    lockObserver.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["readonly"] });
+  }
+
+  // Registered once; read whatever the current page's rules are. Typing,
+  // paste and drop are blocked outright (not just focus), so a field
+  // reached with Tab still can't be changed. Tab/Escape keep working.
+  document.addEventListener("focusin", (e) => { if (isLockedField(e.target)) e.target.blur(); }, true);
+  ["beforeinput", "paste", "drop", "cut"].forEach((evt) => {
+    document.addEventListener(evt, (e) => { if (isLockedField(e.target)) e.preventDefault(); }, true);
+  });
+  document.addEventListener("keydown", (e) => {
+    if (isLockedField(e.target) && e.key !== "Tab" && e.key !== "Escape") e.preventDefault();
+  }, true);
+  ["click", "dblclick"].forEach((evt) => {
+    document.addEventListener(evt, (e) => {
+      if (!blockedTriggers.length || !e.target.closest) return;
+      if (blockedTriggers.some(([sel, ev]) => ev === evt && e.target.closest(sel))) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+      }
+    }, true);
+  });
+
+  function renderAccessDenied() {
+    const main = document.querySelector(".app-main");
+    if (!main) return;
+    main.innerHTML = `
+      <div style="max-width:440px; margin:4rem auto; text-align:center; background:var(--color-white); border:1px solid var(--color-border); border-radius:var(--radius-md); padding:2rem 1.5rem;">
+        ${icon("M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z")}
+        <h1 style="font-size:1.15rem; font-weight:700; margin:0.6rem 0 0.4rem;">403 – Access Denied</h1>
+        <p style="font-size:0.85rem; color:var(--color-text-muted); margin:0 0 1.1rem;">You don't have access to this page. Ask your Super Admin to grant it in User Management.</p>
+        <a href="dashboard.html" class="dom-nav-btn btn-primary" style="display:inline-flex; text-decoration:none;">Go to Home</a>
+      </div>`;
+  }
+
   function renderMenubar(activeKey) {
     const currentBase = window.location.pathname.split("/").pop() || "dashboard.html";
-    return NAV_SECTIONS.map((section) => {
+    return visibleSections().map((section) => {
       if (section.items.length === 1 && !section.forceDropdown && (!section.items[0].children || !section.items[0].children.length)) {
         const item = section.items[0];
         const active = isItemActive(item, activeKey, currentBase);
@@ -507,14 +738,6 @@
         document.head.appendChild(cloned);
       });
 
-      // 3b. Reset html and body inline styles so no previous page locks scrolling
-      document.documentElement.style.overflow = "";
-      document.documentElement.style.overflowY = "";
-      document.documentElement.style.height = "";
-      document.body.style.overflow = "";
-      document.body.style.overflowY = "";
-      document.body.style.height = "";
-
       // 4. Update Menubar Active State
       updateActiveNav(null, url);
 
@@ -622,14 +845,18 @@
   async function init({ activeKey, onCompanyChange }) {
     currentOnCompanyChange = onCompanyChange;
 
+    // Not signed in - go to the login page. The returned promise never
+    // settles, so the page's own code (awaiting init) stops here.
     if (!Store.getToken() || Store.getToken() === "demo-token") {
-      Store.setToken("session-token");
-      Store.setRefresh("session-refresh");
-      Store.setUser(Store.getUser() || { full_name: "Ananya Krishnan" });
-      localStorage.removeItem("voyager_mock_mode");
+      Store.clear();
+      window.location.href = "index.html";
+      return new Promise(() => {});
+    }
+    if (!currentPerms) {
+      currentPerms = await loadPermissions();
+      if (!currentPerms) return new Promise(() => {});
     }
     const user = Store.getUser() || { full_name: "Ananya Krishnan" };
-    const currentTheme = document.documentElement.getAttribute("data-theme") || "light";
 
     // Build Topnav only once if not already rendered
     const topnav = document.getElementById("shell-topnav");
@@ -666,32 +893,7 @@
             ${icon("M18 8a6 6 0 10-12 0c0 7-3 9-3 9h18s-3-2-3-9")}
             <span class="dot"></span>
           </button>
-
-          <!-- 3. Theme Toggle Button Next (Light/Dark Mode) -->
-          <button class="icon-btn theme-toggle-btn" id="theme-toggle-btn" aria-label="Toggle Theme" title="Toggle Light / Dark Mode">
-            <span class="theme-icon-sun" style="display:${currentTheme === 'dark' ? 'inline-flex' : 'none'};">${icon("M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z")}</span>
-            <span class="theme-icon-moon" style="display:${currentTheme === 'dark' ? 'none' : 'inline-flex'};">${icon("M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z")}</span>
-          </button>
         </div>`;
-
-      // Theme Toggle Handler
-      const themeBtn = document.getElementById("theme-toggle-btn");
-      if (themeBtn) {
-        themeBtn.addEventListener("click", () => {
-          const activeTheme = document.documentElement.getAttribute("data-theme") || "light";
-          const newTheme = activeTheme === "dark" ? "light" : "dark";
-          document.documentElement.setAttribute("data-theme", newTheme);
-          localStorage.setItem("voyager-theme", newTheme);
-
-          const sun = themeBtn.querySelector(".theme-icon-sun");
-          const moon = themeBtn.querySelector(".theme-icon-moon");
-          if (sun && moon) {
-            sun.style.display = newTheme === "dark" ? "inline-flex" : "none";
-            moon.style.display = newTheme === "dark" ? "none" : "inline-flex";
-          }
-        });
-      }
-
     }
 
     // Build the horizontal dropdown menu bar - created fresh each load, no
@@ -730,9 +932,19 @@
         e.preventDefault();
         try { await window.VoyagerAPI.post("/auth/logout"); } catch (_) {}
         Store.clear();
+        try { sessionStorage.removeItem(PERMS_KEY); } catch (_) {}
+        currentPerms = null;
         window.location.href = "index.html";
       });
     }
+
+    // Page guard - typing a page's URL directly is blocked too, not just
+    // hidden from the menu. Menu bar + Sign out stay usable.
+    if (!canView(activeKey)) {
+      renderAccessDenied();
+      return new Promise(() => {});
+    }
+    applyPagePermissions(activeKey);
 
     // Company Selector Setup (hidden <select> stays the source of truth;
     // the single current-flag button + its dropdown are what the user
@@ -770,13 +982,17 @@
       // company further below no matter what goes wrong here.
       try {
       if (!select.dataset.loaded) {
-        // Real companies (Company Master), so the flag/FY reflect whatever
-        // Country is actually set there. Uses the shared get() (long timeout)
-        // rather than a 2.5s fetch - live API calls can take a few seconds.
+        // Real companies (Company Master), not the old hardcoded mock list -
+        // so the flag/FY genuinely reflect whatever Country is actually set
+        // there, and a newly-added company shows up here automatically.
         let companies = [];
         try {
-          const rows = await get("/company-master/");
-          companies = (rows || []).map((c) => ({ id: c.id, name: c.company_name || c.name, country_code: countryCodeFromText(c.country) }));
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 2500);
+          const res = await fetch("http://localhost:8000/api/company-master/", { signal: controller.signal });
+          clearTimeout(timeoutId);
+          const rows = res.ok ? await res.json() : [];
+          companies = rows.map((c) => ({ id: c.id, name: c.company_name, country_code: countryCodeFromText(c.country) }));
         } catch (_) { companies = []; }
         if (!companies.length) companies = [{ id: 1, name: "Travel Agency", country_code: "IN" }];
 
@@ -990,5 +1206,244 @@
   setInterval(syncAllDateOverlays, 400);
   syncAllDateOverlays();
 
-  window.VoyagerShell = { init, navigateTo };
+  // ============================================================
+  // Project calendar - replaces the browser's own date picker on EVERY
+  // <input type="date"> in the app (pages, popups, SPA-loaded pages) with
+  // one consistent popup: prev/next arrows + Month/Year dropdowns in a
+  // primary-coloured header, weekday row, day grid. The input itself stays
+  // a real date input, so .value (yyyy-mm-dd), min/max, typing and the
+  // input/change events every page already listens to all work as before.
+  // Disabled or read-only (permission-locked) fields never open it.
+  // ============================================================
+  const CAL_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const CAL_ICON = "data:image/svg+xml," + encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3B6DB5" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>'
+  );
+  let calEl = null, calInput = null, calView = null; // calView = {year, month}
+
+  function ensureCalendarStyle() {
+    if (document.getElementById("vcal-style")) return;
+    const style = document.createElement("style");
+    style.id = "vcal-style";
+    style.textContent = `
+      input[type="date"]::-webkit-calendar-picker-indicator { display: none; }
+      input[type="date"] {
+        background-image: url("${CAL_ICON}") !important; background-repeat: no-repeat !important;
+        background-position: right 8px center !important; background-size: 15px 15px !important;
+        cursor: pointer;
+      }
+      input[type="date"]:disabled, input[type="date"][readonly] { cursor: default; }
+      .vcal {
+        position: fixed; z-index: 2147483600; width: 284px; background: #FFFFFF;
+        border: 1px solid var(--color-border, #E2E8F0); border-radius: 0;
+        box-shadow: 0 12px 32px rgba(15, 23, 42, 0.18); overflow: hidden;
+        font-family: inherit; user-select: none;
+      }
+      .vcal-head {
+        display: flex; align-items: center; gap: 6px; padding: 4px 6px;
+        background: var(--color-primary, #3B6DB5);
+      }
+      .vcal-nav {
+        width: 24px; height: 24px; flex-shrink: 0; border: none; background: transparent; color: #FFFFFF;
+        font-size: 18px; font-weight: 700; line-height: 1; cursor: pointer; border-radius: 0;
+      }
+      .vcal-nav:hover:not(:disabled) { background: rgba(255, 255, 255, 0.18); }
+      .vcal-nav:disabled { opacity: 0.35; cursor: default; }
+      .vcal-select {
+        flex: 1; min-width: 0; height: 24px; padding: 0 4px; border: 1px solid transparent; border-radius: 0;
+        background: #FFFFFF; color: var(--color-text-dark, #0F172A); font-size: 13px; font-weight: 600;
+        font-family: inherit; cursor: pointer;
+      }
+      .vcal-select:focus { outline: 2px solid rgba(255, 255, 255, 0.6); outline-offset: 0; }
+      .vcal-week, .vcal-grid { display: grid; grid-template-columns: repeat(7, 1fr); }
+      .vcal-week { background: var(--color-bg-subtle, #F1F5F9); padding: 3px 6px; }
+      .vcal-week span { text-align: center; font-size: 12px; font-weight: 700; color: var(--color-text-muted, #475569); }
+      .vcal-grid { padding: 6px; gap: 2px; }
+      .vcal-day {
+        height: 34px; border: none; background: transparent; border-radius: 0; cursor: pointer;
+        font-family: inherit; font-size: 13px; color: var(--color-text-dark, #0F172A);
+      }
+      .vcal-day.vcal-sun { color: var(--color-primary, #3B6DB5); font-weight: 600; }
+      .vcal-day:hover:not(:disabled) { background: var(--color-primary-tint, #F0F4FC); }
+      .vcal-day.vcal-today { background: var(--color-bg-subtle, #F1F5F9); font-weight: 700; }
+      .vcal-day.vcal-selected, .vcal-day.vcal-selected:hover { background: var(--color-primary, #3B6DB5); color: #FFFFFF; font-weight: 700; }
+      .vcal-day:disabled { color: #CBD5E1; cursor: default; background: transparent; }
+      .vcal-blank { height: 34px; }
+    `;
+    document.head.appendChild(style);
+  }
+  ensureCalendarStyle();
+
+  const pad2 = (n) => String(n).padStart(2, "0");
+  const toIso = (y, m, d) => `${y}-${pad2(m + 1)}-${pad2(d)}`;
+  function parseIso(s) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s || "");
+    return m ? { year: +m[1], month: +m[2] - 1, day: +m[3] } : null;
+  }
+
+  function calRange(input) {
+    const today = new Date();
+    const min = parseIso(input.min), max = parseIso(input.max);
+    return {
+      min, max,
+      minYear: min ? min.year : today.getFullYear() - 60,
+      maxYear: max ? max.year : today.getFullYear() + 20,
+    };
+  }
+
+  function renderCalendar() {
+    if (!calEl || !calInput) return;
+    const { year, month } = calView;
+    const range = calRange(calInput);
+    const selected = calInput.value;
+    const now = new Date();
+    const todayIso = toIso(now.getFullYear(), now.getMonth(), now.getDate());
+    const minIso = calInput.min || "", maxIso = calInput.max || "";
+
+    const years = [];
+    for (let y = range.minYear; y <= range.maxYear; y++) years.push(y);
+    if (!years.includes(year)) years.push(year), years.sort((a, b) => a - b);
+    const monthOpts = CAL_MONTHS.map((name, i) => {
+      const outOfRange = (range.min && year === range.min.year && i < range.min.month)
+        || (range.max && year === range.max.year && i > range.max.month);
+      return `<option value="${i}" ${i === month ? "selected" : ""} ${outOfRange ? "disabled" : ""}>${name}</option>`;
+    }).join("");
+    const yearOpts = years.map((y) => `<option value="${y}" ${y === year ? "selected" : ""}>${y}</option>`).join("");
+
+    const firstDow = new Date(year, month, 1).getDay();
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    let cells = "";
+    for (let i = 0; i < firstDow; i++) cells += `<span class="vcal-blank"></span>`;
+    for (let d = 1; d <= daysInMonth; d++) {
+      const iso = toIso(year, month, d);
+      const dow = (firstDow + d - 1) % 7;
+      const off = (minIso && iso < minIso) || (maxIso && iso > maxIso);
+      const cls = ["vcal-day", dow === 0 ? "vcal-sun" : "", iso === todayIso ? "vcal-today" : "", iso === selected ? "vcal-selected" : ""].join(" ");
+      cells += `<button type="button" class="${cls}" data-iso="${iso}" ${off ? "disabled" : ""}>${d}</button>`;
+    }
+
+    const prevOff = range.min && (year < range.min.year || (year === range.min.year && month <= range.min.month));
+    const nextOff = range.max && (year > range.max.year || (year === range.max.year && month >= range.max.month));
+    calEl.innerHTML = `
+      <div class="vcal-head">
+        <button type="button" class="vcal-nav" data-step="-1" ${prevOff ? "disabled" : ""} aria-label="Previous month">&#8249;</button>
+        <select class="vcal-select" data-part="month" aria-label="Month">${monthOpts}</select>
+        <select class="vcal-select" data-part="year" aria-label="Year">${yearOpts}</select>
+        <button type="button" class="vcal-nav" data-step="1" ${nextOff ? "disabled" : ""} aria-label="Next month">&#8250;</button>
+      </div>
+      <div class="vcal-week"><span>Su</span><span>Mo</span><span>Tu</span><span>We</span><span>Th</span><span>Fr</span><span>Sa</span></div>
+      <div class="vcal-grid">${cells}</div>`;
+  }
+
+  function positionCalendar() {
+    if (!calEl || !calInput) return;
+    if (!calInput.isConnected) { closeCalendar(); return; } // page swapped out under it
+    const r = calInput.getBoundingClientRect();
+    const w = calEl.offsetWidth, h = calEl.offsetHeight;
+    let top = r.bottom + 4;
+    if (top + h > window.innerHeight - 8 && r.top - h - 4 >= 8) top = r.top - h - 4;
+    let left = Math.min(r.left, window.innerWidth - w - 8);
+    calEl.style.top = `${Math.max(8, top)}px`;
+    calEl.style.left = `${Math.max(8, left)}px`;
+  }
+
+  function openCalendar(input) {
+    if (input.disabled || input.readOnly) return;
+    if (!calEl) {
+      calEl = document.createElement("div");
+      calEl.className = "vcal";
+      calEl.addEventListener("mousedown", (e) => {
+        // Keep focus on the date input (and the popup open), except when
+        // using the Month/Year dropdowns, which need focus themselves.
+        if (!e.target.closest("select")) e.preventDefault();
+      });
+      calEl.addEventListener("click", (e) => {
+        const step = e.target.closest(".vcal-nav");
+        if (step && !step.disabled) {
+          const d = new Date(calView.year, calView.month + Number(step.dataset.step), 1);
+          calView = { year: d.getFullYear(), month: d.getMonth() };
+          renderCalendar();
+          return;
+        }
+        const day = e.target.closest(".vcal-day");
+        if (day && !day.disabled) pickCalendarDate(day.dataset.iso);
+      });
+      calEl.addEventListener("change", (e) => {
+        const sel = e.target.closest(".vcal-select");
+        if (!sel) return;
+        if (sel.dataset.part === "month") calView.month = Number(sel.value);
+        else calView.year = Number(sel.value);
+        // A year whose allowed range doesn't include the current month
+        // snaps to the nearest allowed month.
+        const range = calRange(calInput);
+        if (range.min && calView.year === range.min.year && calView.month < range.min.month) calView.month = range.min.month;
+        if (range.max && calView.year === range.max.year && calView.month > range.max.month) calView.month = range.max.month;
+        renderCalendar();
+      });
+      document.body.appendChild(calEl);
+    }
+    calInput = input;
+    const current = parseIso(input.value) || parseIso(input.min && new Date().toISOString().slice(0, 10) < input.min ? input.min : "");
+    const now = new Date();
+    calView = current ? { year: current.year, month: current.month } : { year: now.getFullYear(), month: now.getMonth() };
+    calEl.style.display = "block";
+    renderCalendar();
+    positionCalendar();
+  }
+
+  function closeCalendar() {
+    if (calEl) calEl.style.display = "none";
+    calInput = null;
+  }
+
+  function pickCalendarDate(iso) {
+    const input = calInput;
+    if (!input) return;
+    input.value = iso;
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+    closeCalendar();
+  }
+
+  // Capture phase, so the browser's own picker never opens and page
+  // handlers further down still see their usual events afterwards.
+  document.addEventListener("mousedown", (e) => {
+    const input = e.target.closest && e.target.closest('input[type="date"]');
+    if (input) {
+      if (input.disabled || input.readOnly) return;
+      // No focus on click - focusing highlights the native day/month/year
+      // segment as a blue block behind the dd/mm/yyyy label. Keyboard
+      // users still Tab into the field and can type a date directly.
+      e.preventDefault();
+      if (calInput === input) closeCalendar();
+      else openCalendar(input);
+      return;
+    }
+    if (calEl && calInput && !calEl.contains(e.target)) closeCalendar();
+  }, true);
+  document.addEventListener("keydown", (e) => {
+    const input = e.target.closest && e.target.closest('input[type="date"]');
+    // Escape closes just the calendar - not the modal it sits in.
+    if (calInput && e.key === "Escape") { e.preventDefault(); e.stopImmediatePropagation(); closeCalendar(); return; }
+    if (input && !input.disabled && !input.readOnly && (e.key === " " || e.key === "F4" || (e.altKey && e.key === "ArrowDown"))) {
+      e.preventDefault();
+      openCalendar(input);
+    }
+    if (input && e.key === "Tab") closeCalendar();
+  }, true);
+  // Typing a date straight into the field keeps the open calendar in step.
+  document.addEventListener("input", (e) => {
+    if (calInput && e.target === calInput) {
+      const d = parseIso(calInput.value);
+      if (d) calView = { year: d.year, month: d.month };
+      renderCalendar();
+    }
+  }, true);
+  document.addEventListener("scroll", (e) => {
+    if (calEl && calInput && !calEl.contains(e.target)) positionCalendar();
+  }, true);
+  window.addEventListener("resize", () => { if (calInput) positionCalendar(); });
+
+  // can("add" | "edit" | "delete" | "view") for the page currently shown.
+  window.VoyagerShell = { init, navigateTo, can: (action) => !!pagePerm[action] };
 })(window);

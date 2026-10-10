@@ -32,6 +32,21 @@ def load_data(force=False):
             cnt = cursor.fetchone()[0]
             if cnt > 5 and not force:
                 print(f"[OK] Database already has {cnt} ledgers. Data is ready!")
+                # Ensure at least one Super Admin exists
+                try:
+                    cursor.execute("SELECT COUNT(*) FROM `AppUsers` WHERE `is_super_admin` = 1;")
+                    if cursor.fetchone()[0] == 0:
+                        from django.contrib.auth.hashers import make_password
+                        pwd_hash = make_password("Passw0rd!")
+                        cursor.execute("""
+                            INSERT INTO `AppUsers` (`full_name`, `email`, `role`, `branch_name`, `is_super_admin`, `is_active`, `password_hash`, `created_at`, `updated_at`)
+                            VALUES ('Ananya Krishnan', 'ananya.krishnan@travelagency.com', 'Administrator', 'Delhi HQ', 1, 1, %s, NOW(), NOW()),
+                                   ('Administrator', 'admin@travelagency.com', 'Super Admin', 'Delhi HQ', 1, 1, %s, NOW(), NOW())
+                            ON DUPLICATE KEY UPDATE `is_super_admin` = 1, `is_active` = 1, `password_hash` = VALUES(`password_hash`);
+                        """, [pwd_hash, pwd_hash])
+                        print("[OK] Seeded initial Super Admin users.")
+                except Exception as e:
+                    print(f"[INFO] AppUsers check: {e}")
                 return {"status": "already_loaded", "ledgers_count": cnt}
     except Exception as e:
         print(f"[INFO] Checking status: {e}")

@@ -9,9 +9,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
 <link href="assets/css/design-system.css" rel="stylesheet" />
 <link href="assets/css/app.css" rel="stylesheet" />
-<link href="assets/css/loader.css" rel="stylesheet" />
 </head><body>
-<script src="assets/js/loader.js?v=2"></script>
 <header class="app-topnav" id="shell-topnav"></header>
 <div class="app-body">
   <aside class="app-sidebar" id="shell-sidebar"></aside>
@@ -57,7 +55,6 @@
           </div>
           <div><label class="field-label">PAN No.</label><input class="form-control-custom" id="in_pan_no" placeholder="e.g. AAAAA0000A" /><div class="field-hint" id="in_pan_no_hint"></div></div>
           <div><label class="field-label">Maintain Balance Bill-by-Bill</label><input class="form-control-custom" id="in_bill_wise" placeholder="Yes / No" /></div>
-          <div><label class="field-label">Place of Supply</label><select class="form-control-custom" id="in_place_of_supply"></select></div>
         </div>
       </div>
 
@@ -102,13 +99,12 @@
           <div class="span-2"><label class="field-label">Address Line 2</label><input class="form-control-custom" id="cr_address_line2" /></div>
           <div><label class="field-label">City</label><input class="form-control-custom" id="cr_city" /></div>
           <div><label class="field-label">Pincode</label><input class="form-control-custom" id="cr_pincode" /></div>
-          <div><label class="field-label">State Name</label><input class="form-control-custom" id="cr_state_name" /></div>
+          <div><label class="field-label">State Name</label><select class="form-control-custom" id="cr_state_name"></select></div>
           <div><label class="field-label">GST No.</label><input class="form-control-custom" id="cr_gst_no" placeholder="e.g. 33AAAAA0000A1Z5" /><div class="field-hint" id="cr_gst_no_hint"></div></div>
           <div><label class="field-label">GST Type</label>
             <select class="form-control-custom" id="cr_gst_type"><option>Regular</option><option>Composition</option><option>Unregistered</option><option>SEZ</option></select>
           </div>
           <div><label class="field-label">PAN No.</label><input class="form-control-custom" id="cr_pan_no" placeholder="e.g. AAAAA0000A" /><div class="field-hint" id="cr_pan_no_hint"></div></div>
-          <div><label class="field-label">Place of Supply</label><select class="form-control-custom" id="cr_place_of_supply"></select></div>
         </div>
       </div>
 
@@ -164,9 +160,9 @@
 </div>
 <script src="assets/js/hardcode.js"></script>
 <script src="assets/js/mock-data.js"></script>
-<script src="assets/js/api.js"></script>
-<script src="assets/js/util.js"></script>
-<script src="assets/js/shell.js?v=13"></script>
+<script src="assets/js/api.js?v=3"></script>
+<script src="assets/js/util.js?v=2"></script>
+<script src="assets/js/shell.js?v=21"></script>
 <script src="assets/js/entry-common.js"></script>
-<script src="assets/js/page-ledger-entry.js"></script>
+<script src="assets/js/page-ledger-entry.js?v=3"></script>
 </body></html>

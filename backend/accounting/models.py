@@ -25,20 +25,21 @@ Django's migration history matches without re-running the DDL:
 from decimal import Decimal
 from django.db import models
 
-# Process-wide cache for TicketLine.computed_gst's per-(company, field_name)
-# Master-Mapping-ledger GST% lookup — without it, a Chart-of-Accounts/Cash-
-# Bank-Book balance recompute across every ticket in a company re-queries
-# the same handful of mappings once per line (twice, since compute_total()
-# also calls computed_gst), which is negligible against local MySQL but
-# times out gunicorn's worker against TiDB Cloud's network round-trip once
-# there are more than a few dozen tickets. Cleared from views.py whenever
-# Master Mapping or a mapped Ledger's own gst_percentage is edited.
-_gst_pct_cache = {}
-_field_gst_pct_cache = _gst_pct_cache  # the build's name for the same cache
-
+# Process-level cache for TicketLine.computed_gst's per-field GST% lookup
+# (see field_ledger_gst_pct below) - MasterMapping rarely changes (an
+# occasional admin edit) but computed_gst is read for every TicketLine on
+# every ticket, every time _compute_jv_lines/_ledger_balance_deltas runs,
+# which was re-querying the same 3 (company_id, field_name) mappings over
+# and over on any page that processes many tickets at once (was the
+# single biggest remaining cost on Chart of Accounts after the view-level
+# MasterMapping cache in _compute_jv_lines - that one only covers ITS OWN
+# lookup, not this separate one inside the model). Cleared by
+# master_mapping_save()/master_mapping_delete() in views.py on any write,
+# so an edited mapping is never served stale for longer than that.
+_field_gst_pct_cache = {}
 
 def clear_gst_pct_cache():
-    _gst_pct_cache.clear()
+    _field_gst_pct_cache.clear()
 
 
 class LedgerGroup(models.Model):
@@ -159,13 +160,14 @@ class Ledger(models.Model):
     maintain_balance_bill_wise = models.CharField(max_length=5, null=True, blank=True)  # "Yes" / "No"
     place_of_supply = models.CharField(max_length=60, null=True, blank=True)
 
-    # Credit terms — customer_type/credit_limit are Debtor-only (Customers
+    # Credit terms - customer_type/credit_limit are Debtor-only (Customers
     # page); credit_days applies to either side (Customers AND Suppliers
     # pages both show it).
     CUSTOMER_TYPE_CHOICES = [("RETAIL", "Retail"), ("CORPORATE", "Corporate"), ("AGENT", "Agent")]
     customer_type = models.CharField(max_length=20, choices=CUSTOMER_TYPE_CHOICES, null=True, blank=True)
     credit_limit = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True, default=0)
     credit_days = models.IntegerField(null=True, blank=True, default=0)
+
 
     # Debtor — India
     city = models.CharField(max_length=60, null=True, blank=True)
@@ -510,24 +512,24 @@ class TicketLine(models.Model):
         """
         company_id = self.ticket.company_id
 
+        # Cast to float - self.service_fee etc. are plain Python floats
+        # before this line has ever been saved (ticket_create/
+        # ticket_update build the instance from _safe_decimal() floats,
+        # not Decimals) but real Decimals once re-fetched from the DB
+        # (e.g. _compute_jv_lines/_ledger_balance_deltas iterating saved
+        # TicketLines) - mixing a Decimal ledger.gst_percentage with
+        # whichever this instance currently holds raises "unsupported
+        # operand type(s) for *: 'float'/'decimal.Decimal' and
+        # 'decimal.Decimal'/'float'" depending on which side it is, so
+        # every operand here is explicitly floated first.
         def field_ledger_gst_pct(field_name):
             cache_key = (company_id, field_name)
-            if cache_key not in _gst_pct_cache:
+            if cache_key not in _field_gst_pct_cache:
                 m = MasterMapping.objects.filter(
                     company_id=company_id, product_type="Airline", field_name=field_name
                 ).select_related("ledger").first()
-                # Cast to float - self.service_fee etc. are plain Python floats
-                # before this line has ever been saved (ticket_create/
-                # ticket_update build the instance from _safe_decimal() floats,
-                # not Decimals) but real Decimals once re-fetched from the DB
-                # (e.g. _compute_jv_lines/_ledger_balance_deltas iterating
-                # saved TicketLines) - mixing a Decimal ledger.gst_percentage
-                # with whichever this instance currently holds raises
-                # "unsupported operand type(s) for *: 'float'/'decimal.Decimal'
-                # and 'decimal.Decimal'/'float'" depending on which side it is,
-                # so every operand here is explicitly floated first.
-                _gst_pct_cache[cache_key] = float(m.ledger.gst_percentage) if m and m.ledger_id else 0.0
-            return _gst_pct_cache[cache_key]
+                _field_gst_pct_cache[cache_key] = float(m.ledger.gst_percentage) if m and m.ledger_id else 0.0
+            return _field_gst_pct_cache[cache_key]
 
         return (
             float(self.service_fee) * field_ledger_gst_pct("Service Fee A/c") / 100
@@ -851,12 +853,12 @@ class RescheduleAirlineTicketLine(models.Model):
 
         def field_ledger_gst_pct(field_name):
             cache_key = (company_id, field_name)
-            if cache_key not in _gst_pct_cache:
+            if cache_key not in _field_gst_pct_cache:
                 m = MasterMapping.objects.filter(
                     company_id=company_id, product_type="Airline", field_name=field_name
                 ).select_related("ledger").first()
-                _gst_pct_cache[cache_key] = float(m.ledger.gst_percentage) if m and m.ledger_id else 0.0
-            return _gst_pct_cache[cache_key]
+                _field_gst_pct_cache[cache_key] = float(m.ledger.gst_percentage) if m and m.ledger_id else 0.0
+            return _field_gst_pct_cache[cache_key]
 
         return (
             float(self.service_fee) * field_ledger_gst_pct("Service Fee A/c") / 100
@@ -1084,6 +1086,10 @@ class CancellationAirlineTicketLine(models.Model):
     cust_ssr_markup_reversal = models.DecimalField(max_digits=14, decimal_places=2, default=0, db_default=0)
     supp_markup_reversal = models.DecimalField(max_digits=14, decimal_places=2, default=0, db_default=0)
     supp_addl_markup_reversal = models.DecimalField(max_digits=14, decimal_places=2, default=0, db_default=0)
+    # Locked Customer/Supplier TDS carried from the booking/reschedule chain
+    # (see computed_tds). NULL = no override, TDS is Amount x TDS %.
+    tds_amount_override = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
+    supp_tds_amount_override = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
 
     total_billed = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     status = models.CharField(max_length=15, choices=TicketLine.STATUS_CHOICES, default="ISSUED")
@@ -1144,6 +1150,11 @@ class CancellationAirlineTicketLine(models.Model):
 
     @property
     def computed_tds(self):
+        # A chained (rescheduled) ticket's TDS is the sum of every level's own
+        # TDS - no single rate produces it, so tds_per is 0 and the real
+        # amount is stored as-is (page-ticket-entry.js tds_amount_override).
+        if self.tds_amount_override is not None:
+            return self.tds_amount_override
         return self.computed_discount * (self.tds_per / 100)
 
     @property
@@ -1183,6 +1194,9 @@ class CancellationAirlineTicketLine(models.Model):
 
     @property
     def computed_supp_tds(self):
+        # Same as computed_tds above, for Supplier Commission's TDS.
+        if self.supp_tds_amount_override is not None:
+            return self.supp_tds_amount_override
         return self.computed_supp_commission * (self.supp_tds_per / 100)
 
     @property
@@ -1657,7 +1671,6 @@ class CompanyMaster(models.Model):
     logo_base64 = models.TextField(null=True, blank=True)
     seal_base64 = models.TextField(null=True, blank=True)
 
-
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -1669,3 +1682,96 @@ class CompanyMaster(models.Model):
 
     def __str__(self):
         return self.company_name
+
+
+class AppUser(models.Model):
+    """
+    User Management page (user-management.html) - one row per system user.
+    No login/session system exists yet anywhere in this project (see
+    page-user-management.js's own docstring) - this table only stores the
+    user + their per-menu access flags (UserMenuAccess below) for the
+    Super Admin to manage; it is not wired into any authentication flow.
+    """
+    full_name = models.CharField(max_length=150)
+    email = models.EmailField(max_length=200)
+    role = models.CharField(max_length=50, default="User")
+    branch_name = models.CharField(max_length=100, null=True, blank=True)
+    # Django's own PBKDF2 hash (django.contrib.auth.hashers), never plain text.
+    password_hash = models.CharField(max_length=256, null=True, blank=True)
+    # Bypasses every menu access check and always sees every menu, including
+    # Control Panel > User Access - distinct from `role`, which is just a
+    # free-text label shown in the grid (e.g. "Accountant", "Travel Desk").
+    is_super_admin = models.BooleanField(default=False)
+    is_active = models.BooleanField(default=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "AppUsers"
+        constraints = [
+            models.UniqueConstraint(fields=["email"], name="uq_app_user_email")
+        ]
+
+    def __str__(self):
+        return self.full_name
+
+
+class MenuMaster(models.Model):
+    """
+    One row per menu item a Super Admin can grant access to - seeded from
+    hardcode.js's NAV_SECTIONS `key`s, COMPLETED menus only (see
+    page-user-management.js's own notes on which keys are seeded).
+    """
+    MODULE_CHOICES = [
+        ("Masters", "Masters"), ("Transactions", "Transactions"),
+        ("Reports", "Reports"), ("Control Panel", "Control Panel"),
+    ]
+
+    menu_key = models.CharField(max_length=60)
+    title = models.CharField(max_length=100)
+    parent_key = models.CharField(max_length=60, null=True, blank=True)
+    module = models.CharField(max_length=20, choices=MODULE_CHOICES)
+    sort_order = models.PositiveIntegerField(default=0)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        db_table = "MenuMaster"
+        constraints = [
+            models.UniqueConstraint(fields=["menu_key"], name="uq_menu_master_key")
+        ]
+        ordering = ["module", "sort_order"]
+
+    def __str__(self):
+        return self.title
+
+
+class UserMenuAccess(models.Model):
+    """One row per (user, menu) the Super Admin has explicitly set flags for."""
+
+    user = models.ForeignKey(AppUser, on_delete=models.CASCADE, related_name="menu_access", db_column="user_id")
+    menu = models.ForeignKey(
+        MenuMaster, on_delete=models.CASCADE, to_field="menu_key",
+        related_name="user_access", db_column="menu_key",
+    )
+    can_view = models.BooleanField(default=False)
+    can_add = models.BooleanField(default=False)
+    can_edit = models.BooleanField(default=False)
+    can_delete = models.BooleanField(default=False)
+    created_by = models.ForeignKey(
+        AppUser, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="granted_accesses", db_column="created_by_id",
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "UserMenuAccess"
+        constraints = [
+            models.UniqueConstraint(fields=["user", "menu"], name="uq_user_menu_access")
+        ]
+        indexes = [models.Index(fields=["user"])]
+
+    def __str__(self):
+        return f"{self.user_id} -> {self.menu_id}"

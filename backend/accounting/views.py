@@ -1,3 +1,5 @@
+import hmac
+import os
 """
 Voyager ERP — Ledger Groups API
 -----------------------------------------------------------------
@@ -5,10 +7,8 @@ This replaces the hardcoded COA_DEFS array that used to live in the
 frontend's mock-data.js. The frontend now calls GET /api/ledger-groups/
 and gets these rows straight from SQL Server instead.
 """
-import hmac
 import json
 import math
-import os
 import re
 from datetime import datetime, date, timedelta
 from django.http import JsonResponse, HttpResponseNotAllowed
@@ -16,10 +16,12 @@ from django.views.decorators.csrf import csrf_exempt
 from django.forms.models import model_to_dict
 from django.db import transaction, IntegrityError
 from django.db.models import ProtectedError, Q, Prefetch
+from django.contrib.auth.hashers import make_password, check_password
 
 from .models import LedgerGroup, Ledger, Ticket, TicketLine, Voucher, JournalVoucher, VoucherType, SupplierCommissionRule, MasterMapping, FOPMaster, PGMaster, PGMasterHistory, CompanyMaster, RescheduleAirlineTicket, RescheduleAirlineTicketLine, CancellationAirlineTicket, CancellationAirlineTicketLine, _field_gst_pct_cache
 from .jv_hardcode import JV_LINE_MAP
 from . import sp_client
+from . import permissions
 
 
 def ledger_groups_list(request):
@@ -530,6 +532,13 @@ def _ledger_balance_deltas(company_id, as_of_date=None, from_date=None):
         for ledger_id, debit, credit in _reschedule_pg_receipt_lines(resched_proxy, lines):
             add(ledger_id, debit, credit)
 
+    # Cancellations - their own JV (Main + FOP leg), same live-recompute
+    # convention. Feeds Trial Balance, Chart of Accounts, Cash & Bank Book
+    # and Profit and Loss through this one function.
+    for entry in _cancellation_report_entries(company_id, jv_mapping_cache, jv_company_state, from_date=from_date, to_date=as_of_date):
+        for a in entry["combined"]:
+            add(a.get("ledger_id"), a.get("debit"), a.get("credit"))
+
     return deltas
 
 
@@ -597,6 +606,21 @@ def _ledger_transactions(company_id, ledger, from_date=None, to_date=None):
     company = sp_client.company_master_get(company_id)
     txns = []
 
+    def opposite_ledger(rows):
+        """
+        Particulars = the first OPPOSITE-side ledger in this entry's own JV
+        order: this ledger's first row is Debit -> the first Credit ledger;
+        Credit -> the first Debit ledger. None if there isn't one.
+        """
+        amt = lambda r, side: float(r.get(side) or 0)
+        mine = next((r for r in rows if r.get("ledger_id") == ledger_id and (amt(r, "debit") or amt(r, "credit"))), None)
+        if not mine:
+            return None
+        opposite_side = "credit" if amt(mine, "debit") > 0 else "debit"
+        other = next((r for r in rows if r.get("ledger_id") != ledger_id and amt(r, opposite_side) > 0
+                      and (r.get("ledger_name") or ledger_names.get(r.get("ledger_id")))), None)
+        return (other.get("ledger_name") or ledger_names.get(other.get("ledger_id"))) if other else None
+
     # Ascending by id, matching the plain (unordered) ORM queryset's
     # implicit insertion-order this replaced - txns.sort() below is a
     # stable sort keyed only by date, so ties need this same tie-break
@@ -617,7 +641,7 @@ def _ledger_transactions(company_id, ledger, from_date=None, to_date=None):
         txns.append({
             "date": voucher_date.isoformat() if voucher_date else None,
             "voucher_type": v["voucher_type"], "voucher_no": v["voucher_no"] or "-",
-            "particulars": v["narration"] or ", ".join(others) or "-",
+            "particulars": opposite_ledger(lines) or v["narration"] or ", ".join(others) or "-",
             "s_pnr": "-", "air_pnr": "-", "ticket_no": "-",
             "opposite": ", ".join(others) or "-", "debit": debit, "credit": credit,
             "ticket_id": None, "reschedule_ticket_id": None,
@@ -665,8 +689,8 @@ def _ledger_transactions(company_id, ledger, from_date=None, to_date=None):
         particulars = " - ".join(x for x in [", ".join(airline_names), header["ticket_office_id"]] if x) or "-"
         txns.append({
             "date": header["invoice_date"].isoformat() if header["invoice_date"] else None,
-            "voucher_type": "Tax Invoice", "voucher_no": header["voucher_no"] or header["invoice_number"],
-            "particulars": particulars,
+            "voucher_type": "Tax Invoice", "voucher_no": header["invoice_number"] or header["voucher_no"],
+            "particulars": opposite_ledger(combined) or particulars,
             "s_pnr": header["booking_reference"] or "-", "air_pnr": header["airline_pnr"] or "-",
             "ticket_no": ", ".join(ticket_nos) or "-",
             "opposite": ", ".join(others) or "-", "debit": debit, "credit": credit,
@@ -719,12 +743,40 @@ def _ledger_transactions(company_id, ledger, from_date=None, to_date=None):
         particulars = " - ".join(x for x in [", ".join(airline_names), header["ticket_office_id"]] if x) or "-"
         txns.append({
             "date": header["invoice_date"].isoformat() if header["invoice_date"] else None,
-            "voucher_type": "Tax Invoice (Reschedule)", "voucher_no": header["voucher_no"] or header["invoice_number"],
-            "particulars": particulars,
+            "voucher_type": "Tax Invoice (Reschedule)", "voucher_no": header["invoice_number"] or header["voucher_no"],
+            "particulars": opposite_ledger(combined) or particulars,
             "s_pnr": header["booking_reference"] or "-", "air_pnr": header["airline_pnr"] or "-",
             "ticket_no": ", ".join(ticket_nos) or "-",
             "opposite": ", ".join(others) or "-", "debit": debit, "credit": credit,
             "ticket_id": None, "reschedule_ticket_id": header["reschedule_ticket_id"],
+        })
+
+    # Cancellations - their own Credit Note JV (ALC-n), Main + FOP leg.
+    # Rows carry cancellation_ticket_id so the frontend links to
+    # ticket-entry.html?cancellation_saved_id=...
+    for entry in _cancellation_report_entries(company_id, jv_mapping_cache, jv_company_state, from_date=from_date, to_date=to_date):
+        v, ct, lines = entry["voucher"], entry["ct"], entry["lines"]
+        combined = [{**a, "ledger_name": a.get("ledger_name") or ledger_names.get(a.get("ledger_id"), "-")} for a in entry["combined"]]
+        mine = [a for a in combined if a.get("ledger_id") == ledger_id]
+        if not mine:
+            continue
+        debit = round(sum(float(a.get("debit") or 0) for a in mine), 2)
+        credit = round(sum(float(a.get("credit") or 0) for a in mine), 2)
+        if debit == 0 and credit == 0:
+            continue
+        others = sorted({a.get("ledger_name") for a in combined if a.get("ledger_id") != ledger_id and a.get("ledger_name")})
+        airline_names = sorted({n.strip() for l in lines for n in (l.airline_name or "").split(",") if n.strip()})
+        ticket_nos = sorted({l.ticket_no for l in lines if l.ticket_no})
+        office_ids = sorted({l.office_id for l in lines if l.office_id})
+        particulars = " - ".join(x for x in [", ".join(airline_names), ", ".join(office_ids)] if x) or "-"
+        txns.append({
+            "date": v.voucher_date.isoformat() if v.voucher_date else None,
+            "voucher_type": ct.invoice_type or "Credit Note (Cancellation)", "voucher_no": ct.invoice_number or v.voucher_no,
+            "particulars": opposite_ledger(combined) or particulars,
+            "s_pnr": ct.cancellation_reference or "-", "air_pnr": ct.airline_pnr or "-",
+            "ticket_no": ", ".join(ticket_nos) or "-",
+            "opposite": ", ".join(others) or "-", "debit": debit, "credit": credit,
+            "ticket_id": None, "reschedule_ticket_id": None, "cancellation_ticket_id": ct.id,
         })
 
     txns.sort(key=lambda x: x["date"] or "")
@@ -1068,6 +1120,25 @@ def day_book_report(request):
             "ticket_id": None, "reschedule_ticket_id": rt.id if rt else None,
         })
 
+    # Cancellations' own Credit Note JV (ALC-n). The customer is CREDITED
+    # (refund), so the amount shows under Credit only - the mirror of the
+    # Debit-only Booking/Reschedule rows above. Clickable through to
+    # ticket-entry.html?cancellation_saved_id=... (cancellation_ticket_id).
+    for entry in _cancellation_report_entries(company_id, mapping_cache, company_state, from_date=from_date, to_date=to_date):
+        v, ct, lines = entry["voucher"], entry["ct"], entry["lines"]
+        customer_row = next((a for a in entry["accounts"] if a.get("role") == "customer"), None)
+        customer_amount = (customer_row.get("credit") or customer_row.get("debit") or 0.0) if customer_row else 0.0
+        txns.append({
+            "date": v.voucher_date.isoformat() if v.voucher_date else None,
+            "particulars": ct.customer.name if ct.customer else "-",
+            "voucher_type": "Credit Note",
+            "s_pnr": ct.cancellation_reference or "-", "air_pnr": ct.airline_pnr or "-",
+            "ticket_no": ", ".join(sorted({l.ticket_no for l in lines if l.ticket_no})) or "-",
+            "voucher_no": v.voucher_no or "-",
+            "debit": 0.0, "credit": customer_amount,
+            "ticket_id": None, "reschedule_ticket_id": None, "cancellation_ticket_id": ct.id,
+        })
+
     txns.sort(key=lambda x: x["date"] or "")
     total_debit = round(sum(tx["debit"] for tx in txns), 2)
     total_credit = round(sum(tx["credit"] for tx in txns), 2)
@@ -1283,6 +1354,107 @@ def trial_balance_report(request):
     })
 
 
+def balance_sheet_report(request):
+    """
+    GET /api/balance-sheet/?company_id=1&to_date=2026-10-09[&group_id=7]
+    Tally-style Balance Sheet as at to_date (closing balances - opening
+    balance plus every posted transaction up to that date, same figures as
+    the Trial Balance):
+
+    Liabilities (left) - every primary group under the Liabilities root
+    (Capital Account, Loans, Current Liabilities, ...), Credit-positive.
+    Assets (right) - every primary group under the Assets root (Fixed
+    Assets, Investments, Current Assets, ...), Debit-positive. Each group
+    carries its own immediate children (sub-groups + ledgers) for the
+    indented detail column. A negative figure means the group/ledger sits
+    on the "wrong" side (shown as (-) on the page, like Tally).
+
+    Profit & Loss A/c - net of every Income/Expense ledger up to to_date
+    (Current Period; there's no year-end closing in this app yet, so
+    Opening Balance is 0): a profit sits on the Liabilities side, a loss on
+    the Assets side. "Difference in opening balances" balances the two
+    totals, on whichever side is short.
+
+    group_id given -> zoom into that group (sub-groups/ledgers with closing
+    Debit/Credit) - the same breakdown the Trial Balance drill-down uses.
+    """
+    if request.method != "GET":
+        return HttpResponseNotAllowed(["GET"])
+    if request.GET.get("group_id"):
+        return trial_balance_report(request)
+
+    company_id = request.GET.get("company_id")
+    if not company_id:
+        return JsonResponse({"error": "company_id is required"}, status=400)
+    to_date = request.GET.get("to_date")
+    deltas = _ledger_balance_deltas(company_id, as_of_date=to_date)
+
+    all_groups = sp_client.ledger_group_list(company_id)
+    children_by_parent = {}
+    for g in all_groups:
+        children_by_parent.setdefault(g["parent_id"], []).append(g)
+    ledgers_by_group = {}
+    for l in sp_client.ledger_list(company_id):
+        ledgers_by_group.setdefault(l["parent_id"], []).append(l)
+
+    def ledger_balance(l):
+        return float(l["balance"]) + deltas.get(l["id"], 0.0)  # Debit +, Credit -
+
+    def rollup(gid):
+        """(signed total, ledger count) for everything under this group, however deep."""
+        total = sum(ledger_balance(l) for l in ledgers_by_group.get(gid, []))
+        count = len(ledgers_by_group.get(gid, []))
+        for child in children_by_parent.get(gid, []):
+            t, c = rollup(child["id"])
+            total += t
+            count += c
+        return total, count
+
+    def side_rows(root_type, sign):
+        rows = []
+        for root in (g for g in all_groups if g["parent_id"] is None and (g.get("account_type") or "").upper() == root_type):
+            for g in sorted(children_by_parent.get(root["id"], []), key=lambda g: g["name"]):
+                total, count = rollup(g["id"])
+                if count == 0:
+                    continue
+                children = []
+                for c in sorted(children_by_parent.get(g["id"], []), key=lambda c: c["name"]):
+                    c_total, c_count = rollup(c["id"])
+                    if c_count:
+                        children.append({"type": "group", "id": c["id"], "name": c["name"], "amount": round(sign * c_total, 2)})
+                for l in sorted(ledgers_by_group.get(g["id"], []), key=lambda l: l["name"]):
+                    children.append({"type": "ledger", "id": l["id"], "name": l["name"], "amount": round(sign * ledger_balance(l), 2)})
+                rows.append({"type": "group", "id": g["id"], "name": g["name"], "amount": round(sign * total, 2), "children": children})
+        return rows
+
+    liabilities = side_rows("LIABILITY", -1)
+    assets = side_rows("ASSET", 1)
+
+    pl_signed = 0.0
+    for root in (g for g in all_groups if g["parent_id"] is None and (g.get("account_type") or "").upper() in ("INCOME", "EXPENSE")):
+        pl_signed += rollup(root["id"])[0]
+    net_profit = round(-pl_signed, 2)  # Credit-heavy income/expense = profit
+    if net_profit:
+        pl_row = {"type": "pl", "name": "Profit & Loss A/c", "amount": abs(net_profit), "children": [
+            {"type": "info", "name": "Opening Balance", "amount": 0.0},
+            {"type": "info", "name": "Current Period", "amount": abs(net_profit)},
+        ]}
+        (liabilities if net_profit > 0 else assets).append(pl_row)
+
+    liab_total = round(sum(r["amount"] for r in liabilities), 2)
+    asset_total = round(sum(r["amount"] for r in assets), 2)
+    diff = round(liab_total - asset_total, 2)
+    if diff:
+        (assets if diff > 0 else liabilities).append(
+            {"type": "diff", "name": "Difference in opening balances", "amount": abs(diff), "children": []})
+
+    return JsonResponse({
+        "to_date": to_date,
+        "liabilities": liabilities, "assets": assets,
+        "total": round(max(liab_total, asset_total), 2),
+    })
+
+
 # Real Ledger Group names this company's seed data always creates (see
 # groups.html's own seeding) - a Trading & Profit and Loss Account is
 # built from exactly these 6, same convention real Tally uses: Purchase
@@ -1373,7 +1545,50 @@ def profit_loss_report(request):
                 continue
             items.append({"ledger_id": l.id, "name": l.name, "amount": amount})
             total += amount
-        return {"name": group.name, "items": items, "total": round(total, 2)}
+        return {"id": group.id, "name": group.name, "items": items, "total": round(total, 2)}
+
+    # Zoom-in (Trial-Balance-style drill-down): ?group_id= returns that
+    # group's own immediate children (sub-groups + ledgers) with their
+    # PERIOD movement as Debit/Credit columns - the same period figures the
+    # main account is built from. Clicking further is another request; a
+    # ledger opens its own monthly statement on the frontend.
+    group_id = request.GET.get("group_id")
+    if group_id:
+        groups_by_id = {g.id: g for g in all_groups}
+        group = groups_by_id.get(int(group_id))
+        if not group:
+            return JsonResponse({"error": "Group not found."}, status=404)
+
+        def movement(gid):
+            return sum(deltas.get(l.id, 0.0) for l in ledgers_under(gid))
+
+        rows, total_debit, total_credit = [], 0.0, 0.0
+        for child in sorted(children_by_parent.get(group.id, []), key=lambda g: g.name):
+            if not ledgers_under(child.id):
+                continue
+            debit, credit = _trial_balance_dr_cr(movement(child.id))
+            rows.append({"type": "group", "id": child.id, "name": child.name, "debit": debit, "credit": credit})
+            total_debit += debit
+            total_credit += credit
+        for l in sorted(ledgers_by_group.get(group.id, []), key=lambda l: l.name):
+            debit, credit = _trial_balance_dr_cr(deltas.get(l.id, 0.0))
+            rows.append({"type": "ledger", "id": l.id, "name": l.name, "debit": debit, "credit": credit})
+            total_debit += debit
+            total_credit += credit
+
+        pl_group_names = set(PROFIT_LOSS_GROUP_NAMES.values())
+        parent = groups_by_id.get(group.parent_id)
+        if group.name in pl_group_names or parent is None or parent.parent_id is None:
+            back = {"group_id": None, "label": "Profit and Loss"}
+        else:
+            back = {"group_id": parent.id, "label": parent.name}
+        g_debit, g_credit = _trial_balance_dr_cr(movement(group.id))
+        return JsonResponse({
+            "from_date": from_date, "to_date": to_date,
+            "context": {"id": group.id, "name": group.name, "debit": g_debit, "credit": g_credit},
+            "back": back, "rows": rows,
+            "total_debit": round(total_debit, 2), "total_credit": round(total_credit, 2),
+        })
 
     purchase = group_section(PROFIT_LOSS_GROUP_NAMES["purchase"], "debit")
     direct_expense = group_section(PROFIT_LOSS_GROUP_NAMES["direct_expense"], "debit")
@@ -1619,9 +1834,17 @@ def _compute_jv_lines(ticket, lines, mapping_cache=None, company_state=None):
     same_state = bool(company_state) and bool(customer_state) and company_state == customer_state
     OUTPUT_GST_KEYS = {"gst", "supp_gst"}
 
+    # Input GST (Debit) - Supplier State vs Company State, per supplier.
+    gst_by_supplier = {}
+    for l in lines:
+        gst_by_supplier[l.supplier_id] = gst_by_supplier.get(l.supplier_id, 0.0) + float(l.computed_supp_gst)
+
     accounts = customer_rows("Debit", customer_total) + supplier_rows("Credit")
     output_gst_emitted = False
     for dr_cr, masters_category, field_name, amount_key in JV_LINE_MAP:
+        if _is_input_gst_row(dr_cr, masters_category, field_name, amount_key):
+            accounts.extend(_input_gst_rows(mapped_row, gst_by_supplier, company_state, mapping_cache))
+            continue
         if dr_cr == "Credit" and masters_category == "GST and TDS" and field_name == "Output IGST A/c" and amount_key in OUTPUT_GST_KEYS:
             if not output_gst_emitted:
                 output_gst_emitted = True
@@ -1662,28 +1885,56 @@ def _jv_prep(company_id):
         cache_key = (company_id, m["field_name"])
         if cache_key not in _field_gst_pct_cache:
             _field_gst_pct_cache[cache_key] = float(m["ledger_gst_percentage"] or 0)
-    # Live-only speed-up: company_id arrives from the query string as "1",
-    # but mapped_ledger()/computed_gst look keys up by ticket.company_id (1),
-    # so the entries above never hit and every field fell back to its own
-    # MasterMapping query (~25 per report - minutes on TiDB). Also seed the
-    # int-keyed entries, with exactly the values those fallback queries
-    # return: the mapped Ledger's current name, and its GST% (0 if unmapped).
-    if str(company_id).isdigit():
-        company_key = int(company_id)
-        mapped = [m for m in mappings if m["ledger_id"] is not None]
-        names = dict(Ledger.objects.filter(id__in={m["ledger_id"] for m in mapped}).values_list("id", "name"))
-        for m in mapped:
-            if m["ledger_id"] in names:
-                mapping_cache[(company_key, m["masters_category"], m["field_name"])] = (m["ledger_id"], names[m["ledger_id"]])
-        per_field = {}
-        for m in mappings:
-            per_field.setdefault(m["field_name"], []).append(m)
-        for field_name, rows in per_field.items():
-            if len(rows) == 1 and (company_key, field_name) not in _field_gst_pct_cache:
-                _field_gst_pct_cache[(company_key, field_name)] = float(rows[0]["ledger_gst_percentage"] or 0)
     company = sp_client.company_master_get(company_id)
     company_state = ((company or {}).get("state") or "").strip().lower()
     return mapping_cache, company_state
+
+
+def _input_gst_rows(mapped_row, gst_by_supplier, company_state, mapping_cache):
+    """
+    Input GST (Debit) - same concept as Output GST, but driven by each
+    SUPPLIER Ledger's own State instead of the customer's: supplier in the
+    same State as Company Master = intra-state purchase, split into Input
+    CGST A/c + Input SGST A/c; different (or no) State = Input IGST A/c.
+    A ticket can carry a different supplier per passenger, so each
+    supplier's own GST is classified on its own State, then summed.
+
+    gst_by_supplier: {supplier_ledger_id (or None): supplier GST amount}.
+    Supplier States are cached in the shared mapping_cache (keyed
+    ("__supplier_state__", ledger_id)), so a report looping over many
+    tickets only looks each supplier up once per request.
+    """
+    ids = [sid for sid in gst_by_supplier if sid]
+    missing = [sid for sid in ids if ("__supplier_state__", sid) not in mapping_cache]
+    if missing:
+        for lid, state in Ledger.objects.filter(id__in=missing).values_list("id", "state_name"):
+            mapping_cache[("__supplier_state__", lid)] = (state or "").strip().lower()
+        for sid in missing:
+            mapping_cache.setdefault(("__supplier_state__", sid), "")
+
+    intra = inter = 0.0
+    for sid, amount in gst_by_supplier.items():
+        state = mapping_cache.get(("__supplier_state__", sid), "") if sid else ""
+        if company_state and state and state == company_state:
+            intra += amount
+        else:
+            inter += amount
+    intra, inter = round(intra, 2), round(inter, 2)
+
+    rows = []
+    if intra:
+        cgst = round(intra / 2, 2)
+        rows.append(mapped_row("Debit", "GST and TDS", "Input CGST A/c", cgst))
+        # SGST takes the remainder so CGST + SGST is exactly the GST amount
+        # (an odd paisa never unbalances the JV).
+        rows.append(mapped_row("Debit", "GST and TDS", "Input SGST A/c", round(intra - cgst, 2)))
+    if inter or not intra:
+        rows.append(mapped_row("Debit", "GST and TDS", "Input IGST A/c", inter))
+    return rows
+
+
+def _is_input_gst_row(dr_cr, masters_category, field_name, amount_key):
+    return dr_cr == "Debit" and masters_category == "GST and TDS" and field_name == "Input IGST A/c" and amount_key == "supp_gst"
 
 
 def _build_ticket_lines(company_id, customer_row, lines_in):
@@ -2698,9 +2949,17 @@ def _compute_reschedule_jv_lines(resched_ticket, lines, mapping_cache=None, comp
     same_state = bool(company_state) and bool(customer_state) and company_state == customer_state
     OUTPUT_GST_KEYS = {"gst", "supp_gst"}
 
+    # Input GST (Debit) - Supplier State vs Company State, per supplier.
+    gst_by_supplier = {}
+    for l in lines:
+        gst_by_supplier[l.supplier_id] = gst_by_supplier.get(l.supplier_id, 0.0) + float(l.computed_supp_gst)
+
     accounts = customer_rows("Debit", customer_total) + supplier_rows("Credit")
     output_gst_emitted = False
     for dr_cr, masters_category, field_name, amount_key in RESCHED_JV_LINE_MAP:
+        if _is_input_gst_row(dr_cr, masters_category, field_name, amount_key):
+            accounts.extend(_input_gst_rows(mapped_row, gst_by_supplier, company_state, mapping_cache))
+            continue
         if dr_cr == "Credit" and masters_category == "GST and TDS" and field_name == "Output IGST A/c" and amount_key in OUTPUT_GST_KEYS:
             if not output_gst_emitted:
                 output_gst_emitted = True
@@ -3385,6 +3644,18 @@ CANCEL_JV_LINE_FIELDS = [
     "supp_markup_reversal", "supp_addl_markup_reversal",
 ]
 
+# Locked Customer/Supplier TDS amounts carried from the booking/reschedule
+# chain (page-ticket-entry.js sets these on the passenger) - None means "no
+# override" (TDS = Amount x TDS %), so they're kept None, never coerced to 0.
+CANCEL_TDS_OVERRIDE_FIELDS = ["tds_amount_override", "supp_tds_amount_override"]
+
+
+def _cancel_tds_overrides(line_in):
+    return {
+        f: (None if line_in.get(f) in (None, "") else _safe_decimal(line_in.get(f)))
+        for f in CANCEL_TDS_OVERRIDE_FIELDS
+    }
+
 
 # ============================================================
 # Cancellation Journal Voucher (2026-10-07 explicit spec) - a SEPARATE JV
@@ -3538,9 +3809,9 @@ def _compute_cancellation_jv_lines(cancel_ticket, lines, mapping_cache=None, com
     other row resolves via Master Mapping (product_type "Airline") through
     the same mapping_cache convention (seeded by _jv_prep).
 
-    company_state is accepted only for signature parity with the Booking/
-    Reschedule functions - the spec posts both Output IGST rows literally,
-    so no same-state CGST/SGST split is applied here.
+    company_state drives row 9's Input GST split (Supplier State vs Company
+    State, see _input_gst_rows) - the spec posts both Output IGST rows
+    literally, so no same-state CGST/SGST split is applied to Output here.
 
     Totals here are the MAIN portion only; the caller adds
     _cancellation_fop_payment_lines' leg on top before the balance check.
@@ -3586,12 +3857,26 @@ def _compute_cancellation_jv_lines(cancel_ticket, lines, mapping_cache=None, com
         accounts.append({"role": "supplier", "ledger_id": ledger.id if ledger else None,
                          "ledger_name": ledger.name if ledger else "— (no supplier selected)",
                          "debit": debit, "credit": credit})
+    def mapped_row(dr_cr, masters_category, field_name, amount):
+        debit, credit = dr_cr_amounts(dr_cr, amount)
+        ledger_id, ledger_name = mapped_ledger(masters_category, field_name)
+        return {"role": field_name, "ledger_id": ledger_id, "ledger_name": ledger_name, "debit": debit, "credit": credit}
+
+    # Row 9 Input GST (Debit) - Supplier State vs Company State, per supplier
+    # (same concept as Booking/Reschedule). The Output IGST rows (15, 27)
+    # stay literal, per the Cancellation spec.
+    if company_state is None:
+        company_state = (CompanyMaster.objects.filter(id=cancel_ticket.company_id).values_list("state", flat=True).first() or "").strip().lower()
+    gst_by_supplier = {}
+    for l, a in zip(lines, per_line):
+        gst_by_supplier[l.supplier_id] = gst_by_supplier.get(l.supplier_id, 0.0) + a["supp_gst"]
+
     # Rows 3-31
     for dr_cr, masters_category, field_name, amount_key in CANCEL_JV_LINE_MAP:
-        debit, credit = dr_cr_amounts(dr_cr, role_amounts[amount_key])
-        ledger_id, ledger_name = mapped_ledger(masters_category, field_name)
-        accounts.append({"role": field_name, "ledger_id": ledger_id, "ledger_name": ledger_name,
-                         "debit": debit, "credit": credit})
+        if _is_input_gst_row(dr_cr, masters_category, field_name, amount_key):
+            accounts.extend(_input_gst_rows(mapped_row, gst_by_supplier, company_state, mapping_cache))
+            continue
+        accounts.append(mapped_row(dr_cr, masters_category, field_name, role_amounts[amount_key]))
 
     narration = " / ".join(filter(None, [
         "Cancellation", cancel_ticket.cancellation_reference, cancel_ticket.airline_pnr,
@@ -3644,6 +3929,43 @@ def _cancellation_fop_payment_lines(cancel_ticket, lines):
     result = [(ledger_id, 0, round(amt, 2)) for ledger_id, amt in supplier_credit.items()]
     result += [(ledger_id, round(amt, 2), 0) for ledger_id, amt in counterpart_debit.items()]
     return result
+
+
+def _cancellation_report_entries(company_id, mapping_cache, company_state, from_date=None, to_date=None):
+    """
+    Every posted Cancellation Journal Voucher (ALC-n) for the reports
+    (Ledger balances / Trial Balance / Ledger report / Day Book), recomputed
+    live from the saved cancellation lines - same convention as the Booking
+    and Reschedule JVs (accounts are never stored). Optional from_date/
+    to_date ("YYYY-MM-DD") window on the voucher date.
+
+    Yields {"voucher", "ct", "lines", "accounts", "combined"} - accounts is
+    the Main JV (rows 1-31), combined adds the Own Card / Client Card FOP leg
+    (JV-2/JV-3) as {"ledger_id", "ledger_name": None, "debit", "credit"} rows.
+    """
+    vouchers = JournalVoucher.objects.filter(
+        company_id=company_id, source_cancellation_ticket__isnull=False
+    ).select_related("source_cancellation_ticket", "source_cancellation_ticket__customer").prefetch_related(
+        Prefetch("source_cancellation_ticket__lines", queryset=CancellationAirlineTicketLine.objects.select_related("supplier"))
+    ).order_by("id")
+    if from_date:
+        vouchers = vouchers.filter(voucher_date__gte=from_date)
+    if to_date:
+        vouchers = vouchers.filter(voucher_date__lte=to_date)
+    for v in vouchers:
+        ct = v.source_cancellation_ticket
+        lines = list(ct.lines.all()) if ct else []
+        if not lines:
+            continue
+        accounts, _n, _td, _tc = _compute_cancellation_jv_lines(ct, lines, mapping_cache, company_state)
+        combined = list(accounts)
+        try:
+            fop_leg = _cancellation_fop_payment_lines(ct, lines)
+        except ValueError:
+            fop_leg = []  # card since removed from FOP Master - Main JV still counts
+        for ledger_id, debit, credit in fop_leg:
+            combined.append({"ledger_id": ledger_id, "ledger_name": None, "debit": debit, "credit": credit})
+        yield {"voucher": v, "ct": ct, "lines": lines, "accounts": accounts, "combined": combined}
 
 
 def _post_cancellation_jv(company_id, cancel_ticket, line_objs):
@@ -3793,6 +4115,7 @@ def cancellation_jv_preview_draft(request):
                 line_kwargs[f] = _safe_decimal(line_kwargs[f])
         for f in CANCEL_JV_LINE_FIELDS:
             line_kwargs[f] = _safe_decimal(line_in.get(f))
+        line_kwargs.update(_cancel_tds_overrides(line_in))
 
         line_supplier = None
         if line_in.get("supplier_name"):
@@ -3841,6 +4164,61 @@ def cancellation_tickets_list(request):
         "total_billed": float(l["total_billed"]),
     } for l in sp_client.cancellation_tickets_list(company_id)]
     return JsonResponse(rows, safe=False)
+
+
+def cancellation_dsr_rows(request):
+    """
+    GET /api/cancellation-tickets/dsr/?company_id=1
+    One row per cancelled passenger for report-dsr-airline-booking.html, same
+    flat shape as tickets_list()/reschedule_tickets_list() so the DSR can
+    merge them in. A Credit Note reduces sales, so Base Fare and the refund
+    amount (total_billed - the Cancellation JV's own Customer credit, see
+    _cancellation_line_amounts) are NEGATIVE. ticket_id/reschedule_ticket_id
+    are null; cancellation_ticket_id links to the saved cancellation.
+    """
+    if request.method != "GET":
+        return HttpResponseNotAllowed(["GET"])
+
+    company_id = request.GET.get("company_id")
+    if not company_id:
+        return JsonResponse({"error": "company_id is required"}, status=400)
+
+    _jv_prep(company_id)  # seeds the per-field GST% cache computed_gst reads
+    rows = []
+    cancellations = CancellationAirlineTicket.objects.filter(company_id=company_id).select_related("customer").prefetch_related(
+        Prefetch("lines", queryset=CancellationAirlineTicketLine.objects.select_related("supplier"))
+    )
+    for ct in cancellations:
+        for l in ct.lines.all():
+            refund = _cancellation_line_amounts(l)["customer_amount"]
+            rows.append({
+                "id": l.id, "ticket_id": None, "reschedule_ticket_id": None, "cancellation_ticket_id": ct.id,
+                "invoice_number": ct.invoice_number, "invoice_date": ct.invoice_date.isoformat() if ct.invoice_date else None,
+                "invoice_type": ct.invoice_type, "booking_status": ct.booking_status,
+                "customer_name": ct.customer.name if ct.customer else None,
+                "booking_reference": ct.cancellation_reference, "airline_pnr": ct.airline_pnr, "gds_pnr": ct.gds_pnr,
+                "travel_type": ct.travel_type, "airline_category": l.airline_category or ct.airline_category,
+                "passenger_name": l.passenger_name, "ticket_no": l.ticket_no, "pax_type": l.pax_type,
+                "sector": l.sector, "airline_name": l.airline_name, "airline_code": l.airline_code,
+                "supplier_name": l.supplier.name if l.supplier else None,
+                "basic_fare": -round(float(l.basic_fare), 2),
+                "total_billed": -round(refund, 2),
+            })
+    return JsonResponse(rows, safe=False)
+
+
+def _chain_used_payment_gateway(original_line, based_on):
+    """True when the booking or any reschedule in this passenger's chain (up
+    to based_on) was paid by Payment Gateway - Cancellation then lets the
+    user pick its Payment Mode; otherwise it stays frozen at Top-up."""
+    if original_line.ticket.payment_mode == "Payment Gateway":
+        return True
+    node = based_on
+    while node is not None:
+        if node.reschedule_ticket.payment_mode == "Payment Gateway":
+            return True
+        node = node.based_on_reschedule_line
+    return False
 
 
 def cancellation_fare_totals(request):
@@ -3922,6 +4300,7 @@ def cancellation_fare_totals(request):
             "supp_tds_per": chain["supp_tds_per"], "supp_tds_amount": chain["supp_tds_amount"],
             "markup": chain["markup"], "addl_markup": chain["addl_markup"], "ssr_markup": chain["ssr_markup"],
             "supp_markup": chain["supp_markup"], "supp_addl_markup": chain["supp_addl_markup"],
+            "chain_payment_gateway": _chain_used_payment_gateway(original_line, based_on),
         })
 
     return JsonResponse({"totals": totals})
@@ -4023,6 +4402,7 @@ def cancellation_ticket_create(request):
         # separately. See CANCEL_JV_LINE_FIELDS.
         for f in CANCEL_JV_LINE_FIELDS:
             line_kwargs[f] = _safe_decimal(line_in.get(f))
+        line_kwargs.update(_cancel_tds_overrides(line_in))
 
         supplier_name = line_in.get("supplier_name")
         line_supplier = None
@@ -4173,6 +4553,12 @@ def cancellation_ticket_update(request, cancellation_id):
         line_kwargs = {f: line_in.get(f) for f in CANCEL_UPDATE_LINE_FIELDS}
         for f in CANCEL_UPDATE_LINE_NUMERIC_FIELDS:
             line_kwargs[f] = _safe_decimal(line_kwargs.get(f))
+        # Penalties + Markup Reversal components: the SP's UPDATE overwrites
+        # these columns from this payload, so they must always be sent - the
+        # request's value if the screen sent one, else the already-saved one
+        # (leaving them out reset them to 0 on every edit).
+        for f in CANCEL_JV_LINE_FIELDS:
+            line_kwargs[f] = _safe_decimal(line_in[f]) if f in line_in else _safe_decimal(saved_line.get(f))
         line_kwargs["id"] = line_id
         lines_json.append(line_kwargs)
 
@@ -4225,6 +4611,24 @@ def cancellation_ticket_detail(request, cancellation_id):
     if not header:
         return JsonResponse({"error": "Cancellation not found."}, status=404)
 
+    # Markup Reversal popup amounts (chain_*) - the same cumulative booking +
+    # reschedule totals a NEW cancellation gets from cancellation_fare_totals,
+    # so a saved one's popup shows every component's real amount (ticked or
+    # not). The cancellation was raised against the chain's cancelled
+    # reschedule line, if any.
+    def chain_markups(original_ticket_line_id):
+        try:
+            original_line = TicketLine.objects.get(id=original_ticket_line_id, ticket__company_id=company_id)
+            based_on = (RescheduleAirlineTicketLine.objects
+                        .filter(original_ticket_line_id=original_ticket_line_id, canceled=True)
+                        .order_by("-id").first())
+            chain = _resolve_parent_chain_line(original_line, based_on)
+            out = {f"chain_{k}": chain[k] for k in ("markup", "addl_markup", "ssr_markup", "supp_markup", "supp_addl_markup")}
+            out["chain_payment_gateway"] = _chain_used_payment_gateway(original_line, based_on)
+            return out
+        except TicketLine.DoesNotExist:
+            return {}
+
     return JsonResponse({
         "id": header["id"], "original_ticket_id": header["original_ticket_id"],
         "invoice_number": header["invoice_number"],
@@ -4256,6 +4660,12 @@ def cancellation_ticket_detail(request, cancellation_id):
             "supp_tds_per": float(l["supp_tds_per"]), "supp_markup": float(l["supp_markup"]), "supp_addl_markup": float(l["supp_addl_markup"]),
             "supp_service_fee": float(l["supp_service_fee"]), "supp_addl_service_fee": float(l["supp_addl_service_fee"]),
             "supp_gst_pct": float(l["supp_gst_pct"]),
+            **{f: (float(l[f]) if l.get(f) is not None else None) for f in CANCEL_TDS_OVERRIDE_FIELDS},
+            # Saved penalties + the 5 Markup Reversal COMPONENT amounts (see
+            # CANCEL_JV_LINE_FIELDS) - were never returned, so a reopened
+            # cancellation showed them all as 0.
+            **{f: float(l[f] or 0) for f in CANCEL_JV_LINE_FIELDS},
+            **chain_markups(l["original_ticket_line_id"]),
         } for l in lines],
     })
 
@@ -5225,6 +5635,222 @@ def company_master_delete(request, company_id):
     return JsonResponse({"ok": True})
 
 
+# ==========================================================================
+# User Management (Control Panel > User Management) - no login/session
+# system exists anywhere in this project yet (see page-user-management.js's
+# own docstring); these endpoints only back that page's own CRUD + its
+# per-user Access modal, nothing else.
+# ==========================================================================
+
+def _app_user_dict(u):
+    return {
+        "id": u["id"], "full_name": u["full_name"], "email": u["email"], "role": u["role"],
+        "branch_name": u["branch_name"], "is_super_admin": bool(u["is_super_admin"]),
+        "is_active": bool(u["is_active"]),
+        "menu_count": u.get("menu_count") or 0,
+        "created_at": u["created_at"].isoformat() if u.get("created_at") else None,
+        "updated_at": u["updated_at"].isoformat() if u.get("updated_at") else None,
+    }
+
+
+def app_user_list(request):
+    """GET /api/user-management/users/[?id=1] - every user, or one by id."""
+    if request.method != "GET":
+        return HttpResponseNotAllowed(["GET"])
+
+    user_id = request.GET.get("id")
+    if user_id:
+        u = sp_client.app_user_get(user_id)
+        if not u:
+            return JsonResponse({"error": "User not found."}, status=404)
+        return JsonResponse(_app_user_dict(u))
+
+    rows = sp_client.app_user_list()
+    return JsonResponse([_app_user_dict(u) for u in rows], safe=False)
+
+
+@csrf_exempt
+def app_user_save(request):
+    """
+    POST /api/user-management/users/save/
+    Body: { "id": 1 (optional - update if present), "full_name": "...",
+            "email": "...", "role": "Accountant", "branch_name": "...",
+            "is_super_admin": false, "is_active": true }
+    """
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+
+    try:
+        body = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON body"}, status=400)
+
+    full_name = (body.get("full_name") or "").strip()
+    email = (body.get("email") or "").strip()
+    if not full_name:
+        return JsonResponse({"error": "full_name is required"}, status=400)
+    if not email:
+        return JsonResponse({"error": "email is required"}, status=400)
+
+    # Required for a new user; blank on edit keeps the current password.
+    password = body.get("password") or ""
+    if not body.get("id") and not password:
+        return JsonResponse({"error": "password is required"}, status=400)
+    if password and len(password) < 6:
+        return JsonResponse({"error": "Password must be at least 6 characters."}, status=400)
+
+    fields = {
+        "full_name": full_name,
+        "email": email,
+        "role": (body.get("role") or "User").strip() or "User",
+        "branch_name": (body.get("branch_name") or "").strip() or None,
+        "is_super_admin": bool(body.get("is_super_admin")),
+        "is_active": bool(body.get("is_active", True)),
+        "password_hash": make_password(password) if password else None,
+    }
+
+    try:
+        user = sp_client.app_user_save(fields, user_id=body.get("id"))
+    except sp_client.StoredProcedureError as err:
+        return JsonResponse({"error": str(err)}, status=409)
+    status = 201 if user.get("was_created") else 200
+    return JsonResponse(_app_user_dict(user), status=status)
+
+
+@csrf_exempt
+def app_user_delete(request, user_id):
+    """DELETE /api/user-management/users/<id>/delete/"""
+    if request.method != "DELETE":
+        return HttpResponseNotAllowed(["DELETE"])
+
+    try:
+        sp_client.app_user_delete(user_id)
+    except sp_client.StoredProcedureError as err:
+        return JsonResponse({"error": str(err)}, status=409)
+    return JsonResponse({"ok": True})
+
+
+def menu_master_list(request):
+    """GET /api/user-management/menus/ - every active menu (Access modal's picklist)."""
+    if request.method != "GET":
+        return HttpResponseNotAllowed(["GET"])
+
+    rows = sp_client.menu_master_list()
+    return JsonResponse([{
+        "menu_key": m["menu_key"], "title": m["title"], "parent_key": m["parent_key"],
+        "module": m["module"], "sort_order": m["sort_order"],
+    } for m in rows], safe=False)
+
+
+def user_menu_access_get(request, user_id):
+    """GET /api/user-management/users/<id>/access/ - every menu's current flags for this user."""
+    if request.method != "GET":
+        return HttpResponseNotAllowed(["GET"])
+
+    try:
+        rows = sp_client.user_menu_access_get(user_id)
+    except sp_client.StoredProcedureError as err:
+        return JsonResponse({"error": str(err)}, status=404)
+    return JsonResponse([{
+        "menu_key": r["menu_key"], "title": r["title"], "parent_key": r["parent_key"],
+        "module": r["module"], "sort_order": r["sort_order"],
+        "can_view": bool(r["can_view"]), "can_add": bool(r["can_add"]),
+        "can_edit": bool(r["can_edit"]), "can_delete": bool(r["can_delete"]),
+    } for r in rows], safe=False)
+
+
+@csrf_exempt
+def user_menu_access_save(request, user_id):
+    """
+    POST /api/user-management/users/<id>/access/save/
+    Body: { "created_by": 1 (optional), "access": [
+        {"menu_key": "company-master", "can_view": true, "can_add": false, "can_edit": false, "can_delete": false},
+        ...
+    ] }
+    """
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+
+    try:
+        body = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON body"}, status=400)
+
+    access_list = body.get("access")
+    if not isinstance(access_list, list):
+        return JsonResponse({"error": "access must be a list"}, status=400)
+
+    normalized = [{
+        "menu_key": a.get("menu_key"),
+        "can_view": bool(a.get("can_view")), "can_add": bool(a.get("can_add")),
+        "can_edit": bool(a.get("can_edit")), "can_delete": bool(a.get("can_delete")),
+    } for a in access_list if a.get("menu_key")]
+
+    try:
+        sp_client.user_menu_access_save(user_id, normalized, created_by=body.get("created_by"))
+    except sp_client.StoredProcedureError as err:
+        return JsonResponse({"error": str(err)}, status=404)
+    return JsonResponse({"ok": True})
+
+
+# ==========================================================================
+# Login (index.html) - signed, time-limited token carrying just the user id
+# (see permissions.py), so no session/token table is needed. my-permissions
+# re-reads the user on every page load, so a deactivated user or a changed
+# permission takes effect immediately.
+# ==========================================================================
+
+def _auth_user_payload(u):
+    return {
+        "id": u["id"], "full_name": u["full_name"], "email": u["email"], "role": u["role"],
+        "branch_name": u["branch_name"], "is_super_admin": bool(u["is_super_admin"]),
+    }
+
+
+@csrf_exempt
+def auth_login(request):
+    """POST /api/auth/login/  Body: { "email": "...", "password": "..." }"""
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+
+    try:
+        body = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON body"}, status=400)
+
+    email = (body.get("email") or "").strip()
+    password = body.get("password") or ""
+    u = sp_client.app_user_get_by_email(email) if email else None
+    # One generic message for every failure, so the response never reveals
+    # which emails exist.
+    if not u or not u["password_hash"] or not check_password(password, u["password_hash"]):
+        return JsonResponse({"error": "Invalid email or password."}, status=401)
+    if not u["is_active"]:
+        return JsonResponse({"error": "This user is inactive. Contact your administrator."}, status=403)
+
+    token = permissions.make_token(u["id"])
+    return JsonResponse({
+        "access_token": token, "refresh_token": token,
+        "user": _auth_user_payload(u),
+        "is_super_admin": bool(u["is_super_admin"]),
+        "menus": permissions.permissions_for(u),
+    })
+
+
+def auth_my_permissions(request):
+    """GET /api/auth/my-permissions/ (Bearer token) - { user, is_super_admin, menus: {key: {view, add, edit, delete}} }"""
+    if request.method != "GET":
+        return HttpResponseNotAllowed(["GET"])
+
+    # MenuPermissionMiddleware has already rejected a missing/expired token
+    # or inactive user with 401 and attached the user here.
+    u = request.app_user
+    return JsonResponse({
+        "user": _auth_user_payload(u),
+        "is_super_admin": bool(u["is_super_admin"]),
+        "menus": permissions.permissions_for(u),
+    })
+
 @csrf_exempt
 def seed_database(request):
     """
@@ -5247,6 +5873,7 @@ def seed_database(request):
     force = request.GET.get("force", "false").lower() in ("true", "1")
     res = load_data(force=force)
     return JsonResponse(res)
+
 
 
 # ---- Live-only endpoints (not in the build): kept from the previous live views.py ----
