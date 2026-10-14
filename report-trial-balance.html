@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
   <link href="assets/css/design-system.css" rel="stylesheet" />
-  <link href="assets/css/app.css" rel="stylesheet" />
+  <link href="assets/css/app.css?v=7" rel="stylesheet" />
   <link rel="icon" type="image/png" href="assets/img/favicon.png" />
   <style>
     /* Locked to the viewport - only the grid's own body scrolls, with the
@@ -160,10 +160,10 @@
   </div>
 
   <script src="assets/js/mock-data.js"></script>
-  <script src="assets/js/api.js?v=3"></script>
-  <script src="assets/js/hardcode.js"></script>
-  <script src="assets/js/util.js?v=2"></script>
-  <script src="assets/js/shell.js?v=21"></script>
+  <script src="assets/js/api.js?v=4"></script>
+  <script src="assets/js/hardcode.js?v=2"></script>
+  <script src="assets/js/util.js?v=3"></script>
+  <script src="assets/js/shell.js?v=28"></script>
   <script>
     // Not gated on DOMContentLoaded - this page's <script> can be injected
     // by the app's SPA navigation (shell.js's navigateTo) into a document
@@ -198,8 +198,12 @@
       } catch (err) {
         console.error("Shell init failed", err);
       }
+      // Back from a report opened off this one -> same dates/filters/scroll.
+      const rs = VoyagerShell.reportState.consume();
       setDefaultDates();
+      VoyagerShell.reportState.applyInputs(rs);
       await loadTrialBalance();
+      VoyagerShell.reportState.restoreAfterLoad(rs);
     })();
 
     // Defaults to today, not a wide range - this project posts a lot of
@@ -377,6 +381,7 @@
       });
       tbody.querySelectorAll(".tb-group-row").forEach((row) => {
         row.addEventListener("click", () => {
+          VoyagerShell.reportState.capture(); // so Back to this level keeps its scroll
           currentGroupId = row.dataset.groupId;
           const url = new URL(window.location.href);
           url.searchParams.set("group_id", currentGroupId);
@@ -396,7 +401,9 @@
       if (currentGroupId) url.searchParams.set("group_id", currentGroupId);
       else url.searchParams.delete("group_id");
       window.history.pushState({}, "", url);
-      loadTrialBalance();
+      VoyagerShell.reportState.markBack(url.href);
+      const rs = VoyagerShell.reportState.consume();
+      loadTrialBalance().then(() => VoyagerShell.reportState.restoreAfterLoad(rs));
     });
 
     function filterTable(query) {

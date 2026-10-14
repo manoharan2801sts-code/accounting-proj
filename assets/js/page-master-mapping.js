@@ -3,7 +3,7 @@
   let allMappings = []; // local cache of the last GET for the selected Product
   const ledgerCache = {}; // group_name -> [{id,name}, ...]
 
-  const PRODUCT_TYPES = ["Airline", "Hotel", "Bus", "Visa", "Insurance", "Rail"];
+  const PRODUCT_TYPES = window.VoyagerHardcode.dropdownValues("productTypes"); // assets/data/dropdowns.xml
 
   // A "section" is a rendering concept, not always a 1:1 match with the 5
   // real Masters categories saved on the backend (masters_category) -
@@ -52,6 +52,8 @@
         { field: "Consolidator Addl Markup A/c", group: "Incomes" },
         { field: "Consolidator Service Fee A/c", group: "Incomes" },
         { field: "Consolidator Addl Service Fee A/c", group: "Incomes" },
+        { field: "Consolidator SSR Markup A/c", group: "Incomes" },
+        { field: "Consolidator SSR Service Fee A/c", group: "Incomes" },
         { field: "Consolidator Reschedule Penalty A/c", group: "Incomes" },
       ],
     },
@@ -62,6 +64,8 @@
         { field: "Supplier Addl Markup A/c", group: "Expenses" },
         { field: "Supplier Service Fee A/c", group: "Expenses" },
         { field: "Supplier Addl Service Fee A/c", group: "Expenses" },
+        { field: "Supplier SSR Markup A/c", group: "Expenses" },
+        { field: "Supplier SSR Service Fee A/c", group: "Expenses" },
         { field: "Supplier Reschedule Penalty A/c", group: "Expenses" },
         { field: "Supplier Cancellation Penalty A/c", group: "Expenses" },
       ],

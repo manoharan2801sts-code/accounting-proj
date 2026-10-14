@@ -8,7 +8,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
 <link href="assets/css/design-system.css" rel="stylesheet" />
-<link href="assets/css/app.css" rel="stylesheet" />
+<link href="assets/css/app.css?v=7" rel="stylesheet" />
 <style>
   .v-card { border-bottom:1px solid var(--color-border-subtle); }
   .v-card:last-child { border-bottom:none; }
@@ -25,26 +25,63 @@
   .v-lines th, .v-lines td { padding:0.35rem 0.55rem; text-align:right; }
   .v-lines th:first-child, .v-lines td:first-child { text-align:left; }
   .v-lines thead th { color:var(--color-text-muted); font-weight:600; border-bottom:1px solid var(--color-border); }
+  /* Date filter + matching column header (same columns as each row below) */
+  /* Same compact toolbar as the report pages (Trial Balance etc.) */
+  .v-toolbar { display:flex; align-items:center; justify-content:space-between; gap:0.5rem; margin-top:0.6rem; flex-wrap:wrap; }
+  .v-filter { display:flex; align-items:center; gap:0.5rem; }
+  .v-filter label { font-size:11px; font-weight:700; color:var(--color-text-muted); letter-spacing:0.03em; }
+  .v-filter input[type="date"] { height:26px; width:116px; padding:0 6px; font-size:12px; box-sizing:border-box; }
+  .v-detail-toggle input { width:16px; height:16px; margin:0; cursor:pointer; }
+  /* Only the voucher list scrolls - header row, filter and Grand Total stay put. */
+  html, body { height: 100%; overflow: hidden; margin: 0; }
+  .v-toolbar, .v-colhead, .v-total { flex-shrink: 0; }
+  .v-box { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; margin-bottom: 0.8rem; }
+  #voucher-list { flex: 1; min-height: 0; overflow-y: auto; }
+  .v-detail-toggle { display:flex; align-items:center; gap:0.5rem; font-size:13px; letter-spacing:normal; color:var(--color-text-dark) !important; font-weight:400 !important; margin-left:0.3rem; cursor:pointer; user-select:none; }
+  .v-total { display:flex; align-items:center; gap:0.75rem; padding:0.6rem 0.9rem; border-top:1px solid var(--color-border);
+    background:var(--color-bg-subtle); font-weight:800; font-size:0.85rem; color:var(--color-text-dark); }
+  .v-total .v-no { font-family:inherit; font-size:0.85rem; color:inherit; font-weight:800; }
+  .v-total .v-narration { color:var(--color-text-muted); font-weight:600; font-size:0.78rem; }
+  .v-colhead { display:flex; align-items:center; gap:0.75rem; padding:0.5rem 0.9rem; background:var(--color-bg-subtle);
+    border-bottom:1px solid var(--color-border); font-size:11px; font-weight:700; color:var(--color-text-muted); letter-spacing:0.03em; }
+  .v-colhead .v-no { font-family:inherit; font-size:11px; color:inherit; }
+  .v-colhead .v-date { font-size:11px; color:inherit; }
+  .v-colhead .v-narration { font-size:11px; color:inherit; }
+  .v-colhead .v-amount { color:inherit; font-weight:700; }
 </style>
 </head><body>
 <header class="app-topnav" id="shell-topnav"></header>
-<div class="app-body">
+<div class="app-body" style="height: calc(100vh - var(--topnav-height) - var(--menubar-height, 0px)); overflow: hidden;">
   <aside class="app-sidebar" id="shell-sidebar"></aside>
-  <main class="app-main">
-    <h1 style="font-size:1.15rem;">Vouchers &amp; Journal</h1>
-    <div style="text-align:right; margin-top:0.8rem;">
-      <a href="voucher-entry.html" class="btn-brand" style="padding:0.5rem 1rem; font-size:0.85rem;">+ New Voucher</a>
+  <main class="app-main" style="display:flex; flex-direction:column; height:100%; overflow:hidden; box-sizing:border-box;">
+    <h1 style="font-size:0.78rem; font-weight:700; color:var(--color-text-dark); margin:0 0 0.5rem;">Vouchers &amp; Journal</h1>
+    <div class="v-toolbar">
+      <div class="v-filter">
+        <label>From</label><input type="date" class="form-control-custom" id="vf-from" />
+        <label>To</label><input type="date" class="form-control-custom" id="vf-to" />
+        <button type="button" class="dom-nav-btn btn-primary" id="vf-apply">Apply</button>
+        <label class="v-detail-toggle"><input type="checkbox" id="vf-detailed" checked /> Detailed View</label>
+      </div>
+      <a href="voucher-entry.html" class="dom-nav-btn btn-primary" style="text-decoration:none;">+ New Voucher</a>
     </div>
-    <div class="card-glass" style="margin-top:0.7rem; overflow:hidden;">
+    <div class="card-glass v-box" style="margin-top:0.7rem;">
+      <div class="v-colhead">
+        <div class="v-no">Voucher No.</div><div class="v-type">Voucher Type</div><div class="v-date">Date</div>
+        <div class="v-narration">Narration</div><div class="v-amount">Amount</div>
+      </div>
       <div id="voucher-list"><div class="skeleton" style="height:200px; margin:1.3rem;"></div></div>
+      <div class="v-total">
+        <div class="v-no">Grand Total</div><div class="v-type"></div><div class="v-date"></div>
+        <div class="v-narration" id="v-total-count"></div><div class="v-amount" id="v-total-amount">0.00</div>
+      </div>
     </div>
   </main>
 </div>
-<script src="assets/js/hardcode.js"></script>
+<script src="assets/js/hardcode.js?v=2"></script>
 <script src="assets/js/mock-data.js"></script>
-<script src="assets/js/api.js?v=3"></script>
-<script src="assets/js/util.js?v=2"></script>
+<script src="assets/js/api.js?v=4"></script>
+<script src="assets/js/util.js?v=3"></script>
 <script src="assets/js/entry-common.js"></script>
-<script src="assets/js/shell.js?v=21"></script>
-<script src="assets/js/page-vouchers.js?v=2"></script>
+<script src="assets/js/shell.js?v=28"></script>
+<script src="assets/js/page-vouchers.js?v=4"></script>
 </body></html>

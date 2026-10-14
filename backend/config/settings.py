@@ -125,5 +125,12 @@ STORAGES = {
     },
 }
 
+# Company Master's Upload Logo/Upload Seal fields send their images as
+# base64 data URLs inside the ordinary JSON save body (no multipart/
+# MEDIA_ROOT infra in this project) - each is capped at 2MB client-side,
+# but base64 encoding adds ~33% overhead, so two together can exceed
+# Django's 2.5MB default request-body limit. 15MB covers both comfortably.
+DATA_UPLOAD_MAX_MEMORY_SIZE = 15 * 1024 * 1024
+
 USE_TZ = True
 TIME_ZONE = "Asia/Kolkata"

@@ -8,7 +8,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
 <link href="assets/css/design-system.css" rel="stylesheet" />
-<link href="assets/css/app.css" rel="stylesheet" />
+<link href="assets/css/app.css?v=7" rel="stylesheet" />
 <link rel="icon" type="image/png" href="assets/img/favicon.png" />
 <style>
   /* Page-scoped tokens (vt- prefix), matching Company Master's card/grid
@@ -154,13 +154,7 @@
           </div>
           <div class="vt-field">
             <label>Type of Voucher</label>
-            <select id="vt-type">
-              <option value="General">General</option>
-              <option value="Journal">Journal</option>
-              <option value="Payment">Payment</option>
-              <option value="Receipt">Receipt</option>
-              <option value="Debit Note">Debit Note</option>
-              <option value="Credit Note">Credit Note</option>
+            <select id="vt-type" data-options="voucherCategories">
             </select>
           </div>
 
@@ -173,10 +167,7 @@
           </div>
           <div class="vt-field">
             <label>Voucher Number Method</label>
-            <select id="vt-number-method">
-              <option value="Automatic">Automatic</option>
-              <option value="Manual">Manual</option>
-              <option value="Automatic & Manual Override">Automatic &amp; Manual Override</option>
+            <select id="vt-number-method" data-options="numberMethods">
             </select>
           </div>
           <div class="vt-field">
@@ -262,12 +253,7 @@
               <td><input type="date" id="an-applicable-from" /></td>
               <td><input type="text" id="an-starting-number" inputmode="numeric" placeholder="1" autocomplete="off" /></td>
               <td>
-                <select id="an-period">
-                  <option value="Daily">Daily</option>
-                  <option value="Weekly">Weekly</option>
-                  <option value="Monthly">Monthly</option>
-                  <option value="Yearly">Yearly</option>
-                  <option value="None" selected>None</option>
+                <select id="an-period" data-options="numberingPeriods">
                 </select>
               </td>
             </tr>
@@ -292,9 +278,9 @@
   </div>
 </div>
 
-<script src="assets/js/hardcode.js"></script>
+<script src="assets/js/hardcode.js?v=2"></script>
 <script src="assets/js/mock-data.js"></script>
-<script src="assets/js/api.js?v=3"></script>
-<script src="assets/js/shell.js?v=21"></script>
+<script src="assets/js/api.js?v=4"></script>
+<script src="assets/js/shell.js?v=28"></script>
 <script src="assets/js/page-voucher-type.js"></script>
 </body></html>

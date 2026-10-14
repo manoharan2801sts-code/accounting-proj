@@ -30,8 +30,15 @@ def load_data(force=False):
         with connection.cursor() as cursor:
             cursor.execute("SELECT COUNT(*) FROM `Ledgers`;")
             cnt = cursor.fetchone()[0]
-            if cnt > 5 and not force:
-                print(f"[OK] Database already has {cnt} ledgers. Data is ready!")
+            ssr_cnt = 0
+            try:
+                cursor.execute("SELECT COUNT(*) FROM `SSR_AL_Tickets`;")
+                ssr_cnt = cursor.fetchone()[0]
+            except Exception:
+                ssr_cnt = 0
+
+            if cnt > 5 and ssr_cnt > 0 and not force:
+                print(f"[OK] Database already has {cnt} ledgers and {ssr_cnt} SSR tickets. Data is ready!")
                 # Ensure at least one Super Admin exists
                 try:
                     cursor.execute("SELECT COUNT(*) FROM `AppUsers` WHERE `is_super_admin` = 1;")

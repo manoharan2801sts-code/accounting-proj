@@ -9,7 +9,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
 <link href="assets/css/design-system.css" rel="stylesheet" />
-<link href="assets/css/app.css?v=3" rel="stylesheet" />
+<link href="assets/css/app.css?v=7" rel="stylesheet" />
 <link href="assets/css/loader.css" rel="stylesheet" />
 <style>
   /* Scoped to this page only — locks the outer page to the viewport so
@@ -502,7 +502,7 @@
                  can carry its own Supplier Penalty. -->
             <div class="fare-item" id="modal-fare-supplier-penalty-field" style="display:none;">
               <label>Supplier Penalty</label>
-              <input class="dom-input modal-calc dom-amount" type="text" inputmode="decimal" id="modal-fare-supplier-penalty" min="0" step="0.01" value="0.00" />
+              <input class="dom-input modal-calc dom-amount no-neg" type="text" inputmode="decimal" id="modal-fare-supplier-penalty" min="0" step="0.01" value="0.00" />
             </div>
           </div>
         </div>
@@ -729,11 +729,16 @@
                   <input class="dom-input dom-amount" type="text" inputmode="decimal" id="modal-supp-comm-computed" min="0" step="0.01" value="0.00" />
                 </span>
               </div>
-              <div class="dom-acct-field dom-acct-field-dual">
+              <!-- SSR Markup / SSR Service Fee pairs: Booking only - hidden here,
+                   shown (and the row switched to 3 columns) by
+                   layoutBookingDiscTds() in page-ticket-entry.js. -->
+              <div class="dom-acct-field dom-acct-field-dual" id="supp-markup-row">
                 <label>Markup</label>
                 <input class="dom-input modal-calc dom-acct-input-sm dom-max10 dom-amount" type="text" inputmode="decimal" id="modal-supp-markup" min="0" max="9999999999" step="0.01" value="0.00" />
                 <label>Addl Markup</label>
                 <input class="dom-input modal-calc dom-acct-input-sm dom-max10 dom-amount" type="text" inputmode="decimal" id="modal-supp-addl-markup" min="0" max="9999999999" step="0.01" value="0.00" />
+                <label class="supp-ssr-pair" style="display:none;">SSR Markup</label>
+                <input style="display:none;" class="supp-ssr-pair dom-input modal-calc dom-acct-input-sm dom-max10 dom-amount" type="text" inputmode="decimal" id="modal-supp-ssr-markup" min="0" max="9999999999" step="0.01" value="0.00" />
               </div>
               <!-- Cancellation mode ONLY - same Markup Reversal pattern as
                    the Customer card's own (see there for the full
@@ -747,11 +752,13 @@
                   </button>
                 </span>
               </div>
-              <div class="dom-acct-field dom-acct-field-dual">
+              <div class="dom-acct-field dom-acct-field-dual" id="supp-service-fee-row">
                 <label>Service Fee</label>
                 <input class="dom-input modal-calc dom-acct-input-sm dom-max10 dom-amount" type="text" inputmode="decimal" id="modal-supp-service-fee" min="0" max="9999999999" step="0.01" value="0.00" />
                 <label>Addl Service Fee</label>
                 <input class="dom-input modal-calc dom-acct-input-sm dom-max10 dom-amount" type="text" inputmode="decimal" id="modal-supp-addl-service-fee" min="0" max="9999999999" step="0.01" value="0.00" />
+                <label class="supp-ssr-pair" style="display:none;">SSR Service Fee</label>
+                <input style="display:none;" class="supp-ssr-pair dom-input modal-calc dom-acct-input-sm dom-max10 dom-amount" type="text" inputmode="decimal" id="modal-supp-ssr-service-fee" min="0" max="9999999999" step="0.01" value="0.00" />
               </div>
               <div class="dom-acct-field dom-acct-field-dual" id="acct-default-supp-tds-row">
                 <label>TDS %</label>
@@ -803,12 +810,12 @@
                    JV_GUARDED_FIELDS/layoutAcctFieldsForReschedule's existing
                    element references keep working - never shown or editable
                    here. -->
-              <div class="dom-acct-field dom-acct-field-dual" id="acct-default-supp-gst-row" style="grid-template-columns: 84px 1fr 68px 1fr;">
-                <label style="white-space:normal; line-height:1.1; font-size:10px;">Taxable Amount</label>
+              <div class="dom-acct-field dom-acct-field-dual" id="acct-default-supp-gst-row" style="grid-template-columns: 138px 1fr 84px 98px;">
+                <label>Taxable Amount</label>
                 <span id="default-supp-taxable-slot">
                   <div class="dom-input-readonly" id="modal-supp-taxable-amount" style="text-align:right; justify-content:flex-end;">0.00</div>
                 </span>
-                <label style="white-space:normal; line-height:1.1; font-size:10px;">GST Amount</label>
+                <label>GST Amount</label>
                 <span id="default-supp-gst-slot" style="display:flex; align-items:center; gap:4px;">
                   <div class="dom-input-readonly" id="modal-supp-gst-computed" style="flex:1; min-width:0; text-align:right; justify-content:flex-end;">0.00</div>
                   <button type="button" class="dom-eye-btn" id="modal-supp-gst-detail-btn" title="View GST Amount calculation">
@@ -1467,12 +1474,13 @@
   </div>
 </div>
 
-<script src="assets/js/hardcode.js"></script>
+<script src="assets/js/hardcode.js?v=2"></script>
 <script src="assets/js/mock-data.js"></script>
 <script src="assets/js/loader.js?v=5"></script>
-<script src="assets/js/api.js?v=3"></script>
-<script src="assets/js/util.js?v=2"></script>
-<script src="assets/js/shell.js?v=21"></script>
+<script src="assets/js/api.js?v=4"></script>
+<script src="assets/js/util.js?v=3"></script>
+<script src="assets/js/shell.js?v=28"></script>
 <script src="assets/js/entry-common.js"></script>
-<script src="assets/js/page-ticket-entry.js?v=104"></script>
+<script src="assets/js/invoice-templates.js?v=14"></script>
+<script src="assets/js/page-ticket-entry.js?v=138"></script>
 </body></html>

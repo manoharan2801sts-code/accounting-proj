@@ -10,7 +10,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
 <link href="assets/css/design-system.css" rel="stylesheet" />
-<link href="assets/css/app.css" rel="stylesheet" />
+<link href="assets/css/app.css?v=7" rel="stylesheet" />
 </head>
 <body>
 
@@ -77,13 +77,6 @@
           <button type="submit" class="btn-brand" style="width:100%;" id="login-btn">Sign in</button>
         </form>
 
-        <div class="card-flat card-pad" style="margin-top:1rem; font-size:0.8rem; background:var(--color-bg-subtle, #F8FAFC); border:1px solid var(--color-border, #E2E8F0); border-radius:6px; padding:0.75rem 1rem;">
-          <strong>Super Admin credentials:</strong>
-          <div class="text-muted-custom" style="margin-top:0.3rem; line-height:1.5;">
-            <code>admin@travelagency.com</code> &middot; <code>Passw0rd!</code><br/>
-            <code>ananya.krishnan@travelagency.com</code> &middot; <code>Passw0rd!</code>
-          </div>
-        </div>
       </div>
 
       <!-- Step 2: OTP / MFA -->
@@ -107,9 +100,16 @@
   </div>
 </div>
 
-<script src="assets/js/hardcode.js"></script>
+<script src="assets/js/hardcode.js?v=2"></script>
 <script src="assets/js/mock-data.js"></script>
-<script src="assets/js/api.js?v=3"></script>
+<script src="assets/js/api.js?v=4"></script>
 <script src="assets/js/auth.js?v=2"></script>
+<script>
+  // Company Master's uploaded logo (saved by shell.js after the last sign-in).
+  try {
+    const logo = localStorage.getItem("voyager_company_logo");
+    if (logo) document.querySelectorAll("img.mark").forEach((img) => { img.src = logo; });
+  } catch (_) { /* keep the default logo */ }
+</script>
 </body>
 </html>

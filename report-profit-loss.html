@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
   <link href="assets/css/design-system.css" rel="stylesheet" />
-  <link href="assets/css/app.css" rel="stylesheet" />
+  <link href="assets/css/app.css?v=7" rel="stylesheet" />
   <link rel="icon" type="image/png" href="assets/img/favicon.png" />
   <style>
     /* Hides the page's own vertical scrollbar track - still scrollable
@@ -188,9 +188,9 @@
   </div>
 
   <script src="assets/js/mock-data.js"></script>
-  <script src="assets/js/api.js?v=3"></script>
-  <script src="assets/js/hardcode.js"></script>
-  <script src="assets/js/shell.js?v=21"></script>
+  <script src="assets/js/api.js?v=4"></script>
+  <script src="assets/js/hardcode.js?v=2"></script>
+  <script src="assets/js/shell.js?v=28"></script>
   <script>
     // Not gated on DOMContentLoaded - this page's <script> can be injected
     // by the app's SPA navigation (shell.js's navigateTo) into a document
@@ -216,7 +216,11 @@
       const today = new Date().toISOString().slice(0, 10);
       document.getElementById("filter-from").value = urlParams.get("from") || document.getElementById("filter-from").value || today;
       document.getElementById("filter-to").value = urlParams.get("to") || document.getElementById("filter-to").value || today;
-      loadReport();
+      // Back from a ledger opened off this report -> same view/filters/scroll.
+      const rs = VoyagerShell.reportState.consume();
+      VoyagerShell.reportState.applyInputs(rs);
+      await loadReport();
+      VoyagerShell.reportState.restoreAfterLoad(rs);
     })();
 
     // From/To/group in the address bar, so Back from a ledger (document.
@@ -238,10 +242,14 @@
       window.location.href = `report-ledger-monthly.html?ledger_id=${ledgerId}&from=${from}&from_url=${fromUrl}`;
     }
 
-    function zoomInto(groupId) {
+    // isBack: the Back link - that level comes back with its scroll.
+    function zoomInto(groupId, isBack) {
+      VoyagerShell.reportState.capture();
       currentGroupId = groupId ? String(groupId) : null;
       syncUrl(true);
-      loadReport();
+      let rs = null;
+      if (isBack) { VoyagerShell.reportState.markBack(window.location.href); rs = VoyagerShell.reportState.consume(); }
+      loadReport().then(() => VoyagerShell.reportState.restoreAfterLoad(rs));
     }
 
     function fmtN(v) {
@@ -347,7 +355,7 @@
     }
     document.getElementById("pl-back-link").addEventListener("click", (e) => {
       e.preventDefault();
-      zoomInto(lastData && lastData.back ? lastData.back.group_id : null);
+      zoomInto(lastData && lastData.back ? lastData.back.group_id : null, true);
     });
     // Browser Back/Forward between zoom levels.
     window.addEventListener("popstate", () => {

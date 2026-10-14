@@ -1,6 +1,8 @@
 /**
- * Voyager ERP — API client with High-Speed In-Memory Caching & Instant Mock Fallback
- * Provides ultra-fast (0ms) in-memory cached responses and instant fallback.
+ * Voyager ERP — API Client & State Store
+ * -----------------------------------------------------------------
+ * Handles authentication tokens, active company context, and API requests.
+ * Provides ultra-fast in-memory cached responses and report caching.
  */
 (function (window) {
   const API_BASE =
@@ -33,9 +35,16 @@
     },
   };
 
-  // Every page calls the backend with fetch - rewrite hardcoded localhost URLs
-  // to API_BASE so live deployments on Render work seamlessly. Also attach
-  // the signed-in user's Bearer token to API calls.
+  // Report data cache - a report screen already seen opens instantly
+  const REPORT_CACHE_PATTERN = /\/api\/(trial-balance|profit-loss|balance-sheet|day-book|ledger-book|cash-bank-book|receivables|payables)\//;
+  const REPORT_CACHE_TTL_MS = 5 * 60 * 1000;
+  const reportCache = new Map();
+
+  // Ultra-fast in-memory cache for instant GET requests
+  const apiCache = new Map();
+
+  // Intercept fetch: rewrite localhost URLs to API_BASE so live deployments on Render work seamlessly.
+  // Also attach the signed-in user's Bearer token to API calls.
   const nativeFetch = window.fetch.bind(window);
   window.fetch = function (input, init) {
     let url = typeof input === "string" ? input : (input && input.url) || "";
@@ -52,22 +61,34 @@
     const token = localStorage.getItem(TOKEN_KEY);
     const isApi = url.startsWith(API_BASE) || url.startsWith("/api") || url.includes("/api/");
     if (!isApi || !token || token === "demo-token") return nativeFetch(input, init);
+
     const opts = { ...(init || {}) };
     const headers = new Headers(opts.headers || (typeof input !== "string" && input.headers) || {});
     if (!headers.has("Authorization")) headers.set("Authorization", `Bearer ${token}`);
     opts.headers = headers;
+
+    const method = String(opts.method || (typeof input !== "string" && input.method) || "GET").toUpperCase();
+    if (method !== "GET") reportCache.clear();
+    const cacheable = method === "GET" && REPORT_CACHE_PATTERN.test(url);
+    if (cacheable) {
+      const hit = reportCache.get(url);
+      if (hit && Date.now() - hit.at < REPORT_CACHE_TTL_MS) {
+        return Promise.resolve(new Response(hit.body, { status: hit.status, headers: { "Content-Type": "application/json" } }));
+      }
+    }
+
     return nativeFetch(input, opts).then((res) => {
       if (res.status === 401 && !url.includes("/auth/login")) {
         Store.clear();
         try { sessionStorage.removeItem("voyager_permissions"); } catch (_) {}
         window.location.href = "index.html";
       }
+      if (cacheable && res.ok) {
+        res.clone().text().then((body) => reportCache.set(url, { at: Date.now(), status: res.status, body })).catch(() => {});
+      }
       return res;
     });
   };
-
-  // Ultra-fast in-memory cache for instant GET requests
-  const apiCache = new Map();
 
   async function request(path, { method = "GET", body, auth = true, retry = true } = {}) {
     const cacheKey = `${method}:${path}:${body ? JSON.stringify(body) : ""}`;
@@ -92,7 +113,7 @@
     }
 
     try {
-      // Generous timeout for remote database calls (Render + TiDB Cloud)
+      // 60s timeout for remote database calls (Render + TiDB Cloud)
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 60000);
 
@@ -113,7 +134,7 @@
       }
 
       if (!res.ok) {
-        if (res.status === 404 && window.VoyagerMock) {
+        if (res.status === 404 && window.VoyagerMock && window.location.protocol === "file:") {
           const mockResult = window.VoyagerMock.handle(path, { method, body });
           if (method === "GET") apiCache.set(cacheKey, mockResult);
           else apiCache.clear();

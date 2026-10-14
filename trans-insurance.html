@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
   <link href="assets/css/design-system.css" rel="stylesheet" />
-  <link href="assets/css/app.css" rel="stylesheet" />
+  <link href="assets/css/app.css?v=7" rel="stylesheet" />
   <link rel="icon" type="image/png" href="assets/img/favicon.png" />
   <style>
     .page-header-row { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 1.25rem; flex-wrap: wrap; }
@@ -101,22 +101,14 @@
         </div>
         <div class="filter-group">
           <label>Insurer Provider</label>
-          <select class="form-control-custom" id="filter-provider" style="height:34px; min-width:170px;">
+          <select class="form-control-custom" id="filter-provider" style="height:34px; min-width:170px;" data-options="insuranceProviders">
             <option value="">All Providers</option>
-            <option value="Tata AIG">Tata AIG General Insurance</option>
-            <option value="Bajaj Allianz">Bajaj Allianz Travel</option>
-            <option value="HDFC ERGO">HDFC ERGO Overseas</option>
-            <option value="Care Health">Care Health Travel Plus</option>
           </select>
         </div>
         <div class="filter-group">
           <label>Policy Status</label>
-          <select class="form-control-custom" id="filter-status" style="height:34px; min-width:140px;">
+          <select class="form-control-custom" id="filter-status" style="height:34px; min-width:140px;" data-options="insuranceFilterStatuses">
             <option value="">All Statuses</option>
-            <option value="Active">Active</option>
-            <option value="Issued">Issued</option>
-            <option value="Expired">Expired</option>
-            <option value="Cancelled">Cancelled</option>
           </select>
         </div>
       </div>
@@ -231,9 +223,9 @@
     </main>
   </div>
 
-  <script src="assets/js/api.js?v=3"></script>
-  <script src="assets/js/hardcode.js"></script>
-  <script src="assets/js/shell.js?v=21"></script>
+  <script src="assets/js/api.js?v=4"></script>
+  <script src="assets/js/hardcode.js?v=2"></script>
+  <script src="assets/js/shell.js?v=28"></script>
   <script>
     document.addEventListener("DOMContentLoaded", () => {
       VoyagerShell.init({ activeKey: "trans-insurance" });

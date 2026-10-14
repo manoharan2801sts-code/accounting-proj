@@ -17,6 +17,43 @@
   // and clicking Save without changing anything shouldn't be allowed to
   // fire a save (and re-persist identical data) at all.
   let editSnapshot = null;
+
+  // ============================================================
+  // Bank Details - stored in hidden inputs inside the form grid (so Edit/
+  // Save/dirty-tracking treat them like any other field); the field itself
+  // is a button that opens the popup to view (read-only) or edit them.
+  // ============================================================
+  const BANK_FIELDS = ["bank_account_holder", "bank_account_no", "bank_ifsc", "bank_swift", "bank_name", "bank_branch"];
+  const bankHiddenId = (f) => `cm-${f.replace(/_/g, "-")}`;
+  const bankPopupId = (f) => `bk-${f.replace(/_/g, "-")}`;
+  function updateBankSummary() {
+    const v = (f) => document.getElementById(bankHiddenId(f)).value.trim();
+    const text = [v("bank_name"), v("bank_account_no") && `A/c ${v("bank_account_no")}`, v("bank_ifsc")].filter(Boolean).join(" - ");
+    document.getElementById("cm-bank-summary").textContent = text || "Add bank details...";
+    document.getElementById("cm-bank-btn").classList.toggle("is-empty", !text);
+  }
+  function openBankPopup() {
+    const readOnly = document.getElementById("cm-edit-btn").style.display !== "none";
+    BANK_FIELDS.forEach((f) => {
+      const el = document.getElementById(bankPopupId(f));
+      el.value = document.getElementById(bankHiddenId(f)).value;
+      el.disabled = readOnly;
+    });
+    document.getElementById("bank-ok-btn").style.display = readOnly ? "none" : "";
+    document.getElementById("bank-modal").classList.add("open");
+  }
+  document.getElementById("cm-bank-btn").addEventListener("click", openBankPopup);
+  document.querySelectorAll("[data-bank-close]").forEach((b) => b.addEventListener("click", () => document.getElementById("bank-modal").classList.remove("open")));
+  document.getElementById("bank-ok-btn").addEventListener("click", () => {
+    BANK_FIELDS.forEach((f) => {
+      let v = document.getElementById(bankPopupId(f)).value.trim();
+      if (f === "bank_ifsc" || f === "bank_swift") v = v.toUpperCase();
+      document.getElementById(bankHiddenId(f)).value = v;
+    });
+    updateBankSummary();
+    document.getElementById("bank-modal").classList.remove("open");
+    document.getElementById(bankHiddenId(BANK_FIELDS[0])).dispatchEvent(new Event("input", { bubbles: true }));
+  });
   function formFieldsList() {
     return Array.from(document.querySelectorAll(".cmx-grid input, .cmx-grid select, .cmx-grid textarea"));
   }
@@ -231,7 +268,8 @@
   function clearForm() {
     ["cm-company-name", "cm-mailing-name", "cm-address", "cm-state", "cm-pincode", "cm-telephone",
       "cm-mobile", "cm-email", "cm-fy-from", "cm-books-from", "cm-pan", "cm-cin", "cm-tan", "cm-hsn-sac",
-      "cm-currency-symbol", "cm-currency-name", "cm-decimal-places"]
+      "cm-currency-symbol", "cm-currency-name", "cm-decimal-places", "cm-terms",
+      ...BANK_FIELDS.map(bankHiddenId)]
       .forEach((id) => { document.getElementById(id).value = ""; });
     document.getElementById("cm-gst-reg-type").value = "Regular";
     document.getElementById("cm-decimal-places").value = "2";
@@ -242,6 +280,7 @@
     document.getElementById("cm-seal-file").value = "";
     setLogo(null);
     setSeal(null);
+    updateBankSummary();
     document.getElementById("cm-company-name").focus();
   }
 
@@ -268,6 +307,9 @@
     set("cm-decimal-places", c.decimal_places != null ? c.decimal_places : 2);
     setLogo(c.logo_base64 || null);
     setSeal(c.seal_base64 || null);
+    document.getElementById("cm-terms").value = c.terms_conditions || "";
+    BANK_FIELDS.forEach((f) => { document.getElementById(bankHiddenId(f)).value = c[f] || ""; });
+    updateBankSummary();
   }
 
   // ============================================================
@@ -301,8 +343,28 @@
         return;
       }
       const reader = new FileReader();
-      reader.onload = () => { onLoaded(reader.result); refreshSaveEnabled(); };
+      reader.onload = async () => { onLoaded(await shrinkImage(reader.result)); refreshSaveEnabled(); };
       reader.readAsDataURL(file);
+    });
+  }
+  // Scales an uploaded image down to at most 600px on its longest side (PNG,
+  // so a transparent seal stays transparent). The logo/seal print far smaller
+  // than that, and a huge base64 image slows every screen that loads it.
+  function shrinkImage(dataUrl) {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        const scale = Math.min(1, 600 / Math.max(img.width, img.height));
+        if (scale === 1 && dataUrl.length < 400000) { resolve(dataUrl); return; }
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.round(img.width * scale);
+        canvas.height = Math.round(img.height * scale);
+        canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+        const out = canvas.toDataURL("image/png");
+        resolve(out.length < dataUrl.length ? out : dataUrl);
+      };
+      img.onerror = () => resolve(dataUrl);
+      img.src = dataUrl;
     });
   }
   wireUpload("cm-logo-file", setLogo);
@@ -313,7 +375,7 @@
   async function loadActiveCompany() {
     if (!activeCompanyId) return;
     try {
-      const res = await fetch(`${COMPANY_MASTER_API}?id=${activeCompanyId}`);
+      const res = await fetch(`${COMPANY_MASTER_API}?id=${activeCompanyId}&images=all`);
       if (res.ok) {
         fillForm(await res.json());
         setViewMode(true); // real saved data - open read-only
@@ -373,6 +435,8 @@
       decimal_places: document.getElementById("cm-decimal-places").value || null,
       logo_base64: logoBase64,
       seal_base64: sealBase64,
+      terms_conditions: document.getElementById("cm-terms").value.trim(),
+      ...Object.fromEntries(BANK_FIELDS.map((f) => [f, document.getElementById(bankHiddenId(f)).value.trim()])),
       id: activeCompanyId,
     };
 
@@ -407,6 +471,88 @@
   // their own default <option>, every other field blank/placeholder -
   // permanently, since loadActiveCompany() (and so fillForm() with the
   // real saved data) never even got called.
+  // ============================================================
+  // Choose Invoice Template - each layout in assets/js/invoice-templates.js
+  // shown as a live preview of this company's own details (name, address,
+  // GST, logo, seal) with sample figures. Preview opens it full size,
+  // Download prints it (Save as PDF), Select saves it as the layout every
+  // Tax Invoice / Credit Note of this company prints in.
+  // ============================================================
+  let tplCompany = null;
+  const tplEl = (id) => document.getElementById(id);
+  const tplHtml = (key) => window.VoyagerInvoice.render(key, window.VoyagerInvoice.sampleData(tplCompany));
+  const tplName = (key) => (window.VoyagerInvoice.TEMPLATES.find((t) => t.key === key) || {}).name || key;
+  let tplPreviewKey = null;
+
+  function renderTemplateCards() {
+    const current = (tplCompany && tplCompany.invoice_template) || "classic";
+    tplEl("tpl-grid").innerHTML = window.VoyagerInvoice.TEMPLATES.map((t) => `
+      <div class="tpl-card ${t.key === current ? "selected" : ""}">
+        <div class="tpl-thumb" data-preview="${t.key}" title="Preview"><iframe data-tpl="${t.key}" tabindex="-1"></iframe></div>
+        <div class="tpl-info">
+          <div class="tpl-name">${t.name}${t.key === current ? '<span class="tpl-badge">Selected</span>' : ""}</div>
+          <div class="tpl-desc">${t.description}</div>
+        </div>
+        <div class="tpl-actions">
+          <button type="button" class="cmx-btn" data-preview="${t.key}">Preview</button>
+          <button type="button" class="cmx-btn" data-download="${t.key}">Download</button>
+          <button type="button" class="cmx-btn cmx-primary" data-select="${t.key}" ${t.key === current ? "disabled" : ""}>${t.key === current ? "Selected" : "Select"}</button>
+        </div>
+      </div>`).join("");
+    tplEl("tpl-grid").querySelectorAll("iframe[data-tpl]").forEach((f) => { f.srcdoc = tplHtml(f.dataset.tpl); });
+  }
+
+  async function openTemplateChooser() {
+    try {
+      const res = await fetch(`${COMPANY_MASTER_API}?id=${activeCompanyId}&images=all`);
+      tplCompany = res.ok ? await res.json() : null;
+    } catch (_) { tplCompany = null; }
+    if (!tplCompany) {
+      voyagerAlert("Save the Company Master details first - the templates preview this company's own details.");
+      return;
+    }
+    renderTemplateCards();
+    tplEl("tpl-modal").classList.add("open");
+  }
+  function openTemplatePreview(key) {
+    tplPreviewKey = key;
+    tplEl("tpl-preview-title").textContent = `Preview - ${tplName(key)}`;
+    tplEl("tpl-preview-frame").srcdoc = tplHtml(key);
+    const current = (tplCompany && tplCompany.invoice_template) || "classic";
+    tplEl("tpl-preview-select").disabled = key === current;
+    tplEl("tpl-preview-select").textContent = key === current ? "Selected" : "Select";
+    tplEl("tpl-preview-modal").classList.add("open");
+  }
+  async function selectTemplate(key) {
+    try {
+      const res = await fetch(`${COMPANY_MASTER_API}invoice-template/`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: activeCompanyId, invoice_template: key }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Could not save the invoice template.");
+      tplCompany.invoice_template = key;
+      renderTemplateCards();
+      tplEl("tpl-preview-modal").classList.remove("open");
+      voyagerAlert(`"${tplName(key)}" is now the invoice template for every print.`, { icon: "success" });
+    } catch (err) {
+      voyagerAlert(err.message, { icon: "error" });
+    }
+  }
+  const downloadTemplate = (key) => window.VoyagerInvoice.print(tplHtml(key), `${tplName(key)} - Sample`);
+
+  tplEl("cm-template-btn").addEventListener("click", openTemplateChooser);
+  tplEl("tpl-grid").addEventListener("click", (e) => {
+    const t = e.target.closest("[data-preview],[data-download],[data-select]");
+    if (!t) return;
+    if (t.dataset.preview) openTemplatePreview(t.dataset.preview);
+    else if (t.dataset.download) downloadTemplate(t.dataset.download);
+    else if (t.dataset.select) selectTemplate(t.dataset.select);
+  });
+  tplEl("tpl-preview-download").addEventListener("click", () => downloadTemplate(tplPreviewKey));
+  tplEl("tpl-preview-select").addEventListener("click", () => selectTemplate(tplPreviewKey));
+  document.querySelectorAll("[data-tpl-close]").forEach((b) => b.addEventListener("click", () => tplEl(b.dataset.tplClose).classList.remove("open")));
+
   let active = null;
   try {
     active = await VoyagerShell.init({

@@ -370,9 +370,12 @@ def _fill_computed(r):
         r["computed_supp_tds"] = _scale(_dmul(_scale(supp, 6), _ddiv100(r["supp_tds_per"])), 6)
         # 8.10.26 build: each Supplier fee times its OWN mapped ledger's GST%
         # (Master Mapping), no longer the flat supp_gst_pct.
+        g_suppssr = _D(r.get("_gst_suppssrsvc")) if r.get("_gst_suppssrsvc") is not None else None
+        supp_ssr_sf = r.get("supp_ssr_service_fee") or z
         r["computed_supp_gst"] = _scale(_dsum(
             _ddiv100(_dmul(r["supp_service_fee"], g_suppsvc if g_suppsvc is not None else z)),
             _ddiv100(_dmul(r["supp_addl_service_fee"], g_suppaddl if g_suppaddl is not None else z)),
+            _ddiv100(_dmul(supp_ssr_sf, g_suppssr if g_suppssr is not None else z)),
         ), 8)
     return r
 
@@ -393,9 +396,11 @@ _GST_JOINS = f"""
     LEFT JOIN `Ledgers` l_suppsvc ON l_suppsvc.id = mm_suppsvc.ledger_id
     LEFT JOIN `MasterMapping` mm_suppaddlsvc ON mm_suppaddlsvc.company_id = t.company_id AND {_ci_lit('mm_suppaddlsvc.product_type', 'Airline')} AND {_ci_lit('mm_suppaddlsvc.field_name', 'Supplier Addl Service Fee A/c')}
     LEFT JOIN `Ledgers` l_suppaddlsvc ON l_suppaddlsvc.id = mm_suppaddlsvc.ledger_id
+    LEFT JOIN `MasterMapping` mm_suppssrsvc ON mm_suppssrsvc.company_id = t.company_id AND {_ci_lit('mm_suppssrsvc.product_type', 'Airline')} AND {_ci_lit('mm_suppssrsvc.field_name', 'Supplier SSR Service Fee A/c')}
+    LEFT JOIN `Ledgers` l_suppssrsvc ON l_suppssrsvc.id = mm_suppssrsvc.ledger_id
 """
 _GST_HIDDEN = ("l_svc.gst_percentage AS _gst_svc, l_addlsvc.gst_percentage AS _gst_addlsvc, l_ssrsvc.gst_percentage AS _gst_ssrsvc, "
-               "l_suppsvc.gst_percentage AS _gst_suppsvc, l_suppaddlsvc.gst_percentage AS _gst_suppaddlsvc")
+               "l_suppsvc.gst_percentage AS _gst_suppsvc, l_suppaddlsvc.gst_percentage AS _gst_suppaddlsvc, l_suppssrsvc.gst_percentage AS _gst_suppssrsvc")
 
 
 @sp("dbo.sp_Ticket", "LIST")
@@ -417,7 +422,7 @@ def ticket_list(p):
             tl.disc_on, tl.disc_type, tl.disc_value, tl.tds_per,
             tl.addl_markup, tl.ssr_markup, tl.service_fee, tl.addl_service_fee, tl.ssr_service_fee, tl.gst_pct,
             tl.supp_comm_on, tl.supp_comm_type, tl.supp_comm_value, tl.supp_tds_per,
-            tl.supp_markup, tl.supp_addl_markup, tl.supp_service_fee, tl.supp_addl_service_fee,
+            tl.supp_markup, tl.supp_addl_markup, tl.supp_service_fee, tl.supp_addl_service_fee, tl.supp_ssr_markup, tl.supp_ssr_service_fee,
             {_COMPUTED_PLACEHOLDERS},
             tl.supp_gst_pct,
             {_GST_HIDDEN}
@@ -427,7 +432,7 @@ def ticket_list(p):
         LEFT JOIN `Ledgers` supp ON supp.id = tl.supplier_ledger_id
         {_GST_JOINS}
         WHERE t.company_id = %s
-        ORDER BY tl.id DESC, mm_svc.id, mm_addlsvc.id, mm_ssrsvc.id, mm_suppsvc.id, mm_suppaddlsvc.id
+        ORDER BY tl.id DESC, mm_svc.id, mm_addlsvc.id, mm_ssrsvc.id, mm_suppsvc.id, mm_suppaddlsvc.id, mm_suppssrsvc.id
     """, [cid])
     return [_fill_computed(r) for r in rows]
 
@@ -438,7 +443,7 @@ def ticket_list_invoice_numbers_by_type(p):
     inv_type = _p_str(p.get("InvoiceType"), 100)
     from_date = _p_date(p.get("FromDate"))
     rows = []
-    for table in ("AL_Tickets", "Rescheduled_Al_Ticket", "Cancellation_AL_Tickets"):
+    for table in ("AL_Tickets", "Rescheduled_Al_Ticket", "Cancellation_AL_Tickets", "SSR_AL_Tickets"):
         rows += query(f"""
             SELECT invoice_number, invoice_date FROM `{table}`
             WHERE company_id = %s AND {_ci('invoice_type')}
@@ -465,7 +470,7 @@ def ticket_list_for_balance(p):
             tl.markup, tl.addl_markup, tl.ssr_markup, tl.service_fee, tl.addl_service_fee, tl.ssr_service_fee, tl.gst_pct,
             tl.status, tl.office_id, tl.fop, tl.card_number,
             tl.supp_comm_on, tl.supp_comm_type, tl.supp_comm_value, tl.supp_tds_per,
-            tl.supp_markup, tl.supp_addl_markup, tl.supp_service_fee, tl.supp_addl_service_fee, tl.supp_gst_pct,
+            tl.supp_markup, tl.supp_addl_markup, tl.supp_service_fee, tl.supp_addl_service_fee, tl.supp_ssr_markup, tl.supp_ssr_service_fee, tl.supp_gst_pct,
             tl.total_billed, tl.supplier_ledger_id, supp.name AS supplier_name
         FROM `AL_Tickets` t
         INNER JOIN `Ledgers` cust ON cust.id = t.customer_ledger_id
@@ -510,7 +515,7 @@ def ticket_get_lines(p):
                tl.markup, tl.addl_markup, tl.ssr_markup, tl.service_fee, tl.addl_service_fee, tl.ssr_service_fee,
                tl.gst_pct, tl.total_billed, tl.status, tl.office_id, tl.fop, tl.card_number,
                tl.supp_comm_on, tl.supp_comm_type, tl.supp_comm_value, tl.supp_tds_per,
-               tl.supp_markup, tl.supp_addl_markup, tl.supp_service_fee, tl.supp_addl_service_fee, tl.supp_gst_pct,
+               tl.supp_markup, tl.supp_addl_markup, tl.supp_service_fee, tl.supp_addl_service_fee, tl.supp_ssr_markup, tl.supp_ssr_service_fee, tl.supp_gst_pct,
                ls.name AS supplier_name,
                {_COMPUTED_PLACEHOLDERS},
                {_GST_HIDDEN}
@@ -519,7 +524,7 @@ def ticket_get_lines(p):
         LEFT JOIN `Ledgers` ls ON ls.id = tl.supplier_ledger_id
         {_GST_JOINS}
         WHERE tl.ticket_id = %s
-        ORDER BY tl.id, mm_svc.id, mm_addlsvc.id, mm_ssrsvc.id, mm_suppsvc.id, mm_suppaddlsvc.id
+        ORDER BY tl.id, mm_svc.id, mm_addlsvc.id, mm_ssrsvc.id, mm_suppsvc.id, mm_suppaddlsvc.id, mm_suppssrsvc.id
     """, [tid])
     return [bits(_fill_computed(r), "rescheduled", "canceled") for r in rows]
 
@@ -541,7 +546,7 @@ _LINE_SCHEMA = [
     ("status", _NV(15)), ("office_id", _NV(30)), ("fop", _NV(20)), ("card_number", _NV(40)),
     ("supp_comm_on", _NV(20)), ("supp_comm_type", _NV(12)), ("supp_comm_value", _D142), ("supp_tds_per", _D52),
     ("supp_markup", _D142), ("supp_addl_markup", _D142), ("supp_service_fee", _D142),
-    ("supp_addl_service_fee", _D142), ("supp_gst_pct", _D52), ("total_billed", _D142),
+    ("supp_addl_service_fee", _D142), ("supp_ssr_markup", _D142), ("supp_ssr_service_fee", _D142), ("supp_gst_pct", _D52), ("total_billed", _D142),
     ("supplier_name", _NV(150)),
 ]
 # Line columns written by MERGE UPDATE / INSERT, in the T-SQL INSERT column order
@@ -837,6 +842,41 @@ def voucher_get_by_id(p):
     return _text(query(f"SELECT {_VOUCHER_COLS} FROM `Vouchers` WHERE id = %s AND company_id = %s", [vid, cid]))
 
 
+def _voucher_prefix(voucher_type):
+    prefix_map = {
+        "Payment": "PV",
+        "Receipt": "RV",
+        "Contra": "CV",
+        "Debit Note": "DN",
+        "Credit Note": "CN",
+    }
+    return prefix_map.get(voucher_type or "Journal", "JV")
+
+
+@sp("dbo.sp_Voucher", "NEXT_NUMBER")
+def voucher_next_number(p):
+    cid = _p_int(p.get("CompanyId"))
+    vtype = _p_str(p.get("VoucherType"), 50) or "Journal"
+    prefix = _voucher_prefix(vtype)
+    rows = query(
+        "SELECT `voucher_no` FROM `Vouchers` WHERE company_id = %s AND category = 'MANUAL' AND `voucher_no` LIKE %s",
+        [cid, f"{prefix}-%"],
+    )
+    max_num = 0
+    pattern = re.compile(rf"^{re.escape(prefix)}-(\d+)$")
+    for r in rows:
+        vno = r.get("voucher_no") or ""
+        m = pattern.match(vno)
+        if m:
+            try:
+                num = int(m.group(1))
+                if num > max_num:
+                    max_num = num
+            except ValueError:
+                pass
+    return [{"next_number": f"{prefix}-{max_num + 1}"}]
+
+
 def _str2(d):
     """CAST(<decimal(38,2)> AS NVARCHAR(30))."""
     d = _scale(d, 2)
@@ -892,19 +932,25 @@ def voucher_save(p):
     if bad is not None:
         return _err("Line " + str(bad + 1) + " references a ledger that doesn't exist.")
 
-    # Resolved lines_json (FOR JSON PATH): ledger_id, ledger_name, debit, credit - INNER JOIN Ledgers.
+    # Resolved lines_json: ledger_id, ledger_name, debit, credit, bill_allocations
     resolved = []
     for (_, v), d, c in zip(entries, debits, credits):
         lid = _jcol(v, "ledger_id", ("int",))
         if lid is None or lid not in found:
             continue
-        resolved.append({"ledger_id": lid, "ledger_name": found[lid],
-                         "debit": d if d is not None else zero, "credit": c if c is not None else zero})
-    resolved_json = _for_json_path(resolved)
+        line_item = {
+            "ledger_id": lid, "ledger_name": found[lid],
+            "debit": d if d is not None else zero, "credit": c if c is not None else zero
+        }
+        if isinstance(v, dict) and "bill_allocations" in v:
+            line_item["bill_allocations"] = v["bill_allocations"]
+        resolved.append(line_item)
+    resolved_json = json.dumps(resolved, default=str)
 
     try:
         with transaction.atomic():
             vtype = voucher_type if voucher_type is not None else "Journal"
+            prefix = _voucher_prefix(vtype)
             if vid is not None:
                 execute("""
                     UPDATE `Vouchers`
@@ -914,18 +960,30 @@ def voucher_save(p):
                 """, [branch_name, vtype, voucher_date, narration, total_debit, total_credit, resolved_json, vid])
                 result_id = vid
             else:
-                max_vch = query_one(
-                    f"SELECT COALESCE(MAX(CAST(SUBSTRING(voucher_no, 5) AS UNSIGNED)), 0) AS m "
-                    f"FROM `Vouchers` WHERE company_id = %s AND {_ci_lit('category', 'MANUAL')} AND voucher_no LIKE 'VCH-%%'", [cid]
+                rows = query(
+                    "SELECT `voucher_no` FROM `Vouchers` WHERE company_id = %s AND category = 'MANUAL' AND `voucher_no` LIKE %s",
+                    [cid, f"{prefix}-%"],
                 )
-                next_num = int((max_vch and max_vch.get("m")) or 0) + 1
+                max_num = 0
+                pattern = re.compile(rf"^{re.escape(prefix)}-(\d+)$")
+                for r in rows:
+                    vno = r.get("voucher_no") or ""
+                    m = pattern.match(vno)
+                    if m:
+                        try:
+                            num = int(m.group(1))
+                            if num > max_num:
+                                max_num = num
+                        except ValueError:
+                            pass
+                vch_no = f"{prefix}-{max_num + 1}"
                 now = _now()
                 _, result_id = execute("""
                     INSERT INTO `Vouchers`
                         (company_id, branch_name, voucher_type, voucher_date, narration, category, voucher_no,
                          total_debit, total_credit, lines_json, created_at, updated_at)
                     VALUES (%s, %s, %s, %s, %s, 'MANUAL', %s, %s, %s, %s, %s, %s)
-                """, [cid, branch_name, vtype, voucher_date, narration, f"VCH-{next_num}",
+                """, [cid, branch_name, vtype, voucher_date, narration, vch_no,
                       total_debit, total_credit, resolved_json, now, now])
                 result_id = int(result_id)
         rows = _text(query(f"SELECT {_VOUCHER_COLS}, 'Success' AS status FROM `Vouchers` WHERE id = %s", [result_id]))

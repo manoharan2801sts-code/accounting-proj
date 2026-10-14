@@ -30,6 +30,13 @@ from django.db import connection
 
 
 def exec_sp(proc_name, params=None):
+    # Live (MySQL/TiDB) has no stored procedures: each procedure's logic is
+    # reproduced in Python in accounting/sp_mysql/ (StoredProcedures.sql is
+    # kept only as a reference in backend/sp_reference/).
+    if connection.vendor != "microsoft":
+        from .sp_mysql import exec_sp as exec_sp_mysql
+        return exec_sp_mysql(proc_name, params)
+
     """
     Executes a stored procedure by name and returns its ONE result set
     as a list of plain dicts (column_name -> value) — per this project's
@@ -47,13 +54,6 @@ def exec_sp(proc_name, params=None):
     Returns [] for an action that returns no rows (e.g. a bare DELETE
     that doesn't SELECT anything back) rather than raising.
     """
-    # Live (MySQL/TiDB) has no stored procedures: each procedure's logic is
-    # reproduced in Python in accounting/sp_mysql/ (StoredProcedures.sql is
-    # kept only as a reference in backend/sp_reference/).
-    if connection.vendor != "microsoft":
-        from .sp_mysql import exec_sp as exec_sp_mysql
-        return exec_sp_mysql(proc_name, params)
-
     params = params or {}
     if params:
         assignments = ", ".join(f"@{name}=%s" for name in params.keys())
@@ -259,18 +259,28 @@ _COMPANY_MASTER_FIELD_PARAMS = {
     "books_beginning_from": "BooksBeginningFrom", "gst_reg_type": "GstRegType", "gst_no": "GstNo",
     "pan_number": "PanNumber", "cin_number": "CinNumber", "tan_number": "TanNumber", "hsn_sac": "HsnSac",
     "currency_symbol": "CurrencySymbol", "currency_name": "CurrencyName", "decimal_places": "DecimalPlaces",
-    "logo_base64": "LogoBase64", "seal_base64": "SealBase64",
+    "logo_base64": "LogoBase64", "seal_base64": "SealBase64", "terms_conditions": "TermsConditions",
+    "bank_account_holder": "BankAccountHolder", "bank_account_no": "BankAccountNo", "bank_ifsc": "BankIfsc", "bank_swift": "BankSwift", "bank_name": "BankName", "bank_branch": "BankBranch",
 }
 
 
-def company_master_get(company_id):
-    """One company by id - views.company_master_list's ?id= branch. None if not found."""
-    return exec_sp_one("dbo.sp_CompanyMaster", {"Action": "LIST", "Id": company_id})
+def company_master_get(company_id, images=None):
+    """One company by id - views.company_master_list's ?id= branch. None if not found.
+    images: None (logo/seal left out - they can be MBs), "logo" or "all"."""
+    return exec_sp_one("dbo.sp_CompanyMaster", {"Action": "LIST", "Id": company_id, "Images": images})
 
 
-def company_master_list():
+def company_master_set_invoice_template(company_id, template):
+    """Company Master > Choose Invoice Template. Raises StoredProcedureError on a bad template / unsaved company."""
+    row = exec_sp_one("dbo.sp_CompanyMaster", {"Action": "SET_INVOICE_TEMPLATE", "Id": company_id, "InvoiceTemplate": template})
+    if not row or row.get("status") == "Error":
+        raise StoredProcedureError((row or {}).get("error") or "Could not save the invoice template.")
+    return row
+
+
+def company_master_list(images=None):
     """Every company, ordered by name - views.company_master_list's bare GET."""
-    return exec_sp("dbo.sp_CompanyMaster", {"Action": "LIST"})
+    return exec_sp("dbo.sp_CompanyMaster", {"Action": "LIST", "Images": images})
 
 
 def company_master_save(fields, company_id=None):
@@ -590,6 +600,12 @@ def voucher_get(voucher_id, company_id):
     return exec_sp_one("dbo.sp_Voucher", {"Action": "GET_BY_ID", "Id": voucher_id, "CompanyId": company_id})
 
 
+def voucher_next_number(company_id, voucher_type):
+    """The number the next voucher of this type gets (JV-n / PV-n / RV-n / CV-n / DN-n / CN-n)."""
+    row = exec_sp_one("dbo.sp_Voucher", {"Action": "NEXT_NUMBER", "CompanyId": company_id, "VoucherType": voucher_type})
+    return (row or {}).get("next_number")
+
+
 def voucher_save(company_id, branch_name, voucher_type, voucher_date, narration, lines, voucher_id=None):
     """
     Creates or updates (when voucher_id is given) a manual Voucher -
@@ -811,7 +827,6 @@ def cancellation_ticket_update(cancellation_id, company_id, header_fields, lines
     return {"id": row["id"], "voucher_id": row.get("voucher_id"), "voucher_no": row.get("voucher_no")}
 
 
-
 # ==========================================================================
 # User Management (dbo.sp_AppUser / sp_MenuMaster / sp_UserMenuAccess) -
 # see StoredProcedures.sql. No login/session system exists yet - these
@@ -893,3 +908,51 @@ def user_menu_access_save(user_id, access_list, created_by=None):
     if row and row.get("status") == "Error":
         raise StoredProcedureError(row.get("error") or "Could not save this user's access.")
     return row
+
+
+# ---------------------------------------------------------------------------
+# SSR Updation - dbo.sp_SSRTicket
+# ---------------------------------------------------------------------------
+def ssr_tickets_list(company_id):
+    """Every saved SSR line (flat) - the SSR page's Find popup."""
+    return exec_sp("dbo.sp_SSRTicket", {"Action": "LIST", "CompanyId": company_id})
+
+
+def ssr_ticket_get(ssr_id, company_id):
+    """One SSR Updation's header + its lines. Returns (header, lines) or (None, None)."""
+    header = exec_sp_one("dbo.sp_SSRTicket", {"Action": "GET_HEADER", "Id": ssr_id, "CompanyId": company_id})
+    if not header or header.get("status") == "Error":
+        return None, None
+    lines = exec_sp("dbo.sp_SSRTicket", {"Action": "GET_LINES", "Id": ssr_id, "CompanyId": company_id})
+    return header, lines
+
+
+def ssr_ticket_save(company_id, header_fields, lines, jv_narration, jv_total_debit, jv_total_credit, ssr_id=None):
+    """
+    Creates (ssr_id None) or updates an SSR Updation + its lines + its own
+    ALS-n Journal Voucher in ONE dbo.sp_SSRTicket SAVE call. `lines` are
+    dicts keyed by the SSR_AL_TicketLines columns plus supplier_name, with
+    ssr_items already a JSON string and total_billed pre-computed. Raises
+    StoredProcedureError on a validation failure. Returns
+    {"id", "line_ids", "voucher_id", "voucher_no"}.
+    """
+    import json as _json
+    params = {
+        "Action": "SAVE", "Id": ssr_id, "CompanyId": company_id,
+        "OriginalTicketId": header_fields.get("original_ticket_id"),
+        "SourceRescheduleTicketId": header_fields.get("source_reschedule_ticket_id"),
+        "CustomerName": header_fields.get("customer_name"), "BranchName": header_fields.get("branch_name"),
+        "InvoiceNumber": header_fields.get("invoice_number"), "InvoiceDate": header_fields.get("invoice_date"),
+        "InvoiceType": header_fields.get("invoice_type"), "TravelType": header_fields.get("travel_type"),
+        "UserName": header_fields.get("user_name"), "Currency": header_fields.get("currency"),
+        "Roe": header_fields.get("roe"), "SsrReference": header_fields.get("ssr_reference"),
+        "SsrRefDate": header_fields.get("ssr_ref_date"), "AirlinePnr": header_fields.get("airline_pnr"),
+        "GdsPnr": header_fields.get("gds_pnr"), "PaymentMode": header_fields.get("payment_mode"),
+        "LinesJson": _json.dumps(lines, default=str),
+        "JvNarration": jv_narration, "JvTotalDebit": jv_total_debit, "JvTotalCredit": jv_total_credit,
+    }
+    row = exec_sp_one("dbo.sp_SSRTicket", params)
+    if not row or row.get("status") == "Error":
+        raise StoredProcedureError((row or {}).get("error") or "Could not save this SSR Updation.")
+    line_ids = [int(x) for x in row["line_ids"].split(",")] if row.get("line_ids") else []
+    return {"id": row["id"], "line_ids": line_ids, "voucher_id": row.get("voucher_id"), "voucher_no": row.get("voucher_no")}

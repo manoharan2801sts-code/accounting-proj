@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
   <link href="assets/css/design-system.css" rel="stylesheet" />
-  <link href="assets/css/app.css" rel="stylesheet" />
+  <link href="assets/css/app.css?v=7" rel="stylesheet" />
   <link rel="icon" type="image/png" href="assets/img/favicon.png" />
   <style>
     /* Locked to the viewport - only the table body scrolls, not the whole
@@ -181,12 +181,13 @@
                 <th>S PNR</th>
                 <th>Air-PNR</th>
                 <th>Ticket No</th>
+                <th>Vch No.</th>
                 <th class="amt-header">Debit</th>
                 <th class="amt-header">Credit</th>
               </tr>
             </thead>
             <tbody id="main-data-tbody">
-              <tr><td colspan="9" style="text-align:center; padding:2rem; color:var(--color-text-muted);">Loading...</td></tr>
+              <tr><td colspan="10" style="text-align:center; padding:2rem; color:var(--color-text-muted);">Loading...</td></tr>
             </tbody>
           </table>
         </div>
@@ -233,10 +234,10 @@
   </div>
 
   <script src="assets/js/mock-data.js"></script>
-  <script src="assets/js/api.js?v=3"></script>
-  <script src="assets/js/hardcode.js"></script>
-  <script src="assets/js/util.js?v=2"></script>
-  <script src="assets/js/shell.js?v=21"></script>
+  <script src="assets/js/api.js?v=4"></script>
+  <script src="assets/js/hardcode.js?v=2"></script>
+  <script src="assets/js/util.js?v=3"></script>
+  <script src="assets/js/shell.js?v=28"></script>
   <script>
     // Not gated on DOMContentLoaded - this page's <script> can be injected
     // by the app's SPA navigation (shell.js's navigateTo) into a document
@@ -267,10 +268,15 @@
       } catch (err) {
         console.error("Shell init failed", err);
       }
+      // Back from a ticket opened off the Day Book -> same dates, filter, scroll.
+      const rs = VoyagerShell.reportState.consume();
       const today = new Date().toISOString().slice(0, 10);
       document.getElementById("filter-from").value = today;
       document.getElementById("filter-to").value = today;
+      VoyagerShell.reportState.applyInputs(rs);
       await loadDayBook();
+      if (rs && rs.extra) restoreFilterSpec(rs.extra.filter);
+      VoyagerShell.reportState.restoreAfterLoad(rs);
     })();
 
     function fmtAmt(n) {
@@ -287,7 +293,7 @@
 
     async function loadDayBook() {
       const tbody = document.getElementById("main-data-tbody");
-      tbody.innerHTML = `<tr><td colspan="9" style="text-align:center; padding:2rem; color:var(--color-text-muted);">Loading...</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="10" style="text-align:center; padding:2rem; color:var(--color-text-muted);">Loading...</td></tr>`;
 
       const fromDate = document.getElementById("filter-from").value;
       const toDate = document.getElementById("filter-to").value;
@@ -308,7 +314,7 @@
         applyFilterAndRender();
       } catch (err) {
         console.error("Could not load the day book - is the Django backend running?", err);
-        tbody.innerHTML = `<tr><td colspan="9" style="text-align:center; padding:2rem; color:var(--color-text-muted);">Could not load data. Is the Django backend running on localhost:8000?</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="10" style="text-align:center; padding:2rem; color:var(--color-text-muted);">Could not load data. Is the Django backend running on localhost:8000?</td></tr>`;
       }
     }
 
@@ -328,6 +334,40 @@
       { key: "credit", label: "Credit", get: (t) => (t.credit ? fmtAmt(t.credit) : "-") },
     ];
     let isAdvanceMode = false;
+    // The Filter popup as last applied - kept so Back from a ticket opened
+    // off this report re-applies the same filter (see restoreFilterSpec).
+    let lastFilterSpec = null;
+    VoyagerShell.reportState.provide(() => ({ filter: lastFilterSpec }));
+    function readFilterSpec() {
+      return {
+        advance: isAdvanceMode,
+        simple: document.getElementById("ef-simple-input").value,
+        conds: Array.from(document.querySelectorAll("#ef-cond-list .ef-cond-row")).map((row) => ({
+          col: row.querySelector(".ef-cond-column").value,
+          value: row.querySelector(".ef-cond-value").value,
+          join: row.querySelector(".ef-cond-join") ? row.querySelector(".ef-cond-join").value : null,
+        })),
+      };
+    }
+    function restoreFilterSpec(spec) {
+      if (!spec) return;
+      openFilterPopup();
+      if (spec.advance) {
+        document.getElementById("ef-advance-toggle-btn").click();
+        (spec.conds || []).forEach((c, i) => {
+          if (i > 0) addConditionRow();
+          const row = document.querySelectorAll("#ef-cond-list .ef-cond-row")[i];
+          const sel = row.querySelector(".ef-cond-column");
+          sel.dataset.value = c.col;
+          refreshConditionColumnOptions();
+          row.querySelector(".ef-cond-value").value = c.value || "";
+          if (c.join && row.querySelector(".ef-cond-join")) row.querySelector(".ef-cond-join").value = c.join;
+        });
+      } else {
+        document.getElementById("ef-simple-input").value = spec.simple || "";
+      }
+      document.getElementById("ef-apply-btn").click();
+    }
 
     function applyFilterAndRender() {
       const txns = activeFilter
@@ -435,6 +475,7 @@
     });
 
     document.getElementById("ef-apply-btn").addEventListener("click", () => {
+      lastFilterSpec = readFilterSpec();
       if (isAdvanceMode) {
         const rows = Array.from(document.querySelectorAll("#ef-cond-list .ef-cond-row"));
         const conditions = rows.map((row) => {
@@ -479,13 +520,24 @@
     });
     document.getElementById("filter-clear-btn").addEventListener("click", () => {
       activeFilter = null;
+      lastFilterSpec = null;
       updateFilterChip();
       applyFilterAndRender();
     });
 
     function navigateToTicket(row) {
+      // A manual voucher (Transactions > Voucher) opens read-only, Back
+      // returns here.
+      if (row.dataset.voucherId) {
+        window.location.href = `voucher-entry.html?id=${row.dataset.voucherId}&view=1&returnTo=${encodeURIComponent("report-day-book.html" + window.location.search)}`;
+        return;
+      }
       if (row.dataset.cancellationTicketId) {
         window.location.href = `ticket-entry.html?cancellation_saved_id=${row.dataset.cancellationTicketId}`;
+        return;
+      }
+      if (row.dataset.ssrTicketId) {
+        window.location.href = `trans-airline-ssr.html?ssr_saved_id=${row.dataset.ssrTicketId}`;
         return;
       }
       window.location.href = row.dataset.rescheduleTicketId
@@ -498,7 +550,7 @@
       const totalRow = document.getElementById("lb-total-row");
       selectedRowIndex = -1; // stale after a full re-render - rows are new DOM nodes
       if (!txns.length) {
-        tbody.innerHTML = `<tr><td colspan="9" style="text-align:center; padding:2rem; color:var(--color-text-muted);">No transactions match the current filter.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="10" style="text-align:center; padding:2rem; color:var(--color-text-muted);">No transactions match the current filter.</td></tr>`;
         totalRow.innerHTML = "";
         return;
       }
@@ -507,7 +559,7 @@
       const totalCredit = txns.reduce((sum, t) => sum + (Number(t.credit) || 0), 0);
 
       const rows = txns.map((t, idx) => `
-        <tr class="${(t.ticket_id || t.reschedule_ticket_id || t.cancellation_ticket_id) ? "txn-row" : ""}" data-ticket-id="${t.ticket_id || ""}" data-reschedule-ticket-id="${t.reschedule_ticket_id || ""}" data-cancellation-ticket-id="${t.cancellation_ticket_id || ""}" title="${(t.ticket_id || t.reschedule_ticket_id || t.cancellation_ticket_id) ? "Click to open this ticket" : ""}">
+        <tr class="${(t.ticket_id || t.reschedule_ticket_id || t.cancellation_ticket_id || t.ssr_ticket_id || t.voucher_id) ? "txn-row" : ""}" data-ticket-id="${t.ticket_id || ""}" data-reschedule-ticket-id="${t.reschedule_ticket_id || ""}" data-cancellation-ticket-id="${t.cancellation_ticket_id || ""}" data-ssr-ticket-id="${t.ssr_ticket_id || ""}" data-voucher-id="${t.voucher_id || ""}" title="${t.voucher_id ? "Click to open this voucher" : (t.ticket_id || t.reschedule_ticket_id || t.cancellation_ticket_id || t.ssr_ticket_id) ? "Click to open this ticket" : ""}">
           <td class="rownum">${idx + 1}</td>
           <td>${fmtDateDisplay(t.date)}</td>
           <td class="particulars">${t.particulars || "-"}</td>
@@ -515,6 +567,7 @@
           <td>${t.s_pnr || "-"}</td>
           <td>${t.air_pnr || "-"}</td>
           <td>${t.ticket_no || "-"}</td>
+          <td>${t.invoice_number || "-"}</td>
           <td class="amt">${t.debit ? fmtAmt(t.debit) : "-"}</td>
           <td class="amt">${t.credit ? fmtAmt(t.credit) : "-"}</td>
         </tr>
@@ -526,7 +579,7 @@
       });
 
       totalRow.innerHTML = `
-        <td colspan="7" style="text-align:right;">Total :</td>
+        <td colspan="8" style="text-align:right;">Total :</td>
         <td class="amt">${fmtAmt(totalDebit)}</td>
         <td class="amt">${fmtAmt(totalCredit)}</td>`;
       syncTotalColumnWidths();

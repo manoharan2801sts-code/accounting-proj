@@ -345,6 +345,7 @@
     "modal-supp-comm-value": "Commission A/c", "modal-supp-tds-per": "Commission TDS A/c",
     "modal-supp-markup": "Supplier Markup A/c", "modal-supp-addl-markup": "Supplier Addl Markup A/c",
     "modal-supp-service-fee": "Supplier Service Fee A/c", "modal-supp-addl-service-fee": "Supplier Addl Service Fee A/c",
+    "modal-supp-ssr-markup": "Supplier SSR Markup A/c", "modal-supp-ssr-service-fee": "Supplier SSR Service Fee A/c",
     "modal-supp-gst-pct": "Input IGST A/c",
     // Reschedule PNR Details tab only - same guard, so these can't hold a
     // value either until their own Master Mapping ledger is set.
@@ -772,10 +773,12 @@
     // "Supplier Addl Service Fee A/c"), not one flat rate hand-typed on
     // the line. supp_gst_pct is no longer read here - see computeSuppLine.
     const suppGst = (p.supp_service_fee || 0) * ((fieldLedgerGstPct["Supplier Service Fee A/c"] || 0) / 100)
-      + (p.supp_addl_service_fee || 0) * ((fieldLedgerGstPct["Supplier Addl Service Fee A/c"] || 0) / 100);
+      + (p.supp_addl_service_fee || 0) * ((fieldLedgerGstPct["Supplier Addl Service Fee A/c"] || 0) / 100)
+      + (p.supp_ssr_service_fee || 0) * ((fieldLedgerGstPct["Supplier SSR Service Fee A/c"] || 0) / 100);
     const total = supplierCost - discount + tds + p.markup + p.addl_markup + p.ssr_markup
       + p.service_fee + p.addl_service_fee + p.ssr_service_fee + gst
-      + (p.supp_markup || 0) + (p.supp_addl_markup || 0) + (p.supp_service_fee || 0) + (p.supp_addl_service_fee || 0) + suppGst;
+      + (p.supp_markup || 0) + (p.supp_addl_markup || 0) + (p.supp_ssr_markup || 0)
+      + (p.supp_service_fee || 0) + (p.supp_addl_service_fee || 0) + (p.supp_ssr_service_fee || 0) + suppGst;
     return { supplierCost, discount, tds, gst, total };
   }
   // Supplier Commission - same shape as the Discount calc above, but keyed
@@ -789,7 +792,8 @@
     // Same cumulative-chain override as computeFareLine's own TDS above.
     const tds = p.supp_tds_amount_override != null ? p.supp_tds_amount_override : commission * (p.supp_tds_per / 100);
     const gst = (p.supp_service_fee || 0) * ((fieldLedgerGstPct["Supplier Service Fee A/c"] || 0) / 100)
-      + (p.supp_addl_service_fee || 0) * ((fieldLedgerGstPct["Supplier Addl Service Fee A/c"] || 0) / 100);
+      + (p.supp_addl_service_fee || 0) * ((fieldLedgerGstPct["Supplier Addl Service Fee A/c"] || 0) / 100)
+      + (p.supp_ssr_service_fee || 0) * ((fieldLedgerGstPct["Supplier SSR Service Fee A/c"] || 0) / 100);
     return { commission, tds, gst };
   }
 
@@ -804,6 +808,7 @@
     service_fee: 0, addl_service_fee: 0, ssr_service_fee: 0, gst_pct: 0, supplier_name: "", office_id: "", fop: "Cash", card_number: "",
     supp_comm_on: "", supp_comm_type: "", supp_comm_value: 0, supp_tds_per: 0,
     supp_markup: 0, supp_addl_markup: 0, supp_service_fee: 0, supp_addl_service_fee: 0, supp_gst_pct: 0,
+    supp_ssr_markup: 0, supp_ssr_service_fee: 0,
     agent_penalty: 0, reschedule_penalty: 0, cancellation_penalty: 0,
   });
 
@@ -826,7 +831,8 @@
     // number, overflowing and squeezing the real Amount/TDS/Taxable/GST
     // boxes next to it out of view. Cancellation mode uses this same
     // merged layout too (see openFareModal) - same reasoning applies.
-    const inReschedLayout = rescheduleMode || cancellationMode;
+    // Booking uses the same merged Discount/TDS row (see layoutBookingDiscTds).
+    const inReschedLayout = rescheduleMode || cancellationMode || isBookingMode();
     // Discount % and Cust Discount On stay visible always now - only
     // Percentage makes them editable (Discount % is meaningless for Flat,
     // Cust Discount On is the base % is calculated against).
@@ -871,8 +877,8 @@
     // Commission Amount box, the % side has no visible label (just the
     // .acct-pct-box's "%" suffix) - same treatment as Discount's own box.
     // Both tabs share this merged layout now - see the same note in
-    // updateDiscValueLabel() above. Cancellation mode too.
-    const inReschedLayout = rescheduleMode || cancellationMode;
+    // updateDiscValueLabel() above. Cancellation and Booking too.
+    const inReschedLayout = rescheduleMode || cancellationMode || isBookingMode();
     document.getElementById("modal-supp-comm-value-field").style.display = "contents";
     document.getElementById("modal-supp-comm-val-label").style.display = inReschedLayout ? "none" : "";
     document.getElementById("modal-supp-comm-value").disabled = !isPct || viewMode;
@@ -904,6 +910,9 @@
   // integer part at 10 digits, truncating as the user types.
   document.addEventListener("input", (e) => {
     if (!e.target.matches || !e.target.matches(".dom-amount")) return;
+    // A field inside an .allow-neg container (Reschedule's Base Fare & Tax
+    // Components card) may also start with one "-"; .no-neg fields never.
+    const neg = !!(e.target.closest(".allow-neg") && !e.target.matches(".no-neg")) && /^\s*-/.test(e.target.value);
     let v = e.target.value.replace(/[^0-9.]/g, "");
     const firstDot = v.indexOf(".");
     if (firstDot !== -1) v = v.slice(0, firstDot + 1) + v.slice(firstDot + 1).replace(/\./g, "");
@@ -912,6 +921,7 @@
       const fixedInt = intPart.slice(0, 10);
       v = decPart !== undefined ? `${fixedInt}.${decPart}` : fixedInt;
     }
+    if (neg) v = `-${v}`;
     if (v !== e.target.value) e.target.value = v;
   });
   function readModalPassenger() {
@@ -954,6 +964,7 @@
       supp_tds_per: num("modal-supp-tds-per"),
       supp_markup: num("modal-supp-markup"), supp_addl_markup: num("modal-supp-addl-markup"),
       supp_service_fee: num("modal-supp-service-fee"), supp_addl_service_fee: num("modal-supp-addl-service-fee"),
+      supp_ssr_markup: num("modal-supp-ssr-markup"), supp_ssr_service_fee: num("modal-supp-ssr-service-fee"),
       supp_gst_pct: num("modal-supp-gst-pct"),
       agent_penalty: num("modal-agent-penalty"),
       // Same one input, repurposed - see openFareModal's cancellationMode
@@ -1010,6 +1021,12 @@
         chain_supp_addl_markup: passengers[editingIndex].chain_supp_addl_markup,
         cust_markup_reversal_checked: passengers[editingIndex].cust_markup_reversal_checked,
         supp_markup_reversal_checked: passengers[editingIndex].supp_markup_reversal_checked,
+        // Booking/Reschedule chain SSR amounts - what each "Return ..." SSR
+        // checkbox fills in (see setupCxSsrReturn).
+        chain_seat: passengers[editingIndex].chain_seat,
+        chain_meal: passengers[editingIndex].chain_meal,
+        chain_baggage: passengers[editingIndex].chain_baggage,
+        chain_other_ssr: passengers[editingIndex].chain_other_ssr,
       } : {}),
     };
   }
@@ -1079,6 +1096,7 @@
     const rows = side === "supplier" ? [
       { label: "Supplier Service Fee", amount: p.supp_service_fee, field: "Supplier Service Fee A/c" },
       { label: "Supplier Addl Service Fee", amount: p.supp_addl_service_fee, field: "Supplier Addl Service Fee A/c" },
+      ...(isBookingMode() || rescheduleMode ? [{ label: "Supplier SSR Service Fee", amount: p.supp_ssr_service_fee, field: "Supplier SSR Service Fee A/c" }] : []),
     ] : [
       { label: "Service Fee", amount: p.service_fee, field: "Service Fee A/c" },
       { label: "Addl Service Fee", amount: p.addl_service_fee, field: "Addl Service Fee A/c" },
@@ -1212,7 +1230,7 @@
     // Taxable Amount - display-only, not used in any calculation. Same
     // convention as the Customer card's own modal-taxable-amount.
     document.getElementById("modal-supp-taxable-amount").textContent =
-      fmtN((p.supp_service_fee || 0) + (p.supp_addl_service_fee || 0));
+      fmtN((p.supp_service_fee || 0) + (p.supp_addl_service_fee || 0) + (p.supp_ssr_service_fee || 0));
     return r;
   }
   function writeModalPassenger(p) {
@@ -1263,6 +1281,8 @@
     document.getElementById("modal-supp-addl-markup").value = fmtN(p.supp_addl_markup || 0);
     document.getElementById("modal-supp-service-fee").value = fmtN(p.supp_service_fee || 0);
     document.getElementById("modal-supp-addl-service-fee").value = fmtN(p.supp_addl_service_fee || 0);
+    document.getElementById("modal-supp-ssr-markup").value = fmtN(p.supp_ssr_markup || 0);
+    document.getElementById("modal-supp-ssr-service-fee").value = fmtN(p.supp_ssr_service_fee || 0);
     document.getElementById("modal-supp-gst-pct").value = Number(p.supp_gst_pct || 0).toFixed(2);
     document.getElementById("modal-agent-penalty").value = fmtN(p.agent_penalty || 0);
     // Same one input, repurposed for Cancellation Penalty in cancellation
@@ -1312,6 +1332,8 @@
     document.getElementById("modal-supp-addl-markup").value = fmtN(t.supp_addl_markup || 0);
     document.getElementById("modal-supp-service-fee").value = fmtN(t.supp_service_fee || 0);
     document.getElementById("modal-supp-addl-service-fee").value = fmtN(t.supp_addl_service_fee || 0);
+    document.getElementById("modal-supp-ssr-markup").value = fmtN(t.supp_ssr_markup || 0);
+    document.getElementById("modal-supp-ssr-service-fee").value = fmtN(t.supp_ssr_service_fee || 0);
     document.getElementById("modal-supp-gst-pct").value = Number(t.supp_gst_pct || 0).toFixed(2);
     suppCommOverridden = !!(t.supp_comm_on || t.supp_comm_type || t.supp_comm_value);
     updateDiscValueLabel();
@@ -1693,6 +1715,9 @@
 
   function openFareModal(index) {
     editingIndex = index;
+    // Reschedule only: the Base Fare & Tax Components card's amounts may be
+    // negative (a minus sign is allowed there) - except Supplier Penalty.
+    document.querySelector(".dom-modal-fares-card").classList.toggle("allow-neg", !!rescheduleMode);
     const isNew = index === null;
     // Fresh per passenger - a short passenger's Reschedule tab shouldn't be
     // forced to match a DIFFERENT, longer passenger's height from earlier
@@ -1731,6 +1756,9 @@
           fop: passengers[0].fop, card_number: passengers[0].card_number,
         }
       : blankPassenger();
+    if (isBookingMode()) layoutBookingDiscTds();
+    // Reschedule: Supplier SSR Markup / SSR Service Fee too (like Booking).
+    if (rescheduleMode) showSuppSsrFields();
     writeModalPassenger(isNew ? newPaxDefaults : passengers[index]);
     document.getElementById("modal-save-btn").style.display = viewMode ? "none" : "";
     document.getElementById("modal-sector-add-btn").style.display = viewMode ? "none" : "";
@@ -1752,6 +1780,7 @@
       // one slot never needs to mean both at once.
       layoutAcctFieldsForReschedule(true);
       document.getElementById("modal-fare-supplier-penalty-field").style.display = "";
+      setupCxSsrReturn(isNew ? null : passengers[index]);
       document.getElementById("modal-reschedule-penalty-label").textContent = "Penalty Amount";
       // Customer Discount and Supplier Commission (incl. both their own
       // TDS) are auto-fetched from the booking/reschedule chain and stay
@@ -1807,6 +1836,91 @@
   // layout. Since only the DOM parent changes, readModalPassenger()/
   // writeModalPassenger()/recalcModalTotal() etc. never need to know or
   // care which layout is currently showing.
+  function isBookingMode() { return !rescheduleMode && !cancellationMode; }
+  // Cancellation only - Seat/Meal/Baggage/Other SSR each get a "Return ..."
+  // checkbox. Unticked = 0 (and locked); ticked = that SSR's amount from the
+  // booking/reschedule chain (p.chain_*), still editable. A saved amount
+  // above 0 reopens ticked.
+  const CX_SSR_RETURN_FIELDS = [
+    { key: "seat", input: "modal-seat", label: "Seat Charges" },
+    { key: "meal", input: "modal-meal", label: "Meal Charges" },
+    { key: "baggage", input: "modal-baggage", label: "Baggage" },
+    { key: "other_ssr", input: "modal-other-ssr", label: "Other SSR" },
+  ];
+  function setupCxSsrReturn(p) {
+    CX_SSR_RETURN_FIELDS.forEach((f) => {
+      const input = document.getElementById(f.input);
+      const label = input.closest(".fare-item").querySelector("label");
+      let cb = input.closest(".fare-item").querySelector(".cx-ssr-return");
+      if (!cb) {
+        // Order: label (wraps onto 2 lines) -> checkbox -> amount box.
+        label.textContent = `Return ${f.label}`;
+        label.style.cssText += "white-space:normal; line-height:1.15; text-align:right; max-width:78px;";
+        cb = document.createElement("input");
+        cb.type = "checkbox";
+        cb.className = "cx-ssr-return";
+        cb.dataset.key = f.key;
+        cb.title = `Return ${f.label}`;
+        // !important - the modal's own input rule forces every input to 22px high.
+        cb.style.cssText = "width:15px !important; height:15px !important; padding:0 !important; margin:0; flex-shrink:0; cursor:pointer; accent-color:var(--color-primary);";
+        label.after(cb);
+        cb.addEventListener("change", () => {
+          const cur = passengers[editingIndex] || {};
+          input.value = fmtN(cb.checked ? (cur[`chain_${f.key}`] || 0) : 0);
+          input.disabled = !cb.checked || viewMode;
+          recalcModalTotal();
+        });
+      }
+      const checked = !!p && (Number(p[f.key]) || 0) > 0;
+      cb.checked = checked;
+      cb.disabled = viewMode;
+      input.disabled = !checked || viewMode;
+    });
+  }
+  // Booking only - TDS % / TDS Amount sit on the Customer card's Discount
+  // row ("Discount Amount [%][amt]  TDS Amount [%][amt]") and the Supplier
+  // card's Commission Amount row - the same merged rows Reschedule/
+  // Cancellation use (acct-resched-disc-row / acct-resched-supp-row). Moves the real
+  // elements (never copies), like layoutAcctFieldsForReschedule; Taxable/GST
+  // and the Supplier card keep the default layout.
+  function layoutBookingDiscTds() {
+    const discAmt = document.getElementById("modal-disc-computed");
+    const tdsAmt = document.getElementById("modal-tds-computed");
+    [discAmt, tdsAmt].forEach((el) => {
+      el.style.flex = "1"; el.style.minWidth = "0"; el.style.width = "100%";
+      el.style.boxSizing = "border-box"; el.style.textAlign = "right";
+    });
+    document.getElementById("resched-disc-pct-slot").append(document.getElementById("modal-disc-value-field"));
+    document.getElementById("resched-disc-amt-slot").append(discAmt);
+    document.getElementById("resched-tds-pct-slot").append(document.getElementById("modal-tds-per"));
+    document.getElementById("resched-tds-amt-slot").append(tdsAmt);
+    document.getElementById("acct-default-disc-row").style.display = "none";
+    document.getElementById("acct-default-tds-row").style.display = "none";
+    document.getElementById("acct-resched-disc-row").style.display = "";
+    // Supplier card - Commission Amount [%][amt]  TDS Amount [%][amt].
+    const suppCommAmt = document.getElementById("modal-supp-comm-computed");
+    const suppTdsAmt = document.getElementById("modal-supp-tds-computed");
+    [suppCommAmt, suppTdsAmt].forEach((el) => {
+      el.style.flex = "1"; el.style.minWidth = "0"; el.style.width = "100%";
+      el.style.boxSizing = "border-box"; el.style.textAlign = "right";
+    });
+    document.getElementById("resched-supp-comm-pct-slot").append(document.getElementById("modal-supp-comm-value-field"));
+    document.getElementById("resched-supp-comm-amt-slot").append(suppCommAmt);
+    document.getElementById("resched-supp-tds-pct-slot").append(document.getElementById("modal-supp-tds-per"));
+    document.getElementById("resched-supp-tds-amt-slot").append(suppTdsAmt);
+    document.getElementById("acct-default-supp-comm-row").style.display = "none";
+    document.getElementById("acct-default-supp-tds-row").style.display = "none";
+    document.getElementById("acct-resched-supp-row").style.display = "";
+    showSuppSsrFields();
+  }
+  // Supplier SSR Markup / SSR Service Fee - 3 columns, like the Customer card
+  // (Booking and Reschedule fare popups).
+  function showSuppSsrFields() {
+    document.querySelectorAll(".supp-ssr-pair").forEach((el) => { el.style.display = ""; });
+    ["supp-markup-row", "supp-service-fee-row"].forEach((id) => {
+      document.getElementById(id).classList.replace("dom-acct-field-dual", "dom-acct-field-triple");
+    });
+  }
   function layoutAcctFieldsForReschedule(isResched) {
     const discPctField = document.getElementById("modal-disc-value-field");
     const discAmt = document.getElementById("modal-disc-computed");
@@ -1949,10 +2063,12 @@
     // rescheduleAncestorLevels).
     writeModalPassenger(isAncestor ? ancestorLevel.passenger : (isParent ? rescheduleParentPassengers[editingIndex] : passengers[editingIndex]));
     if (!readOnly) prefillRescheduleSectorsFromFirstPax();
-    // A passenger picked from the booking/previous reschedule keeps that
-    // parent line's Pax Type - it can't change on a reschedule.
-    if (rescheduleParentPassengers[editingIndex] && (passengers[editingIndex] || {}).pax_type) {
-      document.getElementById("modal-pax-type").disabled = true;
+    // A passenger picked from the booking/previous reschedule keeps the
+    // parent line's Pax Name, Pax Type, Office ID, Supplier and Airline
+    // Category - fixed on a reschedule, so they're locked here.
+    if (rescheduleParentPassengers[editingIndex]) {
+      ["modal-pax-name", "modal-pax-type", "modal-office-id", "modal-supplier", "modal-airline-category"]
+        .forEach((id) => { document.getElementById(id).disabled = true; });
     }
     // Chained (2nd+) reschedule only - writeModalPassenger's own
     // recalcModalTotal/recalcSuppTotal above just derived TDS Amount from
@@ -2128,7 +2244,8 @@
         allTaxes = lineTotal - p.basic_fare - p.yq - p.k3_tax - (p.seat + p.meal + p.baggage + p.other_ssr);
       } else {
         allTaxes = p.yr + p.tax_others
-          + (p.supp_markup || 0) + (p.supp_addl_markup || 0) + (p.supp_service_fee || 0) + (p.supp_addl_service_fee || 0) + rs.gst
+          + (p.supp_markup || 0) + (p.supp_addl_markup || 0) + (p.supp_ssr_markup || 0)
+          + (p.supp_service_fee || 0) + (p.supp_addl_service_fee || 0) + (p.supp_ssr_service_fee || 0) + rs.gst
           + p.markup + p.addl_markup + (p.ssr_markup || 0) + p.service_fee + p.addl_service_fee + (p.ssr_service_fee || 0)
           + r.gst - r.discount + r.tds + penalties;
         // Total = the fare-line total plus those same 3 penalties, so
@@ -2272,8 +2389,8 @@
       markup += p.markup + p.addl_markup + (p.ssr_markup || 0);
       serviceFee += p.service_fee + p.addl_service_fee + (p.ssr_service_fee || 0); gst += r.gst; total += r.total;
       suppCommission += rs.commission; suppTds += rs.tds;
-      suppMarkup += (p.supp_markup || 0) + (p.supp_addl_markup || 0);
-      suppServiceFee += (p.supp_service_fee || 0) + (p.supp_addl_service_fee || 0);
+      suppMarkup += (p.supp_markup || 0) + (p.supp_addl_markup || 0) + (p.supp_ssr_markup || 0);
+      suppServiceFee += (p.supp_service_fee || 0) + (p.supp_addl_service_fee || 0) + (p.supp_ssr_service_fee || 0);
       suppGst += rs.gst;
       suppMarkupRaw += (p.supp_markup || 0); suppAddlMarkupRaw += (p.supp_addl_markup || 0);
       suppServiceFeeRaw += (p.supp_service_fee || 0); suppAddlServiceFeeRaw += (p.supp_addl_service_fee || 0);
@@ -3279,6 +3396,7 @@
       supp_comm_value: l.supp_comm_value, supp_tds_per: l.supp_tds_per,
       supp_markup: l.supp_markup || 0, supp_addl_markup: l.supp_addl_markup || 0,
       supp_service_fee: l.supp_service_fee || 0, supp_addl_service_fee: l.supp_addl_service_fee || 0,
+      supp_ssr_markup: l.supp_ssr_markup || 0, supp_ssr_service_fee: l.supp_ssr_service_fee || 0,
       supp_gst_pct: l.supp_gst_pct || 0,
     }));
     renderPaxTable();
@@ -3306,6 +3424,8 @@
     { match: "report-day-book.html", label: "Day Book" },
     { match: "report-ledger-book.html", label: "Ledger" },
     { match: "report-dsr-airline-booking.html", label: "DSR" },
+    { match: "customers.html", label: "Receivables" },
+    { match: "suppliers.html", label: "Payables" },
   ];
   function applyReportBackLink(defaultLabel, defaultHref) {
     const backTarget = REPORT_BACK_TARGETS.find((r) => document.referrer.includes(r.match));
@@ -3662,6 +3782,7 @@
               ...p, basic_fare: tot.basic_fare, yq: tot.yq, yr: tot.yr, k3_tax: tot.k3_tax,
               tax_others: tot.tax_others, seat: tot.seat, meal: tot.meal, baggage: tot.baggage,
               other_ssr: tot.other_ssr,
+              chain_seat: tot.seat, chain_meal: tot.meal, chain_baggage: tot.baggage, chain_other_ssr: tot.other_ssr,
               disc_on: tot.disc_on, disc_type: tot.disc_type, disc_value: tot.disc_value,
               tds_per: tot.tds_per, tds_amount_override: tot.tds_amount,
               supp_comm_on: tot.supp_comm_on, supp_comm_type: tot.supp_comm_type, supp_comm_value: tot.supp_comm_value,
@@ -3683,6 +3804,17 @@
         // regardless.
       }
 
+      // Seat/Meal/Baggage/Other SSR start at 0 - the chain amount is only
+      // filled in once its "Return ..." checkbox is ticked (setupCxSsrReturn).
+      passengers = passengers.map((p) => ({
+        ...p,
+        chain_seat: p.chain_seat != null ? p.chain_seat : (p.seat || 0),
+        chain_meal: p.chain_meal != null ? p.chain_meal : (p.meal || 0),
+        chain_baggage: p.chain_baggage != null ? p.chain_baggage : (p.baggage || 0),
+        chain_other_ssr: p.chain_other_ssr != null ? p.chain_other_ssr : (p.other_ssr || 0),
+        seat: 0, meal: 0, baggage: 0, other_ssr: 0,
+      }));
+
       // Markup/Addl Markup/SSR Markup/Service Fee/Addl Service Fee/SSR
       // Service Fee/Agent Penalty (customer side) and Markup/Addl Markup/
       // Service Fee/Addl Service Fee/GST %/Cancellation Penalty (supplier
@@ -3702,6 +3834,7 @@
         ...p,
         markup: 0, addl_markup: 0, ssr_markup: 0, service_fee: 0, addl_service_fee: 0, ssr_service_fee: 0, agent_penalty: 0,
         supp_markup: 0, supp_addl_markup: 0, supp_service_fee: 0, supp_addl_service_fee: 0, supp_gst_pct: 0,
+    supp_ssr_markup: 0, supp_ssr_service_fee: 0,
         supplier_penalty: 0, reschedule_penalty: 0, cancellation_penalty: 0,
         // Markup Reversal - unchecked/zero until the user picks something
         // via the eye icon popup (see openMarkupReversalModal).
@@ -3976,10 +4109,13 @@
     // Pax checkboxes start unchecked - they're purely for marking who's
     // actually being rescheduled, not for controlling whether sectors are
     // shown (see renderRsSectors below, which always shows every
-    // passenger's sectors regardless of checkbox state).
+    // passenger's sectors regardless of checkbox state). Only ONE passenger
+    // -> nothing to choose, so that passenger and their sector(s) come
+    // ticked already (see renderRsSectors).
+    const single = rsLookupPassengers.length === 1;
     tbody.innerHTML = rsLookupPassengers.map((p, i) => `
       <tr>
-        <td style="padding:4px 8px;"><input type="checkbox" class="rs-pax-check" data-idx="${i}" /></td>
+        <td style="padding:4px 8px;"><input type="checkbox" class="rs-pax-check" data-idx="${i}"${single ? " checked" : ""} /></td>
         <td style="padding:4px 8px;">${p.pax_type || "-"}</td>
         <td style="padding:4px 8px;">${p.passenger_name || "-"}</td>
       </tr>
@@ -4009,7 +4145,7 @@
         seen.add(key);
         rows.push(`
           <tr>
-            <td style="padding:4px 8px;"><input type="checkbox" class="rs-sector-check" /></td>
+            <td style="padding:4px 8px;"><input type="checkbox" class="rs-sector-check"${rsLookupPassengers.length === 1 ? " checked" : ""} /></td>
             <td style="padding:4px 8px;">${s.sector || "-"}</td>
             <td style="padding:4px 8px;">${s.flight_no || "-"}</td>
             <td style="padding:4px 8px;">${s.travel_class || "-"}</td>
@@ -4460,34 +4596,6 @@
   const isSavedRecord = !!(editId || rescheduleSavedId || cancellationSavedId);
   document.getElementById("print-btn").style.display = isSavedRecord ? "" : "none";
 
-  function amountInWords(amount) {
-    const ones = ["", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten", "Eleven", "Twelve",
-      "Thirteen", "Fourteen", "Fifteen", "Sixteen", "Seventeen", "Eighteen", "Nineteen"];
-    const tens = ["", "", "Twenty", "Thirty", "Forty", "Fifty", "Sixty", "Seventy", "Eighty", "Ninety"];
-    const twoDigits = (n) => (n < 20 ? ones[n] : `${tens[Math.floor(n / 10)]}${n % 10 ? " " + ones[n % 10] : ""}`);
-    const threeDigits = (n) => {
-      const h = Math.floor(n / 100), rest = n % 100;
-      return [h ? `${ones[h]} Hundred` : "", rest ? twoDigits(rest) : ""].filter(Boolean).join(" ");
-    };
-    // Indian grouping: Crore, Lakh, Thousand, Hundred.
-    const words = (n) => {
-      if (n === 0) return "Zero";
-      const parts = [];
-      const crore = Math.floor(n / 10000000); n %= 10000000;
-      const lakh = Math.floor(n / 100000); n %= 100000;
-      const thousand = Math.floor(n / 1000); n %= 1000;
-      if (crore) parts.push(`${words(crore)} Crore`);
-      if (lakh) parts.push(`${twoDigits(lakh)} Lakh`);
-      if (thousand) parts.push(`${twoDigits(thousand)} Thousand`);
-      if (n) parts.push(threeDigits(n));
-      return parts.join(" ");
-    };
-    const abs = Math.abs(Math.round(amount * 100));
-    const rupees = Math.floor(abs / 100), paise = abs % 100;
-    const ccy = (document.getElementById("currency").textContent || "INR").trim();
-    return `${ccy} ${words(rupees)}${paise ? ` and ${twoDigits(paise)} paise` : ""} Only.`;
-  }
-
   // dd/mm/yyyy, like every other date shown in the app.
   function fmtInvoiceDate(ddmmyyyy) {
     const d = parseDDMMYYYY(ddmmyyyy);
@@ -4495,15 +4603,33 @@
     return `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}`;
   }
 
-  function buildInvoiceHtml() {
-    const esc = (s) => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-    const n2 = (v) => (Number(v) || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  // The invoice's data in the shared shape assets/js/invoice-templates.js
+  // renders - which layout prints is Company Master's own choice
+  // (invoice_template: "classic" Tax Invoice or "payment" Payment Invoice).
+  // Tax Invoice (classic) columns for a Booking print - same layout, but Other
+  // Taxes / Service Fee / IGST / CGST / SGST read the booking-only figures
+  // (bkOther, fareServiceFee, bkIgst / bkCgst / bkSgst) built in buildInvoiceData.
+  const BOOKING_TICKET_COLUMNS = window.VoyagerInvoice.TICKET_COLUMNS.map((col) => ({
+    ...col, key: { other: "bkOther", serviceFee: "classicServiceFee", igst: "bkIgst", cgst: "bkCgst", sgst: "bkSgst" }[col.key] || col.key,
+  }));
+
+  // Tax Invoice (classic) columns for a Cancellation (Credit Note) print -
+  // Other Taxes (cxOther), Service Fee (customer + supplier, classicServiceFee)
+  // and IGST / CGST / SGST (customer + supplier GST, bkIgst / bkCgst / bkSgst).
+  const CANCELLATION_TICKET_COLUMNS = window.VoyagerInvoice.TICKET_COLUMNS.map((col) => ({
+    ...col, key: { other: "cxOther", serviceFee: "classicServiceFee", igst: "bkIgst", cgst: "bkCgst", sgst: "bkSgst" }[col.key] || col.key,
+  }));
+
+  function buildInvoiceData() {
     const co = companyMaster || {};
     const customerName = document.getElementById("customer").value;
     const cust = allCustomers.find((c) => c.name === customerName) || {};
     const custState = (cust.state_name || "").trim();
     const intraState = !!custState && !!companyState && custState.toLowerCase() === companyState.trim().toLowerCase();
     const gstRate = fieldLedgerGstPct["Service Fee A/c"] || 0;
+    const ccy = (document.getElementById("currency").textContent || "INR").trim();
+    const gdsPnr = document.getElementById("gds_pnr_header").value;
+    const productType = document.getElementById("travel_type").value === "International" ? "AIR - INT" : "AIR - DOM";
 
     const lines = passengers.map((p, i) => {
       const r = computeFareLine(p);
@@ -4516,140 +4642,144 @@
       const sgst = intraState ? Math.round((gst - cgst) * 100) / 100 : 0;
       const igst = intraState ? 0 : gst;
       return {
-        no: i + 1, pax: p.passenger_name, basic: p.basic_fare || 0, ssr, serviceFee, igst, cgst, sgst, gst, amount,
+        no: i + 1, serType: "Airline", pax: p.passenger_name, basic: p.basic_fare || 0, ssr, serviceFee, igst, cgst, sgst, gst, amount,
         other: amount - (p.basic_fare || 0) - ssr - serviceFee - gst,
+        // Payment Invoice's passenger / fare tables
+        paxType: (p.pax_type || "").toUpperCase(), productType, gdsPnr, airline: p.airline_code || "", ticketNo: p.ticket_no || "",
+        cls: p.travel_class || "", sector: p.sector || "", flight: p.flight_no || "", travelDate: p.travel_date || "",
+        fare: p.basic_fare || 0, tax: (p.yq || 0) + (p.yr || 0) + (p.k3_tax || 0) + (p.tax_others || 0), discount: r.discount || 0,
+        // Booking invoice only: customer Markup + Addl Markup + SSR Markup plus
+        // the supplier's Markup + Addl Markup + SSR Markup. Reschedule /
+        // Cancellation keep the customer markups only.
+        markup: (p.markup || 0) + (p.addl_markup || 0) + (p.ssr_markup || 0)
+          + (isBookingMode() ? (p.supp_markup || 0) + (p.supp_addl_markup || 0) + (p.supp_ssr_markup || 0) : 0),
+        // Fare table's Service Fee / GST columns - Booking invoice only adds
+        // the supplier's Service Fee + Addl + SSR Service Fee and the supplier
+        // GST. Display only: the tax summary (Taxable / IGST / CGST / SGST)
+        // stays on the customer's own serviceFee / gst above.
+        fareServiceFee: serviceFee + (isBookingMode()
+          ? (p.supp_service_fee || 0) + (p.supp_addl_service_fee || 0) + (p.supp_ssr_service_fee || 0) : 0),
+        fareGst: gst + (isBookingMode() ? Math.round(computeSuppLine(p).gst * 100) / 100 : 0),
+        // Template 2 (Payment Invoice) - Booking / Reschedule prints here,
+        // Cancellation in the branch below:
+        // Tax = YQ + YR + K3 + Tax % Others + customer Markup / Addl / SSR Markup
+        // + supplier Markup / Addl / SSR Markup (+ Agent Penalty + Supplier
+        // Penalty + Penalty Amount on a Reschedule); Markup = 0 (already inside
+        // Tax); Service Fee = customer + supplier Service Fee / Addl / SSR
+        // Service Fee.
+        ...(!cancellationMode ? {
+          t2Tax: Math.round(((p.yq || 0) + (p.yr || 0) + (p.k3_tax || 0) + (p.tax_others || 0)
+            + (p.markup || 0) + (p.addl_markup || 0) + (p.ssr_markup || 0)
+            + (p.supp_markup || 0) + (p.supp_addl_markup || 0) + (p.supp_ssr_markup || 0)
+            + (rescheduleMode ? (p.agent_penalty || 0) + (p.supplier_penalty || 0) + (p.reschedule_penalty || 0) : 0)) * 100) / 100,
+          t2Markup: 0,
+          t2ServiceFee: serviceFee + (p.supp_service_fee || 0) + (p.supp_addl_service_fee || 0) + (p.supp_ssr_service_fee || 0),
+        } : {
+          // Cancellation (Credit Note): Tax = YQ + YR + K3 + Tax % Others +
+          // customer / supplier Markup Reversal - customer Markup / Addl / SSR
+          // Markup - supplier Markup / Addl / SSR Markup - Supplier Penalty -
+          // Agent Penalty - Penalty Amount; Markup = 0; Service Fee as above.
+          t2Tax: Math.round(((p.yq || 0) + (p.yr || 0) + (p.k3_tax || 0) + (p.tax_others || 0)
+            + (p.cust_markup_reversal || 0) + (p.supp_markup_reversal || 0)
+            - (p.markup || 0) - (p.addl_markup || 0) - (p.ssr_markup || 0)
+            - (p.supp_markup || 0) - (p.supp_addl_markup || 0) - (p.supp_ssr_markup || 0)
+            - (p.supplier_penalty || 0) - (p.agent_penalty || 0) - (p.cancellation_penalty || 0)) * 100) / 100,
+          t2Markup: 0,
+          t2ServiceFee: serviceFee + (p.supp_service_fee || 0) + (p.supp_addl_service_fee || 0) + (p.supp_ssr_service_fee || 0),
+        }),
+        // Payment Invoice: customer TDS (added back in its summary), the tax
+        // breakup line, the airline's name and the PG charges column.
+        custTds: Math.round((r.tds || 0) * 100) / 100,
+        taxParts: { YQ: p.yq || 0, YR: p.yr || 0, K3: p.k3_tax || 0, OT: p.tax_others || 0 },
+        airlineName: p.airline_name || "", pgCharges: 0,
+        // Booking invoice's TDS column (next to Discount): the customer TDS Amount.
+        fareTds: isBookingMode() ? Math.round((r.tds || 0) * 100) / 100 : 0,
+        // Tax Invoice (classic) template, Booking + Reschedule (not Cancellation) -
+        // see BOOKING_TICKET_COLUMNS. Service Fee = customer + supplier Service
+        // Fee / Addl / SSR Service Fee;
+        // Other Taxes = YQ + YR + K3 + Tax % Others + customer Markup / Addl /
+        // SSR Markup + supplier Markup / Addl / SSR Markup - customer Discount
+        // + customer TDS; GST = customer GST + supplier GST, split IGST or
+        // CGST / SGST like the customer's own.
+        bkOther: Math.round(((p.yq || 0) + (p.yr || 0) + (p.k3_tax || 0) + (p.tax_others || 0)
+          + (p.markup || 0) + (p.addl_markup || 0) + (p.ssr_markup || 0)
+          + (p.supp_markup || 0) + (p.supp_addl_markup || 0) + (p.supp_ssr_markup || 0)
+          - (r.discount || 0) + (r.tds || 0)
+          // Reschedule print only: + Supplier Penalty + Agent Penalty + Penalty Amount.
+          + (rescheduleMode ? (p.supplier_penalty || 0) + (p.agent_penalty || 0) + (p.reschedule_penalty || 0) : 0)) * 100) / 100,
+        // Cancellation (Credit Note) Tax Invoice only - see CANCELLATION_TICKET_COLUMNS:
+        // Other Taxes = YQ + YR + K3 + Tax % Others + customer / supplier Markup
+        // Reversal - customer Discount + customer TDS - customer Markup / Addl /
+        // SSR Markup - supplier Markup / Addl / SSR Markup - Supplier Penalty -
+        // Agent Penalty - Penalty Amount.
+        cxOther: Math.round(((p.yq || 0) + (p.yr || 0) + (p.k3_tax || 0) + (p.tax_others || 0)
+          + (p.cust_markup_reversal || 0) + (p.supp_markup_reversal || 0)
+          - (r.discount || 0) + (r.tds || 0)
+          - (p.markup || 0) - (p.addl_markup || 0) - (p.ssr_markup || 0)
+          - (p.supp_markup || 0) - (p.supp_addl_markup || 0) - (p.supp_ssr_markup || 0)
+          - (p.supplier_penalty || 0) - (p.agent_penalty || 0) - (p.cancellation_penalty || 0)) * 100) / 100,
+        classicServiceFee: serviceFee + (p.supp_service_fee || 0) + (p.supp_addl_service_fee || 0) + (p.supp_ssr_service_fee || 0),
+        ...(() => {
+          const g = gst + Math.round(computeSuppLine(p).gst * 100) / 100;
+          const c = intraState ? Math.round((g / 2) * 100) / 100 : 0;
+          return { bkIgst: intraState ? 0 : g, bkCgst: c, bkSgst: intraState ? Math.round((g - c) * 100) / 100 : 0 };
+        })(),
       };
     });
     const sum = (k) => lines.reduce((s, l) => s + l[k], 0);
-    const grandTotal = sum("amount"), taxable = sum("serviceFee");
-    const totIgst = sum("igst"), totCgst = sum("cgst"), totSgst = sum("sgst"), totTax = totIgst + totCgst + totSgst;
-
+    // Booking / Reschedule / Cancellation: the GST summary (Taxable / IGST /
+    // CGST / SGST / Total Tax) uses the same customer + supplier figures as the
+    // item table.
+    const bk = true;
+    const grandTotal = sum("amount"), taxable = sum(bk ? "classicServiceFee" : "serviceFee");
+    const igst = sum(bk ? "bkIgst" : "igst"), cgst = sum(bk ? "bkCgst" : "cgst"), sgst = sum(bk ? "bkSgst" : "sgst");
+    const totalTax = igst + cgst + sgst;
     const travelDates = [...new Set(passengers.flatMap((p) => (p.travel_date || "").split(",").map((d) => d.trim()).filter(Boolean)))];
     const sectors = [...new Set(passengers.flatMap((p) => (p.sector || "").split(",").map((s) => s.trim()).filter(Boolean)))];
-    const phone = co.mobile || co.telephone || "";
-    const title = cancellationMode ? "CREDIT NOTE" : "TAX INVOICE";
-    const custAddress = (cust.address || "").split("\n").map(esc).join("<br/>");
-    // Company Master's own uploaded logo if there is one, else the project
-    // logo (absolute URL - the print frame has no base URL of its own).
-    const logoSrc = co.logo_base64 || new URL("assets/img/travel-agency-logo.png", window.location.href).href;
-    const logo = `<img src="${logoSrc}" alt="" style="max-height:52px; max-width:170px;" />`;
-    const rate = (r) => (intraState === null ? "" : `${Number(r.toFixed(2))}%`);
-
-    return `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${esc(document.getElementById("invoice_number").value || title)}</title>
-      <style>
-        @page { size: A4; margin: 12mm; }
-        * { box-sizing: border-box; }
-        body { font-family: Arial, Helvetica, sans-serif; font-size: 11px; color: #000; margin: 0; }
-        table, th, td { font-size: 11px; font-family: inherit; }
-        .inv { border: 1px solid #000; }
-        .sec { border-bottom: 1px solid #000; padding: 6px 8px; }
-        .head { text-align: center; position: relative; min-height: 96px; }
-        .head .logo { position: absolute; left: 8px; top: 24px; }
-        .title { font-weight: bold; font-size: 13px; margin-bottom: 8px; }
-        .cname { font-weight: bold; font-size: 17px; }
-        .grid2 { display: flex; } .grid2 > div { flex: 1; }
-        .kv td { padding: 2px 4px 6px 0; vertical-align: top; }
-        table { border-collapse: collapse; width: 100%; }
-        .items th, .items td { border-left: 1px solid #000; padding: 3px 5px; }
-        .items th:first-child, .items td:first-child { border-left: none; }
-        .items th { border-bottom: 1px solid #000; font-weight: normal; }
-        .items td.r, .items th.r, .tax td.r { text-align: right; }
-        .items tbody td { height: 16px; vertical-align: top; }
-        .items tr.fill td { height: ${Math.max(140 - lines.length * 16, 30)}px; }
-        .items tr.gt td { border-top: 1px solid #000; font-weight: bold; }
-        .tax th, .tax td { border: 1px solid #000; padding: 2px 4px; }
-        .tax { margin-top: 0; }
-        .words { padding: 4px 8px; border-bottom: 1px solid #000; }
-        .foot { display: flex; min-height: 90px; }
-        .foot .terms { flex: 1; padding: 6px 8px; border-right: 1px solid #000; font-weight: bold; }
-        .foot .sign { width: 230px; padding: 6px 8px; text-align: center; font-weight: bold; display: flex; flex-direction: column; justify-content: space-between; }
-        .foot .sign span { font-weight: normal; }
-      </style></head><body>
-      <div class="inv">
-        <div class="sec head">
-          <div class="title">${title}</div>
-          <div class="logo">${logo}</div>
-          <div class="cname">${esc(co.company_name)}</div>
-          <div>${[esc(co.address || "").replace(/\n/g, "<br/>"), [co.state, co.pincode].filter(Boolean).map(esc).join(" - ")].filter(Boolean).join(", ")}</div>
-          ${co.gst_no ? `<div style="font-weight:bold; margin-top:6px;">GSTIN : ${esc(co.gst_no)}</div>` : ""}
-          <div style="font-weight:bold;">${phone ? `Tel : ${esc(phone)}` : ""}${phone && co.email ? "&nbsp; " : ""}${co.email ? `Email : ${esc(co.email)}` : ""}</div>
-        </div>
-        <div class="sec grid2">
-          <div><table class="kv">
-            <tr><td style="width:110px; white-space:nowrap;">${cancellationMode ? "Credit Note No" : "Invoice No"}</td><td>: ${esc(document.getElementById("invoice_number").value)}</td></tr>
-            <tr><td>${cancellationMode ? "Credit Note Date" : "Invoice Date"}</td><td>: ${esc(fmtInvoiceDate(getDateGroupValue(document.getElementById("invoice_date"))))}</td></tr>
-            <tr><td>Booking ID</td><td>: ${esc(document.getElementById("booking_reference").value)}</td></tr>
-            <tr><td>Place of Supply</td><td>: ${esc(custState)}</td></tr>
-          </table></div>
-          <div><b>Billed To :</b><br/>${esc(customerName)}<br/>${custAddress}<br/><br/>${esc(custState)}${cust.gst_no ? ` - ${esc(cust.gst_no)}` : ""}</div>
-        </div>
-        <div class="sec"><table class="kv" style="width:auto;">
-          <tr><td style="width:110px; white-space:nowrap; padding-bottom:0;">Date of Travel</td><td style="padding-bottom:0;">: ${esc(travelDates.join(", "))}</td></tr>
-          <tr><td style="padding-bottom:0;">Airline PNR</td><td style="padding-bottom:0;">: ${esc(document.getElementById("airline_pnr_header").value)}</td></tr>
-          <tr><td style="padding-bottom:0;">Sector</td><td style="padding-bottom:0;">: ${esc(sectors.join(", "))}</td></tr>
-        </table></div>
-        <table class="items">
-          <thead><tr><th style="width:30px;"># No</th><th style="width:55px;">Ser. Type</th><th>Pax Name</th><th class="r">Basic Fare</th>
-            <th class="r">Other Taxes</th><th class="r">SSR</th><th class="r">Service Fee</th><th class="r">IGST</th><th class="r">CGST</th><th class="r">SGST</th><th class="r">Amount</th></tr></thead>
-          <tbody>
-            ${lines.map((l) => `<tr><td style="text-align:center;">${l.no}</td><td style="text-align:center;">Airline</td><td>${esc(l.pax)}</td>
-              <td class="r">${n2(l.basic)}</td><td class="r">${n2(l.other)}</td><td class="r">${n2(l.ssr)}</td><td class="r">${n2(l.serviceFee)}</td>
-              <td class="r">${n2(l.igst)}</td><td class="r">${n2(l.cgst)}</td><td class="r">${n2(l.sgst)}</td><td class="r">${n2(l.amount)}</td></tr>`).join("")}
-            <tr class="fill">${"<td></td>".repeat(11)}</tr>
-            <tr class="gt"><td colspan="10" style="border-left:none;">&nbsp;&nbsp;&nbsp;Grand Total</td><td class="r">${n2(grandTotal)}</td></tr>
-          </tbody>
-        </table>
-        <div class="words" style="border-top:1px solid #000;">Total Amount (In Words): ${esc(amountInWords(grandTotal))}</div>
-        <table class="tax">
-          <thead>
-            <tr><th rowspan="2">HSN/SAC</th><th>Taxable</th><th colspan="2">IGST</th><th colspan="2">CGST</th><th colspan="2">SGST/UTGST</th><th rowspan="2">Total<br/>Tax Amount</th></tr>
-            <tr><th>Value</th><th>Rate</th><th>Amount</th><th>Rate</th><th>Amount</th><th>Rate</th><th>Amount</th></tr>
-          </thead>
-          <tbody>
-            <tr><td>${esc(co.hsn_sac || "998551")}</td><td class="r">${n2(taxable)}</td>
-              <td class="r">${intraState ? "" : rate(gstRate)}</td><td class="r">${n2(totIgst)}</td>
-              <td class="r">${intraState ? rate(gstRate / 2) : ""}</td><td class="r">${n2(totCgst)}</td>
-              <td class="r">${intraState ? rate(gstRate / 2) : ""}</td><td class="r">${n2(totSgst)}</td><td class="r">${n2(totTax)}</td></tr>
-            <tr><td class="r"><b>Total</b></td><td class="r">${n2(taxable)}</td><td></td><td class="r">${n2(totIgst)}</td><td></td><td class="r">${n2(totCgst)}</td><td></td><td class="r">${n2(totSgst)}</td><td class="r">${n2(totTax)}</td></tr>
-          </tbody>
-        </table>
-        <div class="words">Tax Amount (In Words): ${esc(amountInWords(totTax))}</div>
-        <div class="foot">
-          <div class="terms">Terms and Conditions:</div>
-          <div class="sign">${esc(co.company_name)}<span>Authorised Signatory</span></div>
-        </div>
-      </div></body></html>`;
+    return {
+      docTitle: cancellationMode ? "CREDIT NOTE" : "TAX INVOICE",
+      showTdsColumn: isBookingMode(), // Payment Invoice fare table - Booking only
+      userName: (document.getElementById("user_name") || {}).value || "",
+      creditNote: !!cancellationMode, // Template 2's Credit Note Total / summary
+      docTitleCase: cancellationMode ? "Credit Note" : "Tax Invoice",
+      company: {
+        name: co.company_name, address: co.address, state: co.state, pincode: co.pincode, gst_no: co.gst_no,
+        pan_number: co.pan_number, cin_number: co.cin_number, email: co.email, phone: co.mobile || co.telephone || "",
+        hsn: co.hsn_sac || "998551", logo: co.logo_base64 || "", seal: co.seal_base64 || "",
+        terms: co.terms_conditions || "", bank: window.VoyagerInvoice.bankLine(co),
+      },
+      invoiceNoLabel: cancellationMode ? "Credit Note No" : "Invoice No",
+      invoiceNo: document.getElementById("invoice_number").value,
+      invoiceDateLabel: cancellationMode ? "Credit Note Date" : "Invoice Date",
+      invoiceDate: fmtInvoiceDate(getDateGroupValue(document.getElementById("invoice_date"))),
+      refLabel: "Booking ID", refValue: document.getElementById("booking_reference").value,
+      customer: { name: customerName, code: cust.code || "", address: cust.address || "", state: custState, gst_no: cust.gst_no || "", pan: cust.pan_number || "" },
+      placeOfSupply: custState,
+      infoRows: [["Date of Travel", travelDates.join(", ")], ["Airline PNR", document.getElementById("airline_pnr_header").value], ["Sector", sectors.join(", ")]],
+      columns: !cancellationMode ? BOOKING_TICKET_COLUMNS : CANCELLATION_TICKET_COLUMNS, lines, grandTotal, taxable, gstRate, intraState,
+      igst, cgst, sgst, totalTax, tds: 0, currency: ccy,
+      amountWords: window.VoyagerInvoice.amountInWords(grandTotal, ccy), taxWords: window.VoyagerInvoice.amountInWords(totalTax, ccy),
+    };
   }
 
-  // Printed through a hidden iframe - no popup window to get blocked, and
-  // the ticket screen itself stays exactly as it is.
-  document.getElementById("print-btn").addEventListener("click", () => {
+  document.getElementById("print-btn").addEventListener("click", async () => {
+    // Logo/seal are left out of the page-load Company Master fetch (they can
+    // be MBs) - fetched here, only when actually printing.
+    if (companyMaster && companyMaster.id && !companyMaster._imagesLoaded) {
+      try {
+        const res = await fetch(`${COMPANY_MASTER_API}?id=${companyMaster.id}&images=all`);
+        if (res.ok) {
+          const full = await res.json();
+          companyMaster.logo_base64 = full.logo_base64;
+          companyMaster.seal_base64 = full.seal_base64;
+          companyMaster.invoice_template = full.invoice_template;
+          companyMaster._imagesLoaded = true;
+        }
+      } catch (_) { /* print without them */ }
+    }
     if (!isSavedRecord || !passengers.length) return;
-    let frame = document.getElementById("invoice-print-frame");
-    if (frame) frame.remove();
-    frame = document.createElement("iframe");
-    frame.id = "invoice-print-frame";
-    frame.style.cssText = "position:fixed; right:0; bottom:0; width:0; height:0; border:0; visibility:hidden;";
-    document.body.appendChild(frame);
-    const doc = frame.contentWindow.document;
-    doc.open();
-    doc.write(buildInvoiceHtml());
-    doc.close();
-    // "Save as PDF" names the file from the page title - the invoice number
-    // (the browser swaps "/" for "_"). Set on this page too, since some
-    // browsers take the name from the top window rather than the frame.
-    const pageTitle = document.title;
-    document.title = document.getElementById("invoice_number").value || pageTitle;
-    const restoreTitle = () => { document.title = pageTitle; };
-    frame.contentWindow.addEventListener("afterprint", restoreTitle);
-    // Wait for the logo to load, or it can print blank.
-    const imgs = Array.from(doc.images);
-    Promise.all(imgs.map((img) => (img.complete ? null : new Promise((res) => { img.onload = img.onerror = res; }))))
-      .then(() => {
-        frame.contentWindow.focus();
-        frame.contentWindow.print();
-        setTimeout(restoreTitle, 1000);
-      });
+    const html = window.VoyagerInvoice.render((companyMaster || {}).invoice_template, buildInvoiceData());
+    window.VoyagerInvoice.print(html, document.getElementById("invoice_number").value);
   });
 
   // ============================================================

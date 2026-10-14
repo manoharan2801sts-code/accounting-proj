@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
   <link href="assets/css/design-system.css" rel="stylesheet" />
-  <link href="assets/css/app.css" rel="stylesheet" />
+  <link href="assets/css/app.css?v=7" rel="stylesheet" />
   <link rel="icon" type="image/png" href="assets/img/favicon.png" />
   <style>
     /* The page itself never scrolls (only ~14 rows total, always fits) -
@@ -138,10 +138,10 @@
   </div>
 
   <script src="assets/js/mock-data.js"></script>
-  <script src="assets/js/api.js?v=3"></script>
-  <script src="assets/js/hardcode.js"></script>
-  <script src="assets/js/util.js?v=2"></script>
-  <script src="assets/js/shell.js?v=21"></script>
+  <script src="assets/js/api.js?v=4"></script>
+  <script src="assets/js/hardcode.js?v=2"></script>
+  <script src="assets/js/util.js?v=3"></script>
+  <script src="assets/js/shell.js?v=28"></script>
   <script>
     // Not gated on DOMContentLoaded, and wrapped in an IIFE - same reasons
     // as every other report page (see report-ledger-book.html's own note):
@@ -161,6 +161,8 @@
       } catch (err) {
         console.error("Shell init failed", err);
       }
+      const rs = VoyagerShell.reportState.consume(); // Back from the ledger statement -> same dates/scroll
+      VoyagerShell.reportState.applyInputs(rs);
       renderBreadcrumb();
       const params = new URLSearchParams(window.location.search);
       currentLedgerId = Number(params.get("ledger_id")) || null;
@@ -169,7 +171,8 @@
           `<tr><td colspan="4" style="text-align:center; padding:2rem; color:var(--color-text-muted);">No ledger selected - open this from a Trial Balance ledger row.</td></tr>`;
         return;
       }
-      loadMonthlySummary();
+      await loadMonthlySummary();
+      VoyagerShell.reportState.restoreAfterLoad(rs);
     })();
 
     // "Reports" itself has no landing page of its own (see hardcode.js's

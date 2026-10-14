@@ -64,15 +64,11 @@
     function renderLevel(parentKey, depth) {
       return (byParent[parentKey] || []).map((g) => {
         const indent = 16 + depth * 20;
-        const badge = g.is_master
-          ? `<span class="pill pill-neutral">System</span>`
-          : `<span class="pill pill-success">Custom</span>`;
         const disabledAttr = g.is_master ? "disabled" : "";
         const title = g.is_master ? 'title="System group - cannot be modified"' : "";
         return `
           <div class="grp-row">
             <div class="grp-name drillable" style="padding-left:${indent}px;" data-id="${g.id}" ${title}>${g.name}</div>
-            <div class="grp-badge-wrap">${badge}</div>
             <div class="grp-actions">
               <button type="button" class="edit-btn" data-id="${g.id}" ${disabledAttr} ${title}>Edit</button>
               <button type="button" class="delete-btn" data-id="${g.id}" ${disabledAttr} ${title}>Delete</button>

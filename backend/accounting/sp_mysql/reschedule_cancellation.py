@@ -293,7 +293,7 @@ def _rt_list_for_balance(p):
             rl.markup, rl.addl_markup, rl.ssr_markup, rl.service_fee, rl.addl_service_fee, rl.ssr_service_fee, rl.gst_pct,
             rl.status, rl.office_id, rl.fop, rl.card_number,
             rl.supp_comm_on, rl.supp_comm_type, rl.supp_comm_value, rl.supp_tds_per,
-            rl.supp_markup, rl.supp_addl_markup, rl.supp_service_fee, rl.supp_addl_service_fee, rl.supp_gst_pct,
+            rl.supp_markup, rl.supp_addl_markup, rl.supp_service_fee, rl.supp_addl_service_fee, rl.supp_ssr_markup, rl.supp_ssr_service_fee, rl.supp_gst_pct,
             rl.agent_penalty, rl.reschedule_penalty,
             rl.total_billed, rl.supplier_ledger_id, supp.name AS supplier_name
         FROM `Rescheduled_Al_Ticket` rt
@@ -425,14 +425,15 @@ def _rt_list(p):
             rl.disc_on, rl.disc_type, rl.disc_value, rl.tds_per,
             rl.addl_markup, rl.ssr_markup, rl.service_fee, rl.addl_service_fee, rl.ssr_service_fee, rl.gst_pct,
             rl.supp_comm_on, rl.supp_comm_type, rl.supp_comm_value, rl.supp_tds_per,
-            rl.supp_markup, rl.supp_addl_markup, rl.supp_service_fee, rl.supp_addl_service_fee,
+            rl.supp_markup, rl.supp_addl_markup, rl.supp_service_fee, rl.supp_addl_service_fee, rl.supp_ssr_markup, rl.supp_ssr_service_fee,
             {_DISC_BASE} AS computed_discount,
             {_DISC_BASE} * (rl.tds_per / 100) AS computed_tds,
             (rl.service_fee * IFNULL(l_svc.gst_percentage, 0) / 100
              + rl.addl_service_fee * IFNULL(l_addlsvc.gst_percentage, 0) / 100
              + rl.ssr_service_fee * IFNULL(l_ssrsvc.gst_percentage, 0) / 100) AS computed_gst,
             (rl.supp_service_fee * IFNULL(l_suppsvc.gst_percentage, 0) / 100
-             + rl.supp_addl_service_fee * IFNULL(l_suppaddlsvc.gst_percentage, 0) / 100) AS computed_supp_gst,
+             + rl.supp_addl_service_fee * IFNULL(l_suppaddlsvc.gst_percentage, 0) / 100
+             + rl.supp_ssr_service_fee * IFNULL(l_suppssrsvc.gst_percentage, 0) / 100) AS computed_supp_gst,
             rl.agent_penalty, rl.reschedule_penalty, rl.supplier_penalty
         FROM `Rescheduled_Al_TicketLines` rl
         INNER JOIN `Rescheduled_Al_Ticket` rt ON rt.id = rl.reschedule_ticket_id
@@ -453,6 +454,9 @@ def _rt_list(p):
         LEFT JOIN `MasterMapping` mm_suppaddlsvc ON mm_suppaddlsvc.company_id = rt.company_id
             AND LOWER(TRIM(mm_suppaddlsvc.product_type)) = 'airline' AND LOWER(TRIM(mm_suppaddlsvc.field_name)) = 'supplier addl service fee a/c'
         LEFT JOIN `Ledgers` l_suppaddlsvc ON l_suppaddlsvc.id = mm_suppaddlsvc.ledger_id
+        LEFT JOIN `MasterMapping` mm_suppssrsvc ON mm_suppssrsvc.company_id = rt.company_id
+            AND LOWER(TRIM(mm_suppssrsvc.product_type)) = 'airline' AND LOWER(TRIM(mm_suppssrsvc.field_name)) = 'supplier ssr service fee a/c'
+        LEFT JOIN `Ledgers` l_suppssrsvc ON l_suppssrsvc.id = mm_suppssrsvc.ledger_id
         WHERE rt.company_id = %s
         ORDER BY rl.id DESC
         """,
@@ -482,6 +486,7 @@ _RT_LINE_SCHEMA = [
     ("supp_comm_value", "dec", 14, 2), ("supp_tds_per", "dec", 5, 2),
     ("supp_markup", "dec", 14, 2), ("supp_addl_markup", "dec", 14, 2),
     ("supp_service_fee", "dec", 14, 2), ("supp_addl_service_fee", "dec", 14, 2),
+    ("supp_ssr_markup", "dec", 14, 2), ("supp_ssr_service_fee", "dec", 14, 2),
     ("supp_gst_pct", "dec", 5, 2), ("agent_penalty", "dec", 14, 2),
     ("reschedule_penalty", "dec", 14, 2), ("total_billed", "dec", 14, 2),
     ("supplier_name", "str", 150),
@@ -494,6 +499,7 @@ _RT_LINE_COPY_COLS = [
     "pg_charges", "pg_charges_percentage", "markup", "addl_markup", "ssr_markup", "service_fee", "addl_service_fee",
     "ssr_service_fee", "gst_pct", "status", "office_id", "fop", "card_number", "supp_comm_on", "supp_comm_type",
     "supp_comm_value", "supp_tds_per", "supp_markup", "supp_addl_markup", "supp_service_fee", "supp_addl_service_fee",
+    "supp_ssr_markup", "supp_ssr_service_fee",
     "supp_gst_pct", "agent_penalty", "reschedule_penalty", "total_billed",
 ]
 

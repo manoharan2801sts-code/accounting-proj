@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
   <link href="assets/css/design-system.css" rel="stylesheet" />
-  <link href="assets/css/app.css" rel="stylesheet" />
+  <link href="assets/css/app.css?v=7" rel="stylesheet" />
   <link rel="icon" type="image/png" href="assets/img/favicon.png" />
   <style>
     .page-header-row { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 1.25rem; flex-wrap: wrap; }
@@ -101,22 +101,14 @@
         </div>
         <div class="filter-group">
           <label>Destination Country</label>
-          <select class="form-control-custom" id="filter-country" style="height:34px; min-width:160px;">
+          <select class="form-control-custom" id="filter-country" style="height:34px; min-width:160px;" data-options="visaFilterCountries">
             <option value="">All Countries</option>
-            <option value="UAE">United Arab Emirates</option>
-            <option value="Schengen">Schengen (Europe)</option>
-            <option value="Singapore">Singapore</option>
-            <option value="USA">United States</option>
-            <option value="UK">United Kingdom</option>
           </select>
         </div>
         <div class="filter-group">
           <label>Status</label>
-          <select class="form-control-custom" id="filter-status" style="height:34px; min-width:140px;">
+          <select class="form-control-custom" id="filter-status" style="height:34px; min-width:140px;" data-options="visaFilterStatuses">
             <option value="">All Statuses</option>
-            <option value="Approved">Approved</option>
-            <option value="Submitted">In Process</option>
-            <option value="Rejected">Rejected</option>
           </select>
         </div>
       </div>
@@ -231,9 +223,9 @@
     </main>
   </div>
 
-  <script src="assets/js/api.js?v=3"></script>
-  <script src="assets/js/hardcode.js"></script>
-  <script src="assets/js/shell.js?v=21"></script>
+  <script src="assets/js/api.js?v=4"></script>
+  <script src="assets/js/hardcode.js?v=2"></script>
+  <script src="assets/js/shell.js?v=28"></script>
   <script>
     document.addEventListener("DOMContentLoaded", () => {
       VoyagerShell.init({ activeKey: "trans-visa" });

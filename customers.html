@@ -2,39 +2,98 @@
 <html lang="en-GB"><head>
 <meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
-<meta http-equiv="Pragma" content="no-cache" />
-<meta http-equiv="Expires" content="0" />
 <title>Receivables — TRAVEL AGENCY</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="https://cdn.datatables.net/1.13.11/css/dataTables.dataTables.min.css">
 <link href="assets/css/design-system.css" rel="stylesheet" />
-<link href="assets/css/app.css" rel="stylesheet" />
-<style>table.dataTable{font-size:0.76rem} .dt-toolbar{display:flex;justify-content:space-between;align-items:center;padding:0.6rem 0.8rem 0.4rem}</style>
+<link href="assets/css/app.css?v=7" rel="stylesheet" />
+<link rel="icon" type="image/png" href="assets/img/favicon.png" />
+<style>
+  /* Same look as the other reports (Trial Balance): compact toolbar, only
+     the table scrolls, Grand Total pinned at the bottom. */
+  html, body { height: 100%; overflow: hidden; margin: 0; }
+  .po-main { display: flex; flex-direction: column; height: 100%; overflow: hidden; box-sizing: border-box; max-width: 1440px; margin: 0 auto; padding: 1.2rem 2rem; width: 100%; }
+  .po-toolbar { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; flex-shrink: 0; }
+  .po-toolbar-label { font-size: 11px; font-weight: 700; color: var(--color-text-muted); letter-spacing: 0.03em; }
+  .po-toolbar-date { height: 26px; width: 116px; padding: 0 6px; font-size: 12px; box-sizing: border-box; }
+  .po-toggle { display: flex; align-items: center; gap: 0.5rem; font-size: 13px; color: var(--color-text-dark); cursor: pointer; user-select: none; margin-left: 0.3rem; }
+  .po-toggle input { width: 16px; height: 16px; cursor: pointer; margin: 0; }
+  .po-card { flex: 1; min-height: 0; display: flex; flex-direction: column; margin-top: 0.8rem; background: var(--color-white);
+    border: 1px solid var(--color-border); border-radius: var(--radius-md); overflow: hidden; }
+  .po-card-head { display: flex; align-items: center; justify-content: space-between; padding: 0.55rem 1rem; border-bottom: 1px solid var(--color-border); flex-shrink: 0; }
+  .po-card-head strong { font-size: 0.85rem; color: var(--color-text-dark); }
+  .po-search { height: 28px; width: 220px; font-size: 12px; }
+  .po-scroll { flex: 1; min-height: 0; overflow-y: auto; }
+  #po-table { width: 100%; border-collapse: collapse; }
+  #po-table thead th { position: sticky; top: 0; z-index: 1; background: var(--color-bg-subtle); text-align: left; font-size: 11px; font-weight: 700;
+    color: var(--color-text-muted); letter-spacing: 0.03em; padding: 0.5rem 0.9rem; border-bottom: 1px solid var(--color-border); }
+  #po-table td { padding: 0.45rem 0.9rem; font-size: 12.5px; border-bottom: 1px solid var(--color-border-subtle); color: var(--color-text); white-space: nowrap; }
+  #po-table th.amt, #po-table td.amt { text-align: right; font-variant-numeric: tabular-nums; }
+  #po-table tr.po-party td { font-weight: 700; color: var(--color-text-dark); }
+  #po-table tr.po-bill td { color: var(--color-text); }
+  #po-table tr.po-adj td { font-style: italic; color: var(--color-text-muted); font-size: 12px; }
+  #po-table td.po-indent { padding-left: 1.9rem; }
+  #po-table td.po-indent2 { padding-left: 2.9rem; }
+  #po-table tr.po-click { cursor: pointer; }
+  #po-table tbody tr:hover td { background: var(--color-primary); color: #FFFFFF !important; }
+  #po-table tbody tr:hover td * { color: #FFFFFF !important; }
+  .po-tag { font-size: 10.5px; font-weight: 700; color: var(--color-text-muted); margin-left: 3px; }
+  .po-empty { text-align: center; padding: 2rem !important; color: var(--color-text-muted) !important; }
+  .po-total { flex-shrink: 0; width: 100%; border-collapse: collapse; background: var(--color-bg-subtle); border-top: 1px solid var(--color-border); }
+  .po-total td { padding: 0.6rem 0.9rem; font-weight: 800; font-size: 13px; color: var(--color-text-dark); }
+  .po-total td.amt { text-align: right; font-variant-numeric: tabular-nums; }
+  /* Ledger Wise / Bill Wise view tabs */
+  .po-tabs { display: inline-flex; border: 1px solid var(--color-border); border-radius: var(--radius-md); overflow: hidden; margin-right: 0.6rem; }
+  .po-tabs label { position: relative; padding: 0 14px; height: 26px; display: inline-flex; align-items: center; font-size: 12px; font-weight: 600;
+    color: var(--color-text); background: var(--color-white); cursor: pointer; user-select: none; }
+  .po-tabs label + label { border-left: 1px solid var(--color-border); }
+  .po-tabs input { position: absolute; opacity: 0; pointer-events: none; }
+  .po-tabs label:has(input:checked) { background: var(--color-primary); color: #FFFFFF; }
+  @media print { .po-toolbar, .po-search { display: none; } html, body { overflow: visible; height: auto; } .po-scroll { overflow: visible; } }
+</style>
 </head><body>
 <header class="app-topnav" id="shell-topnav"></header>
-<div class="app-body">
-  <aside class="app-sidebar" id="shell-sidebar"></aside>
-  <main class="app-main">
-    <h1 style="font-size:1.15rem;">Accounts Receivable</h1>
-    <p class="text-muted-custom">Customer outstanding, credit limit &amp; credit days — sorted by highest exposure.</p>
-    <div class="card-glass table-card" style="margin-top:0.7rem;">
-      <div class="dt-toolbar"><strong style="font-size:0.95rem;">Customer ledger</strong><span class="hint text-muted-custom" id="row-count"></span></div>
-      <table id="data-table" class="display" style="width:100%">
-        <thead><tr><th>Code</th><th>Customer</th><th>Type</th><th>Credit Limit</th><th>Credit Days</th><th>Outstanding</th><th>Utilization</th></tr></thead>
-        <tbody></tbody>
+<div class="app-body" style="height: calc(100vh - var(--topnav-height) - var(--menubar-height, 0px)); overflow: hidden;">
+  <main class="app-main po-main">
+    <div class="po-toolbar" data-side="receivables">
+      <div class="po-tabs" role="tablist">
+        <label><input type="radio" name="po-view" id="po-view-ledger" value="ledger" checked /> Ledger Wise</label>
+        <label><input type="radio" name="po-view" id="po-view-bill" value="bill" /> Bill Wise</label>
+      </div>
+      <span class="po-toolbar-label">As On</span>
+      <input type="date" class="form-control-custom po-toolbar-date" id="po-as-of" />
+      <button type="button" class="dom-nav-btn btn-primary" id="po-apply">Apply</button>
+      <label class="po-toggle"><input type="checkbox" id="po-detailed" checked /> Detailed View</label>
+      <label class="po-toggle"><input type="checkbox" id="po-settled" /> Show Settled Bills</label>
+      <span style="margin-left:auto;"></span>
+      <button type="button" class="dom-nav-btn" id="po-print">Print</button>
+      <button type="button" class="dom-nav-btn btn-primary" id="po-export">Export CSV</button>
+    </div>
+    <div class="po-card">
+      <div class="po-card-head">
+        <strong id="po-title" data-base="Receivables - Sundry Debtors">Receivables - Sundry Debtors (ledger-wise outstanding)</strong>
+        <input type="text" class="form-control-custom po-search" id="po-search" placeholder="Search customer / invoice..." autocomplete="off" />
+      </div>
+      <div class="po-scroll">
+        <table id="po-table">
+          <colgroup id="po-cols"><col style="width:30%"><col style="width:10%"><col style="width:12%"><col style="width:12%"><col style="width:12%"><col style="width:12%"><col style="width:12%"></colgroup>
+          <thead id="po-thead"><tr><th>Particulars</th><th>Date</th><th>Type</th><th>Reference</th><th class="amt">Billed</th><th class="amt">Adjusted</th><th class="amt">Outstanding</th></tr></thead>
+          <tbody id="po-tbody"><tr><td colspan="7" class="po-empty">Loading...</td></tr></tbody>
+        </table>
+      </div>
+      <table class="po-total">
+        <colgroup id="po-total-cols"><col style="width:30%"><col style="width:10%"><col style="width:12%"><col style="width:12%"><col style="width:12%"><col style="width:12%"><col style="width:12%"></colgroup>
+        <tr><td id="po-total-label">Grand Total</td><td class="po-total-spacer"></td><td class="po-total-spacer"></td><td class="po-total-spacer"></td>
+          <td class="amt" id="po-total-billed">0.00</td><td class="amt" id="po-total-adjusted">0.00</td><td class="amt" id="po-total-outstanding">0.00</td></tr>
       </table>
     </div>
   </main>
 </div>
-<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
-<script src="https://cdn.datatables.net/1.13.11/js/dataTables.dataTables.min.js"></script>
-<script src="assets/js/hardcode.js"></script>
+<script src="assets/js/hardcode.js?v=2"></script>
 <script src="assets/js/mock-data.js"></script>
-<script src="assets/js/api.js?v=3"></script>
-<script src="assets/js/util.js?v=2"></script>
-<script src="assets/js/drilldown.js"></script>
+<script src="assets/js/api.js?v=4"></script>
+<script src="assets/js/util.js?v=3"></script>
 <script src="assets/js/entry-common.js"></script>
-<script src="assets/js/shell.js?v=21"></script>
-<script src="assets/js/page-customers.js"></script>
+<script src="assets/js/shell.js?v=28"></script>
+<script src="assets/js/page-party-outstanding.js?v=4"></script>
 </body></html>

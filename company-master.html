@@ -8,7 +8,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
 <link href="assets/css/design-system.css" rel="stylesheet" />
-<link href="assets/css/app.css" rel="stylesheet" />
+<link href="assets/css/app.css?v=7" rel="stylesheet" />
 <link rel="icon" type="image/png" href="assets/img/favicon.png" />
 <style>
   /* Page-scoped tokens (cmx- prefix) - a self-contained ERP master-screen
@@ -135,6 +135,30 @@
   }
   .cmx-btn:disabled:hover { background: #E5E9EF; }
 
+  /* Bank Details - field opens a popup with the six bank fields */
+  .cmx-bank-btn {
+    width: 100%; height: 34px; padding: 0 10px; text-align: left; cursor: pointer; box-sizing: border-box;
+    border: 1px solid var(--cmx-border); border-radius: 3px; background: var(--cmx-white); font-size: 13px; color: var(--cmx-text);
+    display: flex; align-items: center; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+  }
+  .cmx-bank-btn:hover { border-color: var(--cmx-blue); }
+  .cmx-bank-btn.is-empty { color: #94A3B8; }
+  .bank-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 14px; }
+
+  /* Choose Invoice Template popup */
+  .tpl-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; }
+  .tpl-card { border: 1px solid var(--cmx-border); border-radius: 4px; background: var(--cmx-white); display: flex; flex-direction: column; overflow: hidden; }
+  .tpl-card.selected { border: 2px solid var(--cmx-blue); box-shadow: 0 0 0 2px rgba(59, 109, 181, 0.15); }
+  .tpl-thumb { height: 300px; overflow: hidden; background: #F4F6F9; border-bottom: 1px solid var(--cmx-border); position: relative; cursor: zoom-in; }
+  .tpl-thumb iframe { width: 794px; height: 1123px; border: 0; transform: scale(0.36); transform-origin: top left; pointer-events: none; background: #FFF; position: absolute; left: 50%; margin-left: -143px; }
+  .tpl-info { padding: 10px 12px 4px; }
+  .tpl-name { font-size: 13px; font-weight: 700; color: var(--cmx-text); display: flex; align-items: center; gap: 8px; }
+  .tpl-badge { font-size: 10.5px; font-weight: 700; color: var(--cmx-white); background: var(--cmx-blue); padding: 1px 7px; border-radius: 10px; }
+  .tpl-desc { font-size: 11.5px; color: #64748B; margin-top: 3px; min-height: 30px; }
+  .tpl-actions { display: flex; gap: 6px; padding: 8px 12px 12px; }
+  .tpl-actions .cmx-btn { height: 28px; padding: 0 12px; font-size: 12px; }
+  .tpl-preview-frame { width: 100%; height: 70vh; border: 1px solid var(--cmx-border); background: #FFF; }
+
   /* Responsive: tablet = 2 columns, mobile = 1 column. */
   @media (max-width: 1024px) {
     .cmx-grid { grid-template-columns: repeat(2, 1fr); }
@@ -154,7 +178,10 @@
     <div class="cmx-card">
       <div class="cmx-titlebar">
         <span>Company Master</span>
-        <button type="button" class="cmx-btn cmx-titlebar-edit-btn" id="cm-edit-btn">Edit</button>
+        <span style="display:flex; gap:6px;">
+          <button type="button" class="cmx-btn cmx-titlebar-edit-btn" id="cm-template-btn" title="Choose the layout every Tax Invoice / Credit Note prints in">Choose Invoice Template</button>
+          <button type="button" class="cmx-btn cmx-titlebar-edit-btn" id="cm-edit-btn">Edit</button>
+        </span>
       </div>
 
       <div class="cmx-body">
@@ -169,9 +196,7 @@
           </div>
           <div class="cmx-field">
             <label>Country</label>
-            <select id="cm-country">
-              <option value="India">India</option>
-              <option value="UAE">UAE</option>
+            <select id="cm-country" data-options="countries">
             </select>
           </div>
 
@@ -210,11 +235,7 @@
           </div>
           <div class="cmx-field">
             <label>GST Reg Type</label>
-            <select id="cm-gst-reg-type">
-              <option value="Regular">Regular</option>
-              <option value="Composition">Composition</option>
-              <option value="Unregistered">Unregistered</option>
-              <option value="SEZ">SEZ</option>
+            <select id="cm-gst-reg-type" data-options="gstRegistrationTypes">
             </select>
           </div>
           <div class="cmx-field cmx-dual">
@@ -242,7 +263,21 @@
             <input type="text" id="cm-cin" placeholder="CIN Number" autocomplete="off" style="text-transform:uppercase;" />
           </div>
 
-          <div class="cmx-field cmx-span2">
+          <div class="cmx-field">
+            <label>Bank Details</label>
+            <div class="cmx-bank-row">
+              <button type="button" class="cmx-bank-btn" id="cm-bank-btn" title="Bank details printed on the invoice">
+                <span id="cm-bank-summary">Add bank details...</span>
+              </button>
+              <input type="hidden" id="cm-bank-account-holder" />
+              <input type="hidden" id="cm-bank-account-no" />
+              <input type="hidden" id="cm-bank-ifsc" />
+              <input type="hidden" id="cm-bank-swift" />
+              <input type="hidden" id="cm-bank-name" />
+              <input type="hidden" id="cm-bank-branch" />
+            </div>
+          </div>
+          <div class="cmx-field">
             <label>Address</label>
             <div class="cmx-textarea-wrap">
               <textarea class="cmx-textarea" id="cm-address" placeholder="Registered / correspondence address..."></textarea>
@@ -278,6 +313,12 @@
             </div>
             <div class="cmx-upload-note" id="cm-seal-note">Image, max 2 MB</div>
           </div>
+          <div class="cmx-field">
+            <label>Terms and Conditions</label>
+            <div class="cmx-textarea-wrap">
+              <textarea class="cmx-textarea" id="cm-terms" maxlength="300" placeholder="Printed on every invoice (Terms and Conditions / Notes)..."></textarea>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -287,11 +328,66 @@
     </div>
   </main>
 </div>
-<script src="assets/js/hardcode.js"></script>
+<!-- Bank Details popup (Company Master) -->
+<div class="dom-modal-backdrop spa-extra-content" id="bank-modal">
+  <div class="dom-modal-window" style="max-width:560px; width:95%;">
+    <div class="dom-modal-titlebar">
+      <div>Bank Details</div>
+      <button type="button" class="dom-titlebar-btn btn-close" data-bank-close title="Close">&times;</button>
+    </div>
+    <div class="dom-modal-body" style="display:block; padding:14px;">
+      <div class="bank-grid">
+        <div class="cmx-field"><label>A/c Holder's Name</label><input type="text" id="bk-bank-account-holder" maxlength="100" autocomplete="off" /></div>
+        <div class="cmx-field"><label>A/c No.</label><input type="text" id="bk-bank-account-no" maxlength="30" autocomplete="off" /></div>
+        <div class="cmx-field"><label>IFSC Code</label><input type="text" id="bk-bank-ifsc" maxlength="15" autocomplete="off" style="text-transform:uppercase;" /></div>
+        <div class="cmx-field"><label>SWIFT Code</label><input type="text" id="bk-bank-swift" maxlength="15" autocomplete="off" style="text-transform:uppercase;" /></div>
+        <div class="cmx-field"><label>Bank Name</label><input type="text" id="bk-bank-name" maxlength="100" autocomplete="off" /></div>
+        <div class="cmx-field"><label>Branch Name</label><input type="text" id="bk-bank-branch" maxlength="100" autocomplete="off" /></div>
+      </div>
+      <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:14px;">
+        <button type="button" class="cmx-btn" data-bank-close>Cancel</button>
+        <button type="button" class="cmx-btn cmx-primary" id="bank-ok-btn">OK</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Choose Invoice Template - every layout the prints can use, each with
+     Preview / Download / Select. The chosen one is saved per company
+     (CompanyMaster.invoice_template). -->
+<div class="dom-modal-backdrop spa-extra-content" id="tpl-modal">
+  <div class="dom-modal-window" style="max-width:820px; width:95%; max-height:90vh;">
+    <div class="dom-modal-titlebar">
+      <div>Choose Invoice Template</div>
+      <button type="button" class="dom-titlebar-btn btn-close" data-tpl-close="tpl-modal" title="Close">&times;</button>
+    </div>
+    <div class="dom-modal-body dom-modal-body-scroll" style="display:block; padding:14px; max-height:78vh;">
+      <div class="tpl-grid" id="tpl-grid"></div>
+    </div>
+  </div>
+</div>
+<div class="dom-modal-backdrop spa-extra-content" id="tpl-preview-modal">
+  <div class="dom-modal-window" style="max-width:900px; width:95%; max-height:94vh;">
+    <div class="dom-modal-titlebar">
+      <div id="tpl-preview-title">Preview</div>
+      <button type="button" class="dom-titlebar-btn btn-close" data-tpl-close="tpl-preview-modal" title="Close">&times;</button>
+    </div>
+    <div class="dom-modal-body" style="display:block; padding:12px;">
+      <iframe class="tpl-preview-frame" id="tpl-preview-frame" title="Invoice preview"></iframe>
+      <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:10px;">
+        <button type="button" class="cmx-btn" id="tpl-preview-download">Download</button>
+        <button type="button" class="cmx-btn cmx-primary" id="tpl-preview-select">Select</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="assets/js/hardcode.js?v=2"></script>
 <script src="assets/js/mock-data.js"></script>
-<script src="assets/js/api.js?v=3"></script>
-<script src="assets/js/util.js?v=2"></script>
+<script src="assets/js/api.js?v=4"></script>
+<script src="assets/js/util.js?v=3"></script>
 <script src="assets/js/entry-common.js"></script>
-<script src="assets/js/shell.js?v=21"></script>
-<script src="assets/js/page-company-master.js?v=3"></script>
+<script src="assets/js/shell.js?v=28"></script>
+<script src="assets/js/invoice-templates.js?v=14"></script>
+<script src="assets/js/page-company-master.js?v=7"></script>
 </body></html>

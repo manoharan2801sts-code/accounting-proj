@@ -90,9 +90,13 @@
   // Rules grid, Voucher Entry's line rows).
   document.addEventListener("input", (e) => {
     if (!e.target.matches || !e.target.matches(".dom-amount")) return;
+    // A field inside an .allow-neg container (Reschedule's Base Fare & Tax
+    // Components card) may also start with one "-"; .no-neg fields never.
+    const neg = !!(e.target.closest(".allow-neg") && !e.target.matches(".no-neg")) && /^\s*-/.test(e.target.value);
     let v = e.target.value.replace(/[^0-9.]/g, "");
     const firstDot = v.indexOf(".");
     if (firstDot !== -1) v = v.slice(0, firstDot + 1) + v.slice(firstDot + 1).replace(/\./g, "");
+    if (neg) v = `-${v}`;
     if (v !== e.target.value) e.target.value = v;
   });
   // Clicking/tabbing into an amount field selects its current text (e.g.

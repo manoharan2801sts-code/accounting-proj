@@ -2305,7 +2305,7 @@ input.dom-input[type="number"], input.dom-input.dom-amount {
 #resched-supp-comm-pct-slot, #resched-supp-comm-amt-slot,
 #resched-supp-tds-pct-slot, #resched-supp-tds-amt-slot,
 #default-supp-gstpct-slot, #default-supp-gstamt-slot,
-#resched-supp-taxable-slot {
+#resched-supp-taxable-slot, #default-supp-taxable-slot {
   display: contents;
 }
 /* Merged-row containers (Discount+TDS / Commission+TDS) - flex column so
@@ -2757,3 +2757,31 @@ tr.tb-row-selected td, tr.tb-row-selected td *,
 .tb-diff-row:hover td, .tb-diff-row:hover td * {
   color: #FFFFFF !important;
 }
+
+/* Every report screen (body.report-page, set by shell.js): table column
+   headers in black, bold - same on all reports. */
+body.report-page .app-main thead th,
+body.report-page .app-main thead th * {
+  color: #000000 !important;
+  font-weight: 700 !important;
+}
+
+/* Report screens whose main area carries .rpt-lock: locked to the viewport -
+   the page itself never scrolls, only the table area (.rpt-lock-scroll)
+   does, with its column headers pinned - same as Trial Balance / Day Book. */
+.app-main.rpt-lock {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - var(--topnav-height) - var(--menubar-height, 0px));
+  box-sizing: border-box;
+  overflow: hidden;
+  width: 100%;
+}
+.app-main.rpt-lock > * { flex-shrink: 0; }
+.app-main.rpt-lock > .table-container { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.app-main.rpt-lock > .table-container > * { flex-shrink: 0; }
+.app-main.rpt-lock .rpt-lock-scroll { flex: 1 1 auto; min-height: 0; overflow: auto !important; }
+.app-main.rpt-lock .rpt-lock-scroll thead th { position: sticky; top: 0; z-index: 1; }
+/* ...and the page around it never scrolls (only .rpt-lock-scroll does). */
+html:has(.app-main.rpt-lock), body:has(.app-main.rpt-lock) { height: 100%; overflow: hidden; margin: 0; }
+body:has(.app-main.rpt-lock) .app-body { height: calc(100vh - var(--topnav-height) - var(--menubar-height, 0px)); min-height: 0; overflow: hidden; }

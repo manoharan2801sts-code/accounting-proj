@@ -1,0 +1,324 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Every fixed dropdown in the project lives here - edit this file to add,
+  remove, rename or reorder an option; no code change needed. Reload the
+  page (Ctrl+F5) after saving.
+
+  <list key="..." default="...">   key     = name the screens use (don't rename)
+                                    default = option pre-selected (optional)
+    <option>Text</option>           value saved = the text shown
+    <option value="X">Text</option> value saved = X, text shown = Text
+
+  Careful: changing an option's VALUE (or text, when there's no value
+  attribute) can stop older saved records from matching it. Adding new
+  options or changing only the shown text of a value="..." option is safe.
+  Write & as &amp;
+-->
+<dropdowns>
+
+  <!-- ============ Airline Ticket (Booking / Reschedule / Cancellation) ============ -->
+  <list key="bookingModes" default="Manual">
+    <option>Manual</option>
+    <option>Auto Push</option>
+  </list>
+  <list key="bookingTypes">
+    <option>Travel Desk</option>
+    <option>Indesk</option>
+    <option>Agent</option>
+    <option>Retrieve PNR Accounting</option>
+    <option>Manual Booking</option>
+    <option>Mobile Booking</option>
+    <option>Travel Co-Ordinator</option>
+    <option>SSR Updation</option>
+  </list>
+  <list key="bookingStatuses">
+    <option>Confirmed</option>
+    <option>Re-Scheduled</option>
+    <option>Normal Cancelled</option>
+  </list>
+  <list key="travelTypes">
+    <option>Domestic</option>
+    <option>International</option>
+  </list>
+  <list key="currencies">
+    <option>INR</option>
+    <option>AED</option>
+  </list>
+  <!-- Customer Discount On / Supplier Commission On -->
+  <list key="custDiscountOn">
+    <option>Basic</option>
+    <option>Basic + YQ</option>
+    <option>Basic + YR</option>
+    <option>Basic + YQ + YR</option>
+    <option>Gross</option>
+  </list>
+  <!-- Customer Discount Type / Supplier Commission Type -->
+  <list key="custDiscountTypes">
+    <option>Percentage</option>
+    <option>Flat</option>
+  </list>
+  <list key="paxTypes">
+    <option>Adult</option>
+    <option>Child</option>
+    <option>Infant</option>
+  </list>
+  <list key="paymentModes">
+    <option>Top-up</option>
+    <option>Payment Gateway</option>
+  </list>
+  <list key="airlineCategories">
+    <option>LCC</option>
+    <option>FSC</option>
+    <option>OSC</option>
+  </list>
+  <list key="fopOptions">
+    <option>Own Card</option>
+    <option>Client Card</option>
+    <option>Cash</option>
+  </list>
+  <list key="cabinOptions">
+    <option>Economy</option>
+    <option>Premium Economy</option>
+    <option>Business Class</option>
+    <option>First Class</option>
+  </list>
+  <list key="fareTypeOptions">
+    <option>Normal Fare</option>
+    <option>Corporate Fare</option>
+    <option>Retail Fare</option>
+    <option>ECoupon Fare</option>
+    <option>Special Fare</option>
+    <option>SME Fare</option>
+    <option>Flexi Fare</option>
+    <option>Marine Fare</option>
+    <option>Defence Fare</option>
+    <option>Roundtrip Special Fare</option>
+    <option>SME Corporate/Corp Connect Fare</option>
+    <option>SME Retail Fare</option>
+    <option>Labour Fare</option>
+    <option>Corporate Flexi</option>
+    <option>Student Fare</option>
+    <option>Double Seat</option>
+    <option>Senior Citizen Fare</option>
+  </list>
+  <!-- User Name suggestions (Ticket screen) -->
+  <list key="userNames">
+    <option>Ananya Krishnan</option>
+    <option>Rahul Mehta</option>
+    <option>Fatima Al Suwaidi</option>
+    <option>Vikram Iyer</option>
+  </list>
+
+  <!-- ============ Masters ============ -->
+  <!-- Master Mapping > Product -->
+  <list key="productTypes">
+    <option>Airline</option>
+    <option>Hotel</option>
+    <option>Bus</option>
+    <option>Visa</option>
+    <option>Insurance</option>
+    <option>Rail</option>
+  </list>
+  <!-- Company Master > Country -->
+  <list key="countries">
+    <option>India</option>
+    <option>UAE</option>
+  </list>
+  <!-- Company Master / Ledger > GST Registration Type -->
+  <list key="gstRegistrationTypes">
+    <option>Regular</option>
+    <option>Composition</option>
+    <option>Unregistered</option>
+    <option>SEZ</option>
+  </list>
+  <!-- FOP Master > Card Type -->
+  <list key="cardTypes">
+    <option>Own Card</option>
+    <option>Client Card</option>
+  </list>
+  <!-- Ledger > Opening Balance Dr/Cr -->
+  <list key="openingBalanceTypes">
+    <option>Debit</option>
+    <option>Credit</option>
+  </list>
+  <!-- Ledger > UAE Emirate -->
+  <list key="uaeEmirates">
+    <option>Dubai</option>
+    <option>Abu Dhabi</option>
+    <option>Sharjah</option>
+    <option>Ajman</option>
+    <option>Ras Al Khaimah</option>
+    <option>Fujairah</option>
+    <option>Umm Al Quwain</option>
+  </list>
+  <!-- Ledger > Sundry Creditors > Creditor Type -->
+  <list key="creditorTypes">
+    <option>General Creditor</option>
+    <option>Airline</option>
+    <option>Consolidator</option>
+    <option>Hotel</option>
+    <option>Visa</option>
+    <option>Insurance</option>
+    <option>Rail</option>
+    <option>Bus</option>
+    <option>Package</option>
+  </list>
+  <!-- Ledger > GST / TDS / TCS Applicable -->
+  <list key="yesNo">
+    <option value="false">No</option>
+    <option value="true">Yes</option>
+  </list>
+  <!-- Ledger > Duties & Taxes > Tax Category -->
+  <list key="taxCategories">
+    <option>GST</option>
+    <option>TDS</option>
+    <option>Others</option>
+  </list>
+  <!-- Ledger > Duties & Taxes > Tax Type -->
+  <list key="taxTypes">
+    <option>IGST</option>
+    <option>CGST</option>
+    <option>SGST</option>
+  </list>
+  <!-- Voucher Type > Type of Voucher -->
+  <list key="voucherCategories">
+    <option>General</option>
+    <option>Journal</option>
+    <option>Payment</option>
+    <option>Receipt</option>
+    <option>Debit Note</option>
+    <option>Credit Note</option>
+  </list>
+  <!-- Voucher Type > Method of Voucher Numbering -->
+  <list key="numberMethods">
+    <option>Automatic</option>
+    <option>Manual</option>
+    <option>Automatic &amp; Manual Override</option>
+  </list>
+  <!-- Voucher Type > Additional Numbering > Restart Period -->
+  <list key="numberingPeriods" default="None">
+    <option>Daily</option>
+    <option>Weekly</option>
+    <option>Monthly</option>
+    <option>Yearly</option>
+    <option>None</option>
+  </list>
+
+  <!-- ============ Transactions ============ -->
+  <!-- Vouchers > Voucher Entry > Voucher Type -->
+  <list key="voucherEntryTypes">
+    <option value="JOURNAL">Journal</option>
+    <option value="CONTRA">Contra</option>
+    <option value="PAYMENT">Payment</option>
+    <option value="RECEIPT">Receipt</option>
+    <option value="DEBIT_NOTE">Debit Note</option>
+    <option value="CREDIT_NOTE">Credit Note</option>
+  </list>
+  <!-- Hotel / Tour entry > Status -->
+  <list key="bookingRecordStatuses">
+    <option value="CONFIRMED">Confirmed</option>
+    <option value="CANCELLED">Cancelled</option>
+  </list>
+  <!-- Tour entry > Package Type -->
+  <list key="tourPackageTypes">
+    <option value="FIT">FIT – Free Independent Traveller</option>
+    <option value="GIT">GIT – Group Inclusive Tour</option>
+  </list>
+  <!-- Insurance entry > Status -->
+  <list key="insuranceStatuses">
+    <option value="ACTIVE">Active</option>
+    <option value="CANCELLED">Cancelled</option>
+    <option value="CLAIMED">Claimed</option>
+  </list>
+  <!-- Insurance list > Provider filter -->
+  <list key="insuranceProviders">
+    <option value="Tata AIG">Tata AIG General Insurance</option>
+    <option value="Bajaj Allianz">Bajaj Allianz Travel</option>
+    <option value="HDFC ERGO">HDFC ERGO Overseas</option>
+    <option value="Care Health">Care Health Travel Plus</option>
+  </list>
+  <!-- Insurance list > Status filter -->
+  <list key="insuranceFilterStatuses">
+    <option>Active</option>
+    <option>Issued</option>
+    <option>Expired</option>
+    <option>Cancelled</option>
+  </list>
+  <!-- Visa list > Country filter -->
+  <list key="visaFilterCountries">
+    <option value="UAE">United Arab Emirates</option>
+    <option value="Schengen">Schengen (Europe)</option>
+    <option value="Singapore">Singapore</option>
+    <option value="USA">United States</option>
+    <option value="UK">United Kingdom</option>
+  </list>
+  <!-- Visa list > Status filter -->
+  <list key="visaFilterStatuses">
+    <option value="Approved">Approved</option>
+    <option value="Submitted">In Process</option>
+    <option value="Rejected">Rejected</option>
+  </list>
+  <!-- Visa entry > Destination Country -->
+  <list key="visaDestinations">
+    <option>UAE</option>
+    <option>UK</option>
+    <option>Schengen</option>
+    <option>USA</option>
+    <option>India</option>
+  </list>
+  <!-- Visa entry > Visa Type -->
+  <list key="visaTypes">
+    <option>Tourist</option>
+    <option>Business</option>
+    <option>Transit</option>
+  </list>
+  <!-- Visa entry > Status -->
+  <list key="visaStatuses">
+    <option value="SUBMITTED">Submitted</option>
+    <option value="APPROVED">Approved</option>
+    <option value="REJECTED">Rejected</option>
+  </list>
+
+  <!-- ============ Reports ============ -->
+  <!-- DSR > Product filter -->
+  <list key="dsrProducts" default="Airline">
+    <option>Airline</option>
+    <option>Hotel</option>
+    <option>Bus</option>
+    <option>Train</option>
+    <option>Visa</option>
+    <option>Tour Packages</option>
+    <option>Insurance</option>
+    <option>Vouchers</option>
+  </list>
+  <!-- DSR > Status filter -->
+  <list key="dsrStatuses">
+    <option value="Confirmed">Confirmed</option>
+    <option value="Re-Scheduled">Reschedule</option>
+    <option value="Normal Cancelled">Cancellation</option>
+    <option value="SSR Updated">SSR Updation</option>
+  </list>
+
+  <!-- ============ Report / transaction list filters ============ -->
+  <!-- Branch / Office filter (GSTR, TDS, Bus, Train, Hotel, Tour, SSR, Misc lists) -->
+  <list key="branches">
+    <option value="DEL">Delhi HQ</option>
+    <option value="BOM">Mumbai Branch</option>
+    <option value="DXB">Dubai Branch</option>
+  </list>
+  <!-- Status filter on the same screens -->
+  <list key="recordStatuses">
+    <option value="ISSUED">Confirmed / Issued</option>
+    <option value="PENDING">Pending</option>
+    <option value="CANCELLED">Cancelled</option>
+  </list>
+
+  <!-- ============ SSR Updation ============ -->
+  <list key="ssrTypes">
+    <option>Extra Baggage</option>
+    <option>Meal</option>
+    <option>Seat</option>
+    <option>Other SSR</option>
+  </list>
+
+</dropdowns>

@@ -575,10 +575,33 @@ def ledger_delete(params):
 @sp("dbo.sp_CompanyMaster", "LIST")
 def company_master_list(params):
     company_id = _p_int(params, "Id")
+    images = _p_str(params, "Images")
     if company_id is not None:
-        return query("SELECT * FROM `CompanyMaster` WHERE `id` = %s", [company_id])
-    # ORDER BY company_name under a case-insensitive collation.
-    return query("SELECT * FROM `CompanyMaster` ORDER BY LOWER(`company_name`)")
+        rows = query("SELECT * FROM `CompanyMaster` WHERE `id` = %s", [company_id])
+    else:
+        # ORDER BY company_name under a case-insensitive collation.
+        rows = query("SELECT * FROM `CompanyMaster` ORDER BY LOWER(`company_name`)")
+    if images not in ("logo", "all"):
+        for r in rows:
+            r["logo_base64"] = None
+            r["seal_base64"] = None
+    elif images == "logo":
+        for r in rows:
+            r["seal_base64"] = None
+    return rows
+
+
+@sp("dbo.sp_CompanyMaster", "SET_INVOICE_TEMPLATE")
+def company_master_set_invoice_template(params):
+    company_id = _p_int(params, "Id")
+    template = _p_str(params, "InvoiceTemplate", 20) or "classic"
+    if not query_one("SELECT 1 AS `x` FROM `CompanyMaster` WHERE `id` = %s", [company_id]):
+        return _err("Company not found.")
+    execute(
+        "UPDATE `CompanyMaster` SET `invoice_template` = %s, `updated_at` = %s WHERE `id` = %s",
+        [template, _utc_now(), company_id],
+    )
+    return [{"id": company_id, "invoice_template": template, "status": "Success"}]
 
 
 _COMPANY_FIELDS = [
@@ -605,6 +628,13 @@ _COMPANY_FIELDS = [
     ("decimal_places", "DecimalPlaces", "int", None),
     ("logo_base64", "LogoBase64", "str", None),
     ("seal_base64", "SealBase64", "str", None),
+    ("terms_conditions", "TermsConditions", "str", None),
+    ("bank_account_holder", "BankAccountHolder", "str", 100),
+    ("bank_account_no", "BankAccountNo", "str", 30),
+    ("bank_ifsc", "BankIfsc", "str", 15),
+    ("bank_swift", "BankSwift", "str", 15),
+    ("bank_name", "BankName", "str", 100),
+    ("bank_branch", "BankBranch", "str", 100),
 ]
 
 

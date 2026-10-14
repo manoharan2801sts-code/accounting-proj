@@ -8,23 +8,22 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
 <link href="assets/css/design-system.css" rel="stylesheet" />
-<link href="assets/css/app.css" rel="stylesheet" />
+<link href="assets/css/app.css?v=7" rel="stylesheet" />
 </head><body>
 <header class="app-topnav" id="shell-topnav"></header>
 <div class="app-body">
   <aside class="app-sidebar" id="shell-sidebar"></aside>
   <main class="app-main" style="max-width:1400px;">
-    <h1 style="font-size:1.15rem;" id="page-title">New Voucher</h1>
+    <h1 style="font-size:0.95rem;" id="page-title">New Voucher</h1>
     <form id="voucher-form" style="margin-top:0.7rem;">
       <div class="entry-section-title">Voucher header</div>
       <div class="entry-grid">
-        <div><label class="field-label">Branch</label><select class="form-control-custom" id="branch" required></select></div>
         <div><label class="field-label">Voucher Type</label>
-          <select class="form-control-custom" id="voucher_type">
-            <option value="JOURNAL">Journal</option><option value="CONTRA">Contra</option>
-            <option value="PAYMENT">Payment</option><option value="RECEIPT">Receipt</option>
-            <option value="DEBIT_NOTE">Debit Note</option><option value="CREDIT_NOTE">Credit Note</option>
+          <select class="form-control-custom" id="voucher_type" data-options="voucherEntryTypes">
           </select>
+        </div>
+        <div><label class="field-label">Voucher No.</label>
+          <input class="form-control-custom" id="voucher_no" readonly tabindex="-1" title="Automatic - numbered per voucher type" style="background:var(--color-bg-subtle, #F1F5F9);" />
         </div>
         <div><label class="field-label">Voucher Date</label><input class="form-control-custom" type="date" id="voucher_date" required /></div>
         <div class="span-2"><label class="field-label">Narration</label><input class="form-control-custom" id="narration" placeholder="Brief description of this entry" /></div>
@@ -47,16 +46,17 @@
 
       <div class="entry-actions">
         <a href="vouchers.html" class="btn-outline-brand" id="cancel-link">Cancel</a>
+        <button type="button" class="btn-brand" id="edit-btn" style="display:none;">Edit</button>
         <button type="submit" class="btn-brand" id="save-btn" disabled>Post Voucher</button>
       </div>
     </form>
   </main>
 </div>
-<script src="assets/js/hardcode.js"></script>
+<script src="assets/js/hardcode.js?v=2"></script>
 <script src="assets/js/mock-data.js"></script>
-<script src="assets/js/api.js?v=3"></script>
-<script src="assets/js/util.js?v=2"></script>
-<script src="assets/js/shell.js?v=21"></script>
+<script src="assets/js/api.js?v=4"></script>
+<script src="assets/js/util.js?v=3"></script>
+<script src="assets/js/shell.js?v=28"></script>
 <script src="assets/js/entry-common.js"></script>
-<script src="assets/js/page-voucher-entry.js?v=2"></script>
+<script src="assets/js/page-voucher-entry.js?v=7"></script>
 </body></html>

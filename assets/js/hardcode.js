@@ -189,37 +189,74 @@
     currencySymbol: "₹",
   };
 
-  // Airline Ticket entry form — dropdown option lists, straight from the
-  // "TeSePr Accounting Software" field spec (Airline Ticket sheet, Part 1-3).
-  // Kept here (not inline in the HTML) so this is the one place to edit them.
+  // Every fixed dropdown's options come from assets/data/dropdowns.xml -
+  // edit that file to change them (no code change). Loaded once,
+  // synchronously, so every page script that runs after this file can read
+  // the lists immediately. { key: { default, options: [{ value, label }] } }
+  function loadDropdowns() {
+    try {
+      const xhr = new XMLHttpRequest();
+      xhr.open("GET", "assets/data/dropdowns.xml?t=" + Date.now(), false);
+      xhr.send();
+      if (xhr.status !== 200) throw new Error("HTTP " + xhr.status);
+      const xml = new DOMParser().parseFromString(xhr.responseText, "application/xml");
+      if (xml.querySelector("parsererror")) throw new Error("dropdowns.xml is not valid XML");
+      const lists = {};
+      xml.querySelectorAll("list").forEach((list) => {
+        lists[list.getAttribute("key")] = {
+          default: list.getAttribute("default") || "",
+          options: Array.from(list.querySelectorAll("option")).map((o) => {
+            const label = o.textContent.trim();
+            return { value: o.hasAttribute("value") ? o.getAttribute("value") : label, label };
+          }),
+        };
+      });
+      return lists;
+    } catch (err) {
+      console.error("Could not load assets/data/dropdowns.xml", err);
+      return {};
+    }
+  }
+  const DROPDOWNS = loadDropdowns();
+  const dropdownValues = (key) => ((DROPDOWNS[key] || {}).options || []).map((o) => o.value);
+
+  // Fills every <select data-options="key"> under root from DROPDOWNS,
+  // after whatever placeholder option(s) the HTML already has. Runs once
+  // per select (data-options-filled); shell.js calls it on each SPA page.
+  function fillDropdowns(root) {
+    (root || document).querySelectorAll("select[data-options]:not([data-options-filled])").forEach((sel) => {
+      const list = DROPDOWNS[sel.getAttribute("data-options")];
+      sel.setAttribute("data-options-filled", "1");
+      if (!list) return;
+      list.options.forEach((o) => {
+        const opt = sel.ownerDocument.createElement("option");
+        opt.value = o.value;
+        opt.textContent = o.label;
+        if (list.default && o.value === list.default) opt.setAttribute("selected", "selected");
+        sel.appendChild(opt);
+      });
+    });
+  }
+  fillDropdowns(document);
+
+  // Airline Ticket entry form (and Supplier Master's commission rules) -
+  // same key names as dropdowns.xml.
   const TICKET_FORM_OPTIONS = {
-    bookingModes: ["Manual", "Auto Push"],
-    // Locked to this until the real API push is connected — see bookingModes above
-    // for the full list this will switch back to being a dropdown of, later.
-    defaultBookingMode: "Manual",
-    bookingTypes: [
-      "Travel Desk", "Indesk", "Agent", "Retrieve PNR Accounting",
-      "Manual Booking", "Mobile Booking", "Travel Co-Ordinator", "SSR Updation",
-    ],
-    bookingStatuses: ["Confirmed", "Re-Scheduled", "Normal Cancelled"],
-    travelTypes: ["Domestic", "International"],
-    currencies: ["INR", "AED"],
-    custDiscountOn: ["Basic", "Basic + YQ", "Basic + YR", "Basic + YQ + YR", "Gross"],
-    custDiscountTypes: ["Percentage", "Flat"],
-    paxTypes: ["Adult", "Child", "Infant"],
-    paymentModes: ["Top-up", "Payment Gateway"],
-    airlineCategories: ["LCC", "FSC", "OSC"],
-    fopOptions: ["Own Card", "Client Card", "Cash"],
-    cabinOptions: ["Economy", "Premium Economy", "Business Class", "First Class"],
-    fareTypeOptions: [
-      "Normal Fare", "Corporate Fare", "Retail Fare", "ECoupon Fare", "Special Fare", "SME Fare",
-      "Flexi Fare", "Marine Fare", "Defence Fare", "Roundtrip Special Fare",
-      "SME Corporate/Corp Connect Fare", "SME Retail Fare", "Labour Fare", "Corporate Flexi",
-      "Student Fare", "Double Seat", "Senior Citizen Fare",
-    ],
-    // Placeholder until a real User Master exists — spec calls for a searchable
-    // user dropdown backed by "User Master", not yet a separate module here.
-    userNames: ["Ananya Krishnan", "Rahul Mehta", "Fatima Al Suwaidi", "Vikram Iyer"],
+    bookingModes: dropdownValues("bookingModes"),
+    defaultBookingMode: (DROPDOWNS.bookingModes || {}).default || "Manual",
+    bookingTypes: dropdownValues("bookingTypes"),
+    bookingStatuses: dropdownValues("bookingStatuses"),
+    travelTypes: dropdownValues("travelTypes"),
+    currencies: dropdownValues("currencies"),
+    custDiscountOn: dropdownValues("custDiscountOn"),
+    custDiscountTypes: dropdownValues("custDiscountTypes"),
+    paxTypes: dropdownValues("paxTypes"),
+    paymentModes: dropdownValues("paymentModes"),
+    airlineCategories: dropdownValues("airlineCategories"),
+    fopOptions: dropdownValues("fopOptions"),
+    cabinOptions: dropdownValues("cabinOptions"),
+    fareTypeOptions: dropdownValues("fareTypeOptions"),
+    userNames: dropdownValues("userNames"),
   };
 
   window.VoyagerHardcode = {
@@ -232,5 +269,8 @@
     LOADER_MESSAGES,
     NUMBER_FORMAT,
     TICKET_FORM_OPTIONS,
+    DROPDOWNS,
+    dropdownValues,
+    fillDropdowns,
   };
 })(window);

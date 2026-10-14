@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
   <link href="assets/css/design-system.css" rel="stylesheet" />
-  <link href="assets/css/app.css" rel="stylesheet" />
+  <link href="assets/css/app.css?v=7" rel="stylesheet" />
   <link rel="icon" type="image/png" href="assets/img/favicon.png" />
   <style>
     /* Locked to the viewport - only the grid body scrolls, not the whole
@@ -33,9 +33,13 @@
        it drops down right under the "Advanced Filter" button. */
     #dsr-advanced-panel {
       position: absolute; top: 100%; left: 0; margin-top: 6px; z-index: 30;
-      background: var(--color-white); border: 1px solid var(--color-border); border-radius: var(--radius-md);
+      background: #EEF5FF; border: 1px solid #C7DBF5; border-radius: var(--radius-md);
       box-shadow: var(--shadow-md); padding: 0.75rem 1rem;
+      /* Never wider than the page - extra filters wrap onto a 2nd row. */
+      max-width: 100%; box-sizing: border-box;
     }
+    #dsr-airline-only-filters { display: inline-flex; gap: 0.5rem; flex-wrap: wrap; }
+    .dsr-toolbar-text { height: 26px; width: 190px; padding: 0 8px; font-size: 12px; box-sizing: border-box; }
     .dsr-toolbar { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; width: 100%; }
     /* Customer/Supplier chip pickers grow taller as chips are added (each
        wraps onto its own line below the search box) - align everything
@@ -171,35 +175,28 @@
 
         <div id="dsr-advanced-panel" style="display:none;">
           <div class="dsr-toolbar">
-            <select class="form-control-custom dsr-toolbar-select" id="filter-product" onchange="toggleAirlineOnlyFilters(); updateClearFiltersState();">
+            <select class="form-control-custom dsr-toolbar-select" id="filter-product" onchange="toggleAirlineOnlyFilters(); updateClearFiltersState();" data-options="dsrProducts">
               <option value="">All Products</option>
-              <option value="Airline" selected>Airline</option>
-              <option value="Hotel">Hotel</option>
-              <option value="Bus">Bus</option>
-              <option value="Train">Train</option>
-              <option value="Visa">Visa</option>
-              <option value="Tour Packages">Tour Packages</option>
-              <option value="Insurance">Insurance</option>
-              <option value="Vouchers">Vouchers</option>
             </select>
             <span id="dsr-airline-only-filters" style="display:inline-flex; gap:0.5rem;">
-              <select class="form-control-custom dsr-toolbar-select" id="filter-airline-category" onchange="updateClearFiltersState()">
+              <select class="form-control-custom dsr-toolbar-select" id="filter-airline-category" onchange="updateClearFiltersState()" data-options="airlineCategories">
                 <option value="">All Categories</option>
-                <option value="LCC">LCC</option>
-                <option value="FSC">FSC</option>
-                <option value="OSC">OSC</option>
               </select>
-              <select class="form-control-custom dsr-toolbar-select" id="filter-travel-type" onchange="updateClearFiltersState()">
+              <select class="form-control-custom dsr-toolbar-select" id="filter-travel-type" onchange="updateClearFiltersState()" data-options="travelTypes">
                 <option value="">All Types</option>
-                <option value="Domestic">Domestic</option>
-                <option value="International">International</option>
               </select>
-              <select class="form-control-custom dsr-toolbar-select" id="filter-status" onchange="updateClearFiltersState()">
+              <select class="form-control-custom dsr-toolbar-select" id="filter-status" onchange="updateClearFiltersState()" data-options="dsrStatuses">
                 <option value="">All Status</option>
-                <option value="Confirmed">Confirmed</option>
-                <option value="Re-Scheduled">Reschedule</option>
-                <option value="Normal Cancelled">Cancellation</option>
               </select>
+              <select class="form-control-custom dsr-toolbar-select" id="filter-payment-mode" onchange="updateClearFiltersState()" data-options="paymentModes">
+                <option value="">All Payment Modes</option>
+              </select>
+              <select class="form-control-custom dsr-toolbar-select" id="filter-booking-type" onchange="updateClearFiltersState()" data-options="bookingTypes">
+                <option value="">All Booking Types</option>
+              </select>
+              <!-- One box for both: shows a row when its Invoice No OR its S PNR contains the text. -->
+              <input type="text" class="form-control-custom dsr-toolbar-text" id="filter-inv-spnr" placeholder="Invoice No / S PNR..." autocomplete="off"
+                     oninput="updateClearFiltersState()" onkeydown="if (event.key === 'Enter') { event.preventDefault(); applyFiltersAndRender(); }" />
             </span>
             <div class="chip-picker dsr-inline-picker" id="customer-picker">
               <div class="chip-picker-input-wrap">
@@ -259,12 +256,12 @@
     </main>
   </div>
 
-  <script src="assets/js/hardcode.js"></script>
+  <script src="assets/js/hardcode.js?v=2"></script>
   <script src="assets/js/mock-data.js"></script>
-  <script src="assets/js/api.js?v=3"></script>
-  <script src="assets/js/util.js?v=2"></script>
+  <script src="assets/js/api.js?v=4"></script>
+  <script src="assets/js/util.js?v=3"></script>
   <script src="assets/js/entry-common.js"></script>
-  <script src="assets/js/shell.js?v=21"></script>
+  <script src="assets/js/shell.js?v=28"></script>
   <script>
     // Not gated on DOMContentLoaded - when this page is opened via the
     // app's SPA navigation (shell.js's navigateTo), its <script> tags are
@@ -312,13 +309,21 @@
       document.getElementById("filter-airline-category").value = urlParams.get("category") || "";
       document.getElementById("filter-travel-type").value = urlParams.get("travelType") || "";
       document.getElementById("filter-status").value = urlParams.get("status") || "";
+      document.getElementById("filter-payment-mode").value = urlParams.get("paymentMode") || "";
+      document.getElementById("filter-booking-type").value = urlParams.get("bookingType") || "";
+      document.getElementById("filter-inv-spnr").value = urlParams.get("invSpnr") || "";
       const urlCustomers = urlParams.get("customers");
       const urlSuppliers = urlParams.get("suppliers");
       if (urlCustomers) customerPicker.setSelected(urlCustomers.split("|"));
       if (urlSuppliers) supplierPicker.setSelected(urlSuppliers.split("|"));
       toggleAirlineOnlyFilters();
       updateClearFiltersState();
-      loadReport();
+      // Back from a ticket -> also the same search text and scroll position
+      // (the filters themselves already come back from the URL above).
+      const rs = VoyagerShell.reportState.consume();
+      VoyagerShell.reportState.applyInputs(rs);
+      await loadReport();
+      VoyagerShell.reportState.restoreAfterLoad(rs);
     })();
 
     // Double-click a row to open that ticket in ticket-entry.html - a
@@ -328,6 +333,10 @@
     function navigateToTicket(row) {
       if (row.dataset.cancellationId) {
         window.location.href = `ticket-entry.html?cancellation_saved_id=${row.dataset.cancellationId}`;
+        return;
+      }
+      if (row.dataset.ssrId) {
+        window.location.href = `trans-airline-ssr.html?ssr_saved_id=${row.dataset.ssrId}`;
         return;
       }
       window.location.href = row.dataset.rescheduleId
@@ -395,6 +404,7 @@
     const TICKETS_API = "http://localhost:8000/api/tickets/";
     const RESCHEDULE_TICKETS_API = "http://localhost:8000/api/reschedule-tickets/list/";
     const CANCELLATION_DSR_API = "http://localhost:8000/api/cancellation-tickets/dsr/";
+    const SSR_DSR_API = "http://localhost:8000/api/ssr-tickets/dsr/";
     let allRows = [];
 
     function fmtAmt(n) {
@@ -437,12 +447,14 @@
         // reschedule_ticket_id for those.
         // Cancellations (cancellation_ticket_id) are their own Credit Note
         // rows - never folded into the booking/reschedule they cancelled.
+        // SSR Updations (ssr_ticket_id) likewise - one row per SSR invoice.
         const groupKey = r.cancellation_ticket_id != null ? `c${r.cancellation_ticket_id}`
+          : r.ssr_ticket_id != null ? `s${r.ssr_ticket_id}`
           : (r.ticket_id != null ? `t${r.ticket_id}` : `r${r.reschedule_ticket_id}`);
         let g = byTicket.get(groupKey);
         if (!g) {
           g = {
-            ticket_id: r.ticket_id, reschedule_ticket_id: r.reschedule_ticket_id, cancellation_ticket_id: r.cancellation_ticket_id,
+            ticket_id: r.ticket_id, reschedule_ticket_id: r.reschedule_ticket_id, cancellation_ticket_id: r.cancellation_ticket_id, ssr_ticket_id: r.ssr_ticket_id,
             invoice_date: r.invoice_date, invoice_number: r.invoice_number,
             customer_name: r.customer_name, booking_reference: r.booking_reference, airline_pnr: r.airline_pnr,
             lead_passenger_name: r.passenger_name, airline_names: [], supplier_names: [], sectors: [],
@@ -499,7 +511,7 @@
         return;
       }
       let rowsHtml = tickets.map((t) => `
-        <tr class="dsr-data-row" data-id="${t.ticket_id || ""}" data-reschedule-id="${t.reschedule_ticket_id || ""}" data-cancellation-id="${t.cancellation_ticket_id || ""}" title="Double-click to view this ticket">
+        <tr class="dsr-data-row" data-id="${t.ticket_id || ""}" data-reschedule-id="${t.reschedule_ticket_id || ""}" data-cancellation-id="${t.cancellation_ticket_id || ""}" data-ssr-id="${t.ssr_ticket_id || ""}" title="Double-click to view this ticket">
           <td>${fmtDateDMY(t.invoice_date)}</td>
           <td>${t.invoice_number || "-"}</td>
           <td class="truncate-cell" title="${escAttr(t.customer_name || "-")}">${t.customer_name || "-"}</td>
@@ -571,6 +583,12 @@
       if (category) params.set("category", category);
       if (travelType) params.set("travelType", travelType);
       if (status) params.set("status", status);
+      const paymentMode = document.getElementById("filter-payment-mode").value;
+      const bookingType = document.getElementById("filter-booking-type").value;
+      const invSpnr = document.getElementById("filter-inv-spnr").value.trim();
+      if (paymentMode) params.set("paymentMode", paymentMode);
+      if (bookingType) params.set("bookingType", bookingType);
+      if (invSpnr) params.set("invSpnr", invSpnr);
       if (customers.length) params.set("customers", customers.join("|"));
       if (suppliers.length) params.set("suppliers", suppliers.join("|"));
       const qs = params.toString();
@@ -587,6 +605,9 @@
       const status = document.getElementById("filter-status").value;
       const pickedCustomers = customerPicker.getSelected();
       const pickedSuppliers = supplierPicker.getSelected();
+      const paymentMode = document.getElementById("filter-payment-mode").value;
+      const bookingType = document.getElementById("filter-booking-type").value;
+      const invSpnr = document.getElementById("filter-inv-spnr").value.trim().toLowerCase();
 
       // This report only has Airline ticket line data - any other Product
       // selection has nothing to show here.
@@ -603,6 +624,11 @@
         if (category && r.airline_category !== category) return false;
         if (travelType && r.travel_type !== travelType) return false;
         if (status && r.booking_status !== status) return false;
+        if (paymentMode && r.payment_mode !== paymentMode) return false;
+        if (bookingType && r.booking_type !== bookingType) return false;
+        // Invoice No OR S PNR - either one matching shows the row.
+        if (invSpnr && !String(r.invoice_number || "").toLowerCase().includes(invSpnr)
+            && !String(r.booking_reference || "").toLowerCase().includes(invSpnr)) return false;
         return true;
       });
       renderTable(rows);
@@ -611,10 +637,11 @@
     async function loadReport() {
       const tbody = document.getElementById("main-data-tbody");
       try {
-        const [res, rescheduleRes, cancellationRes] = await Promise.all([
+        const [res, rescheduleRes, cancellationRes, ssrRes] = await Promise.all([
           fetch(`${TICKETS_API}?company_id=${activeCompanyId}`),
           fetch(`${RESCHEDULE_TICKETS_API}?company_id=${activeCompanyId}`),
           fetch(`${CANCELLATION_DSR_API}?company_id=${activeCompanyId}`),
+          fetch(`${SSR_DSR_API}?company_id=${activeCompanyId}`),
         ]);
         if (!res.ok) throw new Error(`Server returned ${res.status}`);
         const data = await res.json();
@@ -627,7 +654,10 @@
         // Cancellations - Credit Note rows with NEGATIVE Base Fare / Net
         // Amount (they reduce sales), so the Total row nets them off.
         const cancellationData = cancellationRes.ok ? await cancellationRes.json() : [];
-        allRows = [...data, ...rescheduleData, ...cancellationData].map((l) => ({ ...l, pnr: l.airline_pnr || l.gds_pnr || l.booking_reference }));
+        // SSR Updations - extra SSR sold on an issued ticket (no Base Fare;
+        // Net Amount = what the customer pays for the SSR).
+        const ssrData = ssrRes.ok ? await ssrRes.json() : [];
+        allRows = [...data, ...rescheduleData, ...cancellationData, ...ssrData].map((l) => ({ ...l, pnr: l.airline_pnr || l.gds_pnr || l.booking_reference }));
       } catch (err) {
         console.error("Could not load tickets for the DSR report - is the Django backend running?", err);
         allRows = [];
@@ -753,6 +783,9 @@
         || document.getElementById("filter-airline-category").value
         || document.getElementById("filter-travel-type").value
         || document.getElementById("filter-status").value
+        || document.getElementById("filter-payment-mode").value
+        || document.getElementById("filter-booking-type").value
+        || document.getElementById("filter-inv-spnr").value.trim()
         || customerPicker.getSelected().length
         || supplierPicker.getSelected().length;
       btn.disabled = !anyActive;
@@ -762,6 +795,9 @@
       document.getElementById("filter-airline-category").value = "";
       document.getElementById("filter-travel-type").value = "";
       document.getElementById("filter-status").value = "";
+      document.getElementById("filter-payment-mode").value = "";
+      document.getElementById("filter-booking-type").value = "";
+      document.getElementById("filter-inv-spnr").value = "";
       customerPicker.clear();
       supplierPicker.clear();
       toggleAirlineOnlyFilters();

@@ -41,6 +41,7 @@ RULES = {
     "supplier-commission-rule-delete": ("delete", ["supplier-master"]),
     "company-master-save": ("upsert", ["company-master"]),
     "company-master-delete": ("delete", ["company-master"]),
+    "company-master-invoice-template": ("edit", ["company-master"]),
     "voucher-type-save": ("upsert", ["voucher-type"]),
     "voucher-type-delete": ("delete", ["voucher-type"]),
     # Its save body never carries an id (rows upsert by field), so add and
@@ -61,12 +62,18 @@ RULES = {
     "cancellation-ticket-create": ("add", ["trans-airline-cancellation"]),
     "cancellation-ticket-update": ("edit", ["trans-airline-cancellation"]),
     "cancellation-jv-preview-draft": ("view", ["trans-airline-cancellation"]),
+    "ssr-ticket-create": ("add", ["trans-airline-ssr"]),
+    "ssr-ticket-update": ("edit", ["trans-airline-ssr"]),
+    "ssr-jv-preview-draft": ("view", ["trans-airline-ssr"]),
     # Reports (their own data endpoints)
     "day-book-report": ("view", ["rep-day-book"]),
     "cash-bank-book-report": ("view", ["rep-cash-bank-book"]),
     "trial-balance-report": ("view", ["rep-trial-balance"]),
     "profit-loss-report": ("view", ["rep-profit-loss"]),
     "balance-sheet-report": ("view", ["rep-balance-sheet"]),
+    "receivables-report": ("view", ["customers"]),
+    "payables-report": ("view", ["suppliers"]),
+    "party-open-bills": ("view", ["vouchers"]),
     "ledger-book-report": ("view", LEDGER_DRILLDOWN_REPORTS),
     "ledger-monthly-summary": ("view", LEDGER_DRILLDOWN_REPORTS),
 }

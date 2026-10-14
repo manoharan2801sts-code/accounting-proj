@@ -495,17 +495,61 @@ CREATE OR ALTER PROCEDURE dbo.sp_CompanyMaster
     @CurrencyName           NVARCHAR(50)    = NULL,
     @DecimalPlaces          SMALLINT        = NULL,
     @LogoBase64             NVARCHAR(MAX)   = NULL,
-    @SealBase64             NVARCHAR(MAX)   = NULL
+    @SealBase64             NVARCHAR(MAX)   = NULL,
+    -- LIST only: which images to return - NULL = none (fast), 'logo', 'all'.
+    @Images                 NVARCHAR(10)    = NULL,
+    -- SET_INVOICE_TEMPLATE only: 'classic' or 'payment'.
+    @InvoiceTemplate        NVARCHAR(20)    = NULL,
+    @TermsConditions        NVARCHAR(MAX)   = NULL,
+    @BankAccountHolder      NVARCHAR(100)   = NULL,
+    @BankAccountNo          NVARCHAR(30)   = NULL,
+    @BankIfsc               NVARCHAR(15)   = NULL,
+    @BankSwift              NVARCHAR(15)   = NULL,
+    @BankName               NVARCHAR(100)   = NULL,
+    @BankBranch             NVARCHAR(100)   = NULL
 AS
 BEGIN
     SET NOCOUNT ON;
 
     IF @Action = 'LIST'
     BEGIN
-        IF @Id IS NOT NULL
-            SELECT * FROM dbo.CompanyMaster WHERE id = @Id;
-        ELSE
-            SELECT * FROM dbo.CompanyMaster ORDER BY company_name;
+        -- The logo/seal can be MBs of base64 - only sent when asked for.
+        SELECT id, company_name, mailing_name, address, country, state, pincode, telephone, mobile, email,
+               financial_year_from, books_beginning_from, gst_reg_type, gst_no, cin_number, tan_number, hsn_sac,
+               created_at, updated_at, pan_number, currency_name, currency_symbol, decimal_places, invoice_template, terms_conditions,
+               bank_account_holder, bank_account_no, bank_ifsc, bank_swift, bank_name, bank_branch,
+               CASE WHEN @Images IN ('logo', 'all') THEN logo_base64 END AS logo_base64,
+               CASE WHEN @Images = 'all' THEN seal_base64 END AS seal_base64
+        FROM dbo.CompanyMaster
+        WHERE @Id IS NULL OR id = @Id
+        ORDER BY company_name;
+        RETURN;
+    END
+
+    -- Company Master > Choose Invoice Template - the print layout for every
+    -- Tax Invoice / Credit Note this company prints.
+    IF @Action = 'SET_INVOICE_TEMPLATE'
+    BEGIN
+        IF @InvoiceTemplate NOT IN ('classic', 'payment')
+        BEGIN
+            SELECT NULL AS id, 'Error' AS status, 'Unknown invoice template.' AS error;
+            RETURN;
+        END
+        IF NOT EXISTS (SELECT 1 FROM dbo.CompanyMaster WHERE id = @Id)
+        BEGIN
+            SELECT NULL AS id, 'Error' AS status, 'Save the Company Master details first.' AS error;
+            RETURN;
+        END
+        BEGIN TRY
+            BEGIN TRAN;
+            UPDATE dbo.CompanyMaster SET invoice_template = @InvoiceTemplate, updated_at = SYSUTCDATETIME() WHERE id = @Id;
+            COMMIT TRAN;
+            SELECT @Id AS id, @InvoiceTemplate AS invoice_template, 'Success' AS status;
+        END TRY
+        BEGIN CATCH
+            IF @@TRANCOUNT > 0 ROLLBACK TRAN;
+            SELECT NULL AS id, 'Error' AS status, ERROR_MESSAGE() AS error;
+        END CATCH
         RETURN;
     END
 
@@ -542,7 +586,9 @@ BEGIN
                     books_beginning_from = @BooksBeginningFrom, gst_reg_type = @GstRegType, gst_no = @GstNo,
                     pan_number = @PanNumber, cin_number = @CinNumber, tan_number = @TanNumber, hsn_sac = @HsnSac,
                     currency_symbol = @CurrencySymbol, currency_name = @CurrencyName, decimal_places = @DecimalPlaces,
-                    logo_base64 = @LogoBase64, seal_base64 = @SealBase64, updated_at = SYSUTCDATETIME()
+                    logo_base64 = @LogoBase64, seal_base64 = @SealBase64, terms_conditions = @TermsConditions,
+                    bank_account_holder = @BankAccountHolder, bank_account_no = @BankAccountNo, bank_ifsc = @BankIfsc, bank_swift = @BankSwift, bank_name = @BankName, bank_branch = @BankBranch,
+                    updated_at = SYSUTCDATETIME()
                 WHERE id = @Id;
                 SET @ResultId = @Id;
             END
@@ -556,12 +602,12 @@ BEGIN
                     (id, company_name, mailing_name, address, country, state, pincode, telephone, mobile, email,
                      financial_year_from, books_beginning_from, gst_reg_type, gst_no, pan_number, cin_number,
                      tan_number, hsn_sac, currency_symbol, currency_name, decimal_places, logo_base64, seal_base64,
-                     created_at, updated_at)
+                     terms_conditions, bank_account_holder, bank_account_no, bank_ifsc, bank_swift, bank_name, bank_branch, created_at, updated_at)
                 VALUES
                     (@Id, @CompanyName, @MailingName, @Address, @Country, @State, @Pincode, @Telephone, @Mobile, @Email,
                      @FinancialYearFrom, @BooksBeginningFrom, @GstRegType, @GstNo, @PanNumber, @CinNumber,
                      @TanNumber, @HsnSac, @CurrencySymbol, @CurrencyName, @DecimalPlaces, @LogoBase64, @SealBase64,
-                     SYSUTCDATETIME(), SYSUTCDATETIME());
+                     @TermsConditions, @BankAccountHolder, @BankAccountNo, @BankIfsc, @BankSwift, @BankName, @BankBranch, SYSUTCDATETIME(), SYSUTCDATETIME());
                 SET IDENTITY_INSERT dbo.CompanyMaster OFF;
                 SET @ResultId = @Id;
                 SET @WasCreated = 1;
@@ -572,12 +618,12 @@ BEGIN
                     (company_name, mailing_name, address, country, state, pincode, telephone, mobile, email,
                      financial_year_from, books_beginning_from, gst_reg_type, gst_no, pan_number, cin_number,
                      tan_number, hsn_sac, currency_symbol, currency_name, decimal_places, logo_base64, seal_base64,
-                     created_at, updated_at)
+                     terms_conditions, bank_account_holder, bank_account_no, bank_ifsc, bank_swift, bank_name, bank_branch, created_at, updated_at)
                 VALUES
                     (@CompanyName, @MailingName, @Address, @Country, @State, @Pincode, @Telephone, @Mobile, @Email,
                      @FinancialYearFrom, @BooksBeginningFrom, @GstRegType, @GstNo, @PanNumber, @CinNumber,
                      @TanNumber, @HsnSac, @CurrencySymbol, @CurrencyName, @DecimalPlaces, @LogoBase64, @SealBase64,
-                     SYSUTCDATETIME(), SYSUTCDATETIME());
+                     @TermsConditions, @BankAccountHolder, @BankAccountNo, @BankIfsc, @BankSwift, @BankName, @BankBranch, SYSUTCDATETIME(), SYSUTCDATETIME());
                 SET @ResultId = SCOPE_IDENTITY();
                 SET @WasCreated = 1;
             END
@@ -1426,7 +1472,7 @@ BEGIN
             tl.disc_on, tl.disc_type, tl.disc_value, tl.tds_per,
             tl.addl_markup, tl.ssr_markup, tl.service_fee, tl.addl_service_fee, tl.ssr_service_fee, tl.gst_pct,
             tl.supp_comm_on, tl.supp_comm_type, tl.supp_comm_value, tl.supp_tds_per,
-            tl.supp_markup, tl.supp_addl_markup, tl.supp_service_fee, tl.supp_addl_service_fee,
+            tl.supp_markup, tl.supp_addl_markup, tl.supp_service_fee, tl.supp_addl_service_fee, tl.supp_ssr_markup, tl.supp_ssr_service_fee,
             (CASE tl.disc_type
                 WHEN 'Percentage' THEN
                     (CASE tl.disc_on
@@ -1475,7 +1521,8 @@ BEGIN
                 WHEN 'Flat' THEN tl.supp_comm_value
                 ELSE 0 END) * (tl.supp_tds_per / 100) AS computed_supp_tds,
             (tl.supp_service_fee * ISNULL(l_suppsvc.gst_percentage, 0) / 100
-             + tl.supp_addl_service_fee * ISNULL(l_suppaddlsvc.gst_percentage, 0) / 100) AS computed_supp_gst,
+             + tl.supp_addl_service_fee * ISNULL(l_suppaddlsvc.gst_percentage, 0) / 100
+             + tl.supp_ssr_service_fee * ISNULL(l_suppssrsvc.gst_percentage, 0) / 100) AS computed_supp_gst,
             tl.supp_gst_pct
         FROM dbo.AL_TicketLines tl
         INNER JOIN dbo.AL_Tickets t ON t.id = tl.ticket_id
@@ -1491,6 +1538,8 @@ BEGIN
         LEFT JOIN dbo.Ledgers l_suppsvc ON l_suppsvc.id = mm_suppsvc.ledger_id
         LEFT JOIN dbo.MasterMapping mm_suppaddlsvc ON mm_suppaddlsvc.company_id = t.company_id AND mm_suppaddlsvc.product_type = 'Airline' AND mm_suppaddlsvc.field_name = 'Supplier Addl Service Fee A/c'
         LEFT JOIN dbo.Ledgers l_suppaddlsvc ON l_suppaddlsvc.id = mm_suppaddlsvc.ledger_id
+        LEFT JOIN dbo.MasterMapping mm_suppssrsvc ON mm_suppssrsvc.company_id = t.company_id AND mm_suppssrsvc.product_type = 'Airline' AND mm_suppssrsvc.field_name = 'Supplier SSR Service Fee A/c'
+        LEFT JOIN dbo.Ledgers l_suppssrsvc ON l_suppssrsvc.id = mm_suppssrsvc.ledger_id
         WHERE t.company_id = @CompanyId
         ORDER BY tl.id DESC;
         RETURN;
@@ -1516,6 +1565,11 @@ BEGIN
         UNION ALL
         SELECT invoice_number, invoice_date FROM dbo.Cancellation_AL_Tickets
         WHERE company_id = @CompanyId AND invoice_type = @InvoiceType
+          AND (@FromDate IS NULL OR invoice_date >= @FromDate)
+        UNION ALL
+        -- SSR Updations share the same per-Invoice-Type sequence too.
+        SELECT invoice_number, invoice_date FROM dbo.SSR_AL_Tickets
+        WHERE company_id = @CompanyId AND invoice_type = @InvoiceType
           AND (@FromDate IS NULL OR invoice_date >= @FromDate);
         RETURN;
     END
@@ -1539,7 +1593,7 @@ BEGIN
             tl.markup, tl.addl_markup, tl.ssr_markup, tl.service_fee, tl.addl_service_fee, tl.ssr_service_fee, tl.gst_pct,
             tl.status, tl.office_id, tl.fop, tl.card_number,
             tl.supp_comm_on, tl.supp_comm_type, tl.supp_comm_value, tl.supp_tds_per,
-            tl.supp_markup, tl.supp_addl_markup, tl.supp_service_fee, tl.supp_addl_service_fee, tl.supp_gst_pct,
+            tl.supp_markup, tl.supp_addl_markup, tl.supp_service_fee, tl.supp_addl_service_fee, tl.supp_ssr_markup, tl.supp_ssr_service_fee, tl.supp_gst_pct,
             tl.total_billed, tl.supplier_ledger_id, supp.name AS supplier_name
         FROM dbo.AL_Tickets t
         INNER JOIN dbo.Ledgers cust ON cust.id = t.customer_ledger_id
@@ -1583,7 +1637,7 @@ BEGIN
                tl.markup, tl.addl_markup, tl.ssr_markup, tl.service_fee, tl.addl_service_fee, tl.ssr_service_fee,
                tl.gst_pct, tl.total_billed, tl.status, tl.office_id, tl.fop, tl.card_number,
                tl.supp_comm_on, tl.supp_comm_type, tl.supp_comm_value, tl.supp_tds_per,
-               tl.supp_markup, tl.supp_addl_markup, tl.supp_service_fee, tl.supp_addl_service_fee, tl.supp_gst_pct,
+               tl.supp_markup, tl.supp_addl_markup, tl.supp_service_fee, tl.supp_addl_service_fee, tl.supp_ssr_markup, tl.supp_ssr_service_fee, tl.supp_gst_pct,
                ls.name AS supplier_name,
                (CASE tl.disc_type
                    WHEN 'Percentage' THEN
@@ -1633,7 +1687,8 @@ BEGIN
                    WHEN 'Flat' THEN tl.supp_comm_value
                    ELSE 0 END) * (tl.supp_tds_per / 100) AS computed_supp_tds,
                (tl.supp_service_fee * ISNULL(l_suppsvc.gst_percentage, 0) / 100
-                + tl.supp_addl_service_fee * ISNULL(l_suppaddlsvc.gst_percentage, 0) / 100) AS computed_supp_gst
+                + tl.supp_addl_service_fee * ISNULL(l_suppaddlsvc.gst_percentage, 0) / 100
+             + tl.supp_ssr_service_fee * ISNULL(l_suppssrsvc.gst_percentage, 0) / 100) AS computed_supp_gst
         FROM dbo.AL_TicketLines tl
         INNER JOIN dbo.AL_Tickets t ON t.id = tl.ticket_id
         LEFT JOIN dbo.Ledgers ls ON ls.id = tl.supplier_ledger_id
@@ -1647,6 +1702,8 @@ BEGIN
         LEFT JOIN dbo.Ledgers l_suppsvc ON l_suppsvc.id = mm_suppsvc.ledger_id
         LEFT JOIN dbo.MasterMapping mm_suppaddlsvc ON mm_suppaddlsvc.company_id = t.company_id AND mm_suppaddlsvc.product_type = 'Airline' AND mm_suppaddlsvc.field_name = 'Supplier Addl Service Fee A/c'
         LEFT JOIN dbo.Ledgers l_suppaddlsvc ON l_suppaddlsvc.id = mm_suppaddlsvc.ledger_id
+        LEFT JOIN dbo.MasterMapping mm_suppssrsvc ON mm_suppssrsvc.company_id = t.company_id AND mm_suppssrsvc.product_type = 'Airline' AND mm_suppssrsvc.field_name = 'Supplier SSR Service Fee A/c'
+        LEFT JOIN dbo.Ledgers l_suppssrsvc ON l_suppssrsvc.id = mm_suppssrsvc.ledger_id
         WHERE tl.ticket_id = @Id
         ORDER BY tl.id;
         RETURN;
@@ -1792,6 +1849,7 @@ BEGIN
                         supp_comm_value DECIMAL(14,2) '$.supp_comm_value', supp_tds_per DECIMAL(5,2) '$.supp_tds_per',
                         supp_markup DECIMAL(14,2) '$.supp_markup', supp_addl_markup DECIMAL(14,2) '$.supp_addl_markup',
                         supp_service_fee DECIMAL(14,2) '$.supp_service_fee', supp_addl_service_fee DECIMAL(14,2) '$.supp_addl_service_fee',
+                        supp_ssr_markup DECIMAL(14,2) '$.supp_ssr_markup', supp_ssr_service_fee DECIMAL(14,2) '$.supp_ssr_service_fee',
                         supp_gst_pct DECIMAL(5,2) '$.supp_gst_pct', total_billed DECIMAL(14,2) '$.total_billed',
                         supplier_name NVARCHAR(150) '$.supplier_name'
                     )
@@ -1812,6 +1870,7 @@ BEGIN
                     supp_comm_value = src.supp_comm_value, supp_tds_per = src.supp_tds_per, supp_markup = src.supp_markup,
                     supp_addl_markup = src.supp_addl_markup, supp_service_fee = src.supp_service_fee,
                     supp_addl_service_fee = src.supp_addl_service_fee, supp_gst_pct = src.supp_gst_pct,
+                    supp_ssr_markup = ISNULL(src.supp_ssr_markup, 0), supp_ssr_service_fee = ISNULL(src.supp_ssr_service_fee, 0),
                     total_billed = src.total_billed,
                     supplier_ledger_id = (SELECT id FROM dbo.Ledgers WHERE company_id = @CompanyId AND name = src.supplier_name AND ledger_category = 'CREDITOR'),
                     updated_at = SYSUTCDATETIME()
@@ -1821,7 +1880,7 @@ BEGIN
                      baggage, other_ssr, disc_on, disc_type, disc_value, tds_per, pg_charges, pg_charges_percentage,
                      markup, addl_markup, ssr_markup, service_fee, addl_service_fee, ssr_service_fee, gst_pct, status,
                      office_id, fop, card_number, supp_comm_on, supp_comm_type, supp_comm_value, supp_tds_per,
-                     supp_markup, supp_addl_markup, supp_service_fee, supp_addl_service_fee, supp_gst_pct, total_billed,
+                     supp_markup, supp_addl_markup, supp_service_fee, supp_addl_service_fee, supp_ssr_markup, supp_ssr_service_fee, supp_gst_pct, total_billed,
                      supplier_ledger_id, rescheduled, created_at, updated_at)
                 VALUES
                     (@Id, src.airline_code, src.airline_name, src.airline_category, src.flight_no, src.ticket_no, src.passenger_name, src.pax_type,
@@ -1829,7 +1888,7 @@ BEGIN
                      src.baggage, src.other_ssr, src.disc_on, src.disc_type, src.disc_value, src.tds_per, src.pg_charges, src.pg_charges_percentage,
                      src.markup, src.addl_markup, src.ssr_markup, src.service_fee, src.addl_service_fee, src.ssr_service_fee, src.gst_pct, ISNULL(src.status, 'ISSUED'),
                      src.office_id, src.fop, src.card_number, src.supp_comm_on, src.supp_comm_type, src.supp_comm_value, src.supp_tds_per,
-                     src.supp_markup, src.supp_addl_markup, src.supp_service_fee, src.supp_addl_service_fee, src.supp_gst_pct, src.total_billed,
+                     src.supp_markup, src.supp_addl_markup, src.supp_service_fee, src.supp_addl_service_fee, ISNULL(src.supp_ssr_markup, 0), ISNULL(src.supp_ssr_service_fee, 0), src.supp_gst_pct, src.total_billed,
                      (SELECT id FROM dbo.Ledgers WHERE company_id = @CompanyId AND name = src.supplier_name AND ledger_category = 'CREDITOR'),
                      0, SYSUTCDATETIME(), SYSUTCDATETIME());
 
@@ -1872,7 +1931,7 @@ BEGIN
                      baggage, other_ssr, disc_on, disc_type, disc_value, tds_per, pg_charges, pg_charges_percentage,
                      markup, addl_markup, ssr_markup, service_fee, addl_service_fee, ssr_service_fee, gst_pct, status,
                      office_id, fop, card_number, supp_comm_on, supp_comm_type, supp_comm_value, supp_tds_per,
-                     supp_markup, supp_addl_markup, supp_service_fee, supp_addl_service_fee, supp_gst_pct, total_billed,
+                     supp_markup, supp_addl_markup, supp_service_fee, supp_addl_service_fee, supp_ssr_markup, supp_ssr_service_fee, supp_gst_pct, total_billed,
                      supplier_ledger_id, rescheduled, created_at, updated_at)
                 SELECT
                     @ResultId, j.airline_code, j.airline_name, j.airline_category, j.flight_no, j.ticket_no, j.passenger_name, j.pax_type,
@@ -1880,7 +1939,7 @@ BEGIN
                     j.baggage, j.other_ssr, j.disc_on, j.disc_type, j.disc_value, j.tds_per, j.pg_charges, j.pg_charges_percentage,
                     j.markup, j.addl_markup, j.ssr_markup, j.service_fee, j.addl_service_fee, j.ssr_service_fee, j.gst_pct, ISNULL(j.status, 'ISSUED'),
                     j.office_id, j.fop, j.card_number, j.supp_comm_on, j.supp_comm_type, j.supp_comm_value, j.supp_tds_per,
-                    j.supp_markup, j.supp_addl_markup, j.supp_service_fee, j.supp_addl_service_fee, j.supp_gst_pct, j.total_billed,
+                    j.supp_markup, j.supp_addl_markup, j.supp_service_fee, j.supp_addl_service_fee, ISNULL(j.supp_ssr_markup, 0), ISNULL(j.supp_ssr_service_fee, 0), j.supp_gst_pct, j.total_billed,
                     (SELECT id FROM dbo.Ledgers WHERE company_id = @CompanyId AND name = j.supplier_name AND ledger_category = 'CREDITOR'),
                     0, SYSUTCDATETIME(), SYSUTCDATETIME()
                 FROM OPENJSON(@LinesJson) WITH (
@@ -1902,6 +1961,7 @@ BEGIN
                     supp_comm_value DECIMAL(14,2) '$.supp_comm_value', supp_tds_per DECIMAL(5,2) '$.supp_tds_per',
                     supp_markup DECIMAL(14,2) '$.supp_markup', supp_addl_markup DECIMAL(14,2) '$.supp_addl_markup',
                     supp_service_fee DECIMAL(14,2) '$.supp_service_fee', supp_addl_service_fee DECIMAL(14,2) '$.supp_addl_service_fee',
+                        supp_ssr_markup DECIMAL(14,2) '$.supp_ssr_markup', supp_ssr_service_fee DECIMAL(14,2) '$.supp_ssr_service_fee',
                     supp_gst_pct DECIMAL(5,2) '$.supp_gst_pct', total_billed DECIMAL(14,2) '$.total_billed',
                     supplier_name NVARCHAR(150) '$.supplier_name'
                 ) AS j;
@@ -2004,7 +2064,7 @@ BEGIN
             rl.markup, rl.addl_markup, rl.ssr_markup, rl.service_fee, rl.addl_service_fee, rl.ssr_service_fee, rl.gst_pct,
             rl.status, rl.office_id, rl.fop, rl.card_number,
             rl.supp_comm_on, rl.supp_comm_type, rl.supp_comm_value, rl.supp_tds_per,
-            rl.supp_markup, rl.supp_addl_markup, rl.supp_service_fee, rl.supp_addl_service_fee, rl.supp_gst_pct,
+            rl.supp_markup, rl.supp_addl_markup, rl.supp_service_fee, rl.supp_addl_service_fee, rl.supp_ssr_markup, rl.supp_ssr_service_fee, rl.supp_gst_pct,
             rl.agent_penalty, rl.reschedule_penalty,
             rl.total_billed, rl.supplier_ledger_id, supp.name AS supplier_name
         FROM dbo.Rescheduled_Al_Ticket rt
@@ -2104,7 +2164,7 @@ BEGIN
             rl.disc_on, rl.disc_type, rl.disc_value, rl.tds_per,
             rl.addl_markup, rl.ssr_markup, rl.service_fee, rl.addl_service_fee, rl.ssr_service_fee, rl.gst_pct,
             rl.supp_comm_on, rl.supp_comm_type, rl.supp_comm_value, rl.supp_tds_per,
-            rl.supp_markup, rl.supp_addl_markup, rl.supp_service_fee, rl.supp_addl_service_fee,
+            rl.supp_markup, rl.supp_addl_markup, rl.supp_service_fee, rl.supp_addl_service_fee, rl.supp_ssr_markup, rl.supp_ssr_service_fee,
             (CASE rl.disc_type
                 WHEN 'Percentage' THEN
                     (CASE rl.disc_on
@@ -2131,7 +2191,8 @@ BEGIN
              + rl.addl_service_fee * ISNULL(l_addlsvc.gst_percentage, 0) / 100
              + rl.ssr_service_fee * ISNULL(l_ssrsvc.gst_percentage, 0) / 100) AS computed_gst,
             (rl.supp_service_fee * ISNULL(l_suppsvc.gst_percentage, 0) / 100
-             + rl.supp_addl_service_fee * ISNULL(l_suppaddlsvc.gst_percentage, 0) / 100) AS computed_supp_gst,
+             + rl.supp_addl_service_fee * ISNULL(l_suppaddlsvc.gst_percentage, 0) / 100
+             + rl.supp_ssr_service_fee * ISNULL(l_suppssrsvc.gst_percentage, 0) / 100) AS computed_supp_gst,
             rl.agent_penalty, rl.reschedule_penalty, rl.supplier_penalty
         FROM dbo.Rescheduled_Al_TicketLines rl
         INNER JOIN dbo.Rescheduled_Al_Ticket rt ON rt.id = rl.reschedule_ticket_id
@@ -2147,6 +2208,8 @@ BEGIN
         LEFT JOIN dbo.Ledgers l_suppsvc ON l_suppsvc.id = mm_suppsvc.ledger_id
         LEFT JOIN dbo.MasterMapping mm_suppaddlsvc ON mm_suppaddlsvc.company_id = rt.company_id AND mm_suppaddlsvc.product_type = 'Airline' AND mm_suppaddlsvc.field_name = 'Supplier Addl Service Fee A/c'
         LEFT JOIN dbo.Ledgers l_suppaddlsvc ON l_suppaddlsvc.id = mm_suppaddlsvc.ledger_id
+        LEFT JOIN dbo.MasterMapping mm_suppssrsvc ON mm_suppssrsvc.company_id = rt.company_id AND mm_suppssrsvc.product_type = 'Airline' AND mm_suppssrsvc.field_name = 'Supplier SSR Service Fee A/c'
+        LEFT JOIN dbo.Ledgers l_suppssrsvc ON l_suppssrsvc.id = mm_suppssrsvc.ledger_id
         WHERE rt.company_id = @CompanyId
         ORDER BY rl.id DESC;
         RETURN;
@@ -2351,7 +2414,7 @@ BEGIN
                  baggage, other_ssr, supplier_penalty, disc_on, disc_type, disc_value, tds_per, pg_charges, pg_charges_percentage,
                  markup, addl_markup, ssr_markup, service_fee, addl_service_fee, ssr_service_fee, gst_pct, status,
                  office_id, fop, card_number, supp_comm_on, supp_comm_type, supp_comm_value, supp_tds_per,
-                 supp_markup, supp_addl_markup, supp_service_fee, supp_addl_service_fee, supp_gst_pct,
+                 supp_markup, supp_addl_markup, supp_service_fee, supp_addl_service_fee, supp_ssr_markup, supp_ssr_service_fee, supp_gst_pct,
                  agent_penalty, reschedule_penalty, total_billed, supplier_ledger_id, created_at, updated_at)
             SELECT
                 @ResultId, j.original_ticket_line_id, j.based_on_reschedule_line_id, 0, j.parent_pnr,
@@ -2360,7 +2423,7 @@ BEGIN
                 j.baggage, j.other_ssr, j.supplier_penalty, j.disc_on, j.disc_type, j.disc_value, j.tds_per, j.pg_charges, j.pg_charges_percentage,
                 j.markup, j.addl_markup, j.ssr_markup, j.service_fee, j.addl_service_fee, j.ssr_service_fee, j.gst_pct, ISNULL(j.status, 'ISSUED'),
                 j.office_id, j.fop, j.card_number, j.supp_comm_on, j.supp_comm_type, j.supp_comm_value, j.supp_tds_per,
-                j.supp_markup, j.supp_addl_markup, j.supp_service_fee, j.supp_addl_service_fee, j.supp_gst_pct,
+                j.supp_markup, j.supp_addl_markup, j.supp_service_fee, j.supp_addl_service_fee, ISNULL(j.supp_ssr_markup, 0), ISNULL(j.supp_ssr_service_fee, 0), j.supp_gst_pct,
                 j.agent_penalty, j.reschedule_penalty, j.total_billed,
                 (SELECT id FROM dbo.Ledgers WHERE company_id = @CompanyId AND name = j.supplier_name AND ledger_category = 'CREDITOR'),
                 SYSUTCDATETIME(), SYSUTCDATETIME()
@@ -2386,6 +2449,7 @@ BEGIN
                 supp_comm_value DECIMAL(14,2) '$.supp_comm_value', supp_tds_per DECIMAL(5,2) '$.supp_tds_per',
                 supp_markup DECIMAL(14,2) '$.supp_markup', supp_addl_markup DECIMAL(14,2) '$.supp_addl_markup',
                 supp_service_fee DECIMAL(14,2) '$.supp_service_fee', supp_addl_service_fee DECIMAL(14,2) '$.supp_addl_service_fee',
+                supp_ssr_markup DECIMAL(14,2) '$.supp_ssr_markup', supp_ssr_service_fee DECIMAL(14,2) '$.supp_ssr_service_fee',
                 supp_gst_pct DECIMAL(5,2) '$.supp_gst_pct', agent_penalty DECIMAL(14,2) '$.agent_penalty',
                 reschedule_penalty DECIMAL(14,2) '$.reschedule_penalty', total_billed DECIMAL(14,2) '$.total_billed',
                 supplier_name NVARCHAR(150) '$.supplier_name'
@@ -2463,6 +2527,21 @@ CREATE OR ALTER PROCEDURE dbo.sp_Voucher
 AS
 BEGIN
     SET NOCOUNT ON;
+
+    -- Automatic voucher numbering - one series per voucher type:
+    -- Journal JV-n, Payment PV-n, Receipt RV-n, Contra CV-n, Debit Note DN-n,
+    -- Credit Note CN-n (highest existing number of that series + 1).
+    DECLARE @Prefix NVARCHAR(5) = CASE ISNULL(@VoucherType, 'Journal')
+                    WHEN 'Payment' THEN 'PV' WHEN 'Receipt' THEN 'RV' WHEN 'Contra' THEN 'CV'
+                    WHEN 'Debit Note' THEN 'DN' WHEN 'Credit Note' THEN 'CN' ELSE 'JV' END;
+
+    IF @Action = 'NEXT_NUMBER'
+    BEGIN
+        SELECT @Prefix + '-' + CAST(ISNULL(MAX(TRY_CAST(SUBSTRING(voucher_no, LEN(@Prefix) + 2, 20) AS INT)), 0) + 1 AS NVARCHAR(10)) AS next_number
+        FROM dbo.Vouchers
+        WHERE company_id = @CompanyId AND category = 'MANUAL' AND voucher_no LIKE @Prefix + '-%';
+        RETURN;
+    END
 
     IF @Action = 'LIST'
     BEGIN
@@ -2545,8 +2624,10 @@ BEGIN
         -- looked up fresh so a later ledger rename never goes stale here.
         DECLARE @ResolvedLinesJson NVARCHAR(MAX);
         SELECT @ResolvedLinesJson = (
-            SELECT j.ledger_id, l.name AS ledger_name, ISNULL(j.debit, 0) AS debit, ISNULL(j.credit, 0) AS credit
-            FROM OPENJSON(@LinesJson) WITH (ledger_id INT '$.ledger_id', debit DECIMAL(16,2) '$.debit', credit DECIMAL(16,2) '$.credit') j
+            SELECT j.ledger_id, l.name AS ledger_name, ISNULL(j.debit, 0) AS debit, ISNULL(j.credit, 0) AS credit,
+                   JSON_QUERY(j.bill_allocations) AS bill_allocations   -- bill-wise allocation (Against Invoice / New Invoice / On Account)
+            FROM OPENJSON(@LinesJson) WITH (ledger_id INT '$.ledger_id', debit DECIMAL(16,2) '$.debit', credit DECIMAL(16,2) '$.credit',
+                                            bill_allocations NVARCHAR(MAX) '$.bill_allocations' AS JSON) j
             INNER JOIN dbo.Ledgers l ON l.id = j.ledger_id
             FOR JSON PATH
         );
@@ -2558,23 +2639,23 @@ BEGIN
             IF @Id IS NOT NULL
             BEGIN
                 UPDATE dbo.Vouchers
-                SET branch_name = @BranchName, voucher_type = ISNULL(@VoucherType, 'Journal'), voucher_date = @VoucherDate,
+                SET branch_name = ISNULL(@BranchName, branch_name), voucher_type = ISNULL(@VoucherType, 'Journal'), voucher_date = @VoucherDate,
                     narration = @Narration, total_debit = @TotalDebit, total_credit = @TotalCredit, lines_json = @ResolvedLinesJson
                 WHERE id = @Id;
                 SET @ResultId = @Id;
             END
             ELSE
             BEGIN
-                -- Highest existing VCH- number + 1 (not count + 1) - a deleted
-                -- voucher leaves a gap, and count + 1 then reuses a live number.
-                DECLARE @NextNum INT = (SELECT ISNULL(MAX(TRY_CAST(SUBSTRING(voucher_no, 5, 20) AS INT)), 0) + 1
-                    FROM dbo.Vouchers WHERE company_id = @CompanyId AND category = 'MANUAL' AND voucher_no LIKE 'VCH-%');
+                -- Highest existing number of this type's series + 1 (not count + 1) -
+                -- a deleted voucher leaves a gap, and count + 1 then reuses a live number.
+                DECLARE @NextNum INT = (SELECT ISNULL(MAX(TRY_CAST(SUBSTRING(voucher_no, LEN(@Prefix) + 2, 20) AS INT)), 0) + 1
+                    FROM dbo.Vouchers WHERE company_id = @CompanyId AND category = 'MANUAL' AND voucher_no LIKE @Prefix + '-%');
                 INSERT INTO dbo.Vouchers
                     (company_id, branch_name, voucher_type, voucher_date, narration, category, voucher_no,
                      total_debit, total_credit, lines_json, created_at, updated_at)
                 VALUES
-                    (@CompanyId, @BranchName, ISNULL(@VoucherType, 'Journal'), @VoucherDate, @Narration, 'MANUAL',
-                     'VCH-' + CAST(@NextNum AS NVARCHAR(10)), @TotalDebit, @TotalCredit, @ResolvedLinesJson, SYSUTCDATETIME(), SYSUTCDATETIME());
+                    (@CompanyId, ISNULL(@BranchName, 'Chennai Branch'), ISNULL(@VoucherType, 'Journal'), @VoucherDate, @Narration, 'MANUAL',
+                     @Prefix + '-' + CAST(@NextNum AS NVARCHAR(10)), @TotalDebit, @TotalCredit, @ResolvedLinesJson, SYSUTCDATETIME(), SYSUTCDATETIME());
                 SET @ResultId = SCOPE_IDENTITY();
             END
 
@@ -3334,6 +3415,244 @@ BEGIN
         BEGIN CATCH
             IF @@TRANCOUNT > 0 ROLLBACK TRAN;
             SELECT NULL AS menu_key, 'Error' AS status, ERROR_MESSAGE() AS error;
+        END CATCH
+        RETURN;
+    END
+END
+GO
+
+
+-- ============================================================================
+-- dbo.sp_SSRTicket - SSR Updation (trans-airline-ssr.html). Header + lines +
+-- its own Journal Voucher (category AIRLINE_SSR, ALS-n) in one transaction.
+-- The JV's ledger rows are recomputed live in Python (views._compute_ssr_jv_lines,
+-- driven by Ledger Mapping) - only the totals/narration are stored here.
+-- Actions: LIST, GET_HEADER, GET_LINES, SAVE (insert, or update when @Id set).
+-- ============================================================================
+CREATE OR ALTER PROCEDURE dbo.sp_SSRTicket
+    @Action                    NVARCHAR(50),
+    @Id                        INT             = NULL,
+    @CompanyId                 INT             = NULL,
+    @OriginalTicketId          INT             = NULL,
+    @SourceRescheduleTicketId  INT             = NULL,
+    @CustomerName              NVARCHAR(150)   = NULL,
+    @BranchName                NVARCHAR(100)   = NULL,
+    @InvoiceNumber             NVARCHAR(20)    = NULL,
+    @InvoiceDate               DATE            = NULL,
+    @InvoiceType               NVARCHAR(100)   = NULL,
+    @TravelType                NVARCHAR(20)    = NULL,
+    @UserName                  NVARCHAR(100)   = NULL,
+    @Currency                  NVARCHAR(5)     = NULL,
+    @Roe                       DECIMAL(10,4)   = NULL,
+    @SsrReference              NVARCHAR(30)    = NULL,
+    @SsrRefDate                DATE            = NULL,
+    @AirlinePnr                NVARCHAR(13)    = NULL,
+    @GdsPnr                    NVARCHAR(13)    = NULL,
+    @PaymentMode               NVARCHAR(20)    = NULL,
+    @LinesJson                 NVARCHAR(MAX)   = NULL,
+    @JvNarration               NVARCHAR(250)   = NULL,
+    @JvTotalDebit              DECIMAL(16,2)   = NULL,
+    @JvTotalCredit             DECIMAL(16,2)   = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF @Action = 'LIST'
+    BEGIN
+        -- One row per SSR line - the SSR page's Find popup.
+        SELECT sl.id, st.id AS ssr_ticket_id, st.invoice_number, st.invoice_date,
+               st.ssr_reference AS booking_reference, st.airline_pnr, st.gds_pnr,
+               cust.name AS customer_name, sl.ticket_no, sl.passenger_name, sl.sector,
+               sl.ssr_items, sl.total_billed
+        FROM dbo.SSR_AL_TicketLines sl
+        INNER JOIN dbo.SSR_AL_Tickets st ON st.id = sl.ssr_ticket_id
+        INNER JOIN dbo.Ledgers cust ON cust.id = st.customer_ledger_id
+        WHERE st.company_id = @CompanyId
+        ORDER BY st.id DESC, sl.id;
+        RETURN;
+    END
+
+    IF @Action = 'GET_HEADER'
+    BEGIN
+        IF NOT EXISTS (SELECT 1 FROM dbo.SSR_AL_Tickets WHERE id = @Id AND company_id = @CompanyId)
+        BEGIN
+            SELECT NULL AS id, 'Error' AS status, 'SSR Updation not found.' AS error;
+            RETURN;
+        END
+        SELECT st.id, st.original_ticket_id, st.source_reschedule_ticket_id, st.invoice_number, st.invoice_date,
+               st.invoice_type, st.booking_mode, st.booking_status, cust.name AS customer_name, st.customer_ledger_id,
+               cust.state_name AS customer_state, st.travel_type, st.user_name, st.currency, st.roe,
+               st.ssr_reference, st.ssr_ref_date, st.airline_pnr, st.gds_pnr, st.payment_mode, st.branch_name,
+               ot.invoice_number AS original_invoice_number, rt.invoice_number AS source_reschedule_invoice_number,
+               jv.id AS voucher_id, jv.voucher_no, jv.total_debit AS jv_total_debit, jv.total_credit AS jv_total_credit,
+               'Success' AS status
+        FROM dbo.SSR_AL_Tickets st
+        INNER JOIN dbo.Ledgers cust ON cust.id = st.customer_ledger_id
+        INNER JOIN dbo.AL_Tickets ot ON ot.id = st.original_ticket_id
+        LEFT JOIN dbo.Rescheduled_Al_Ticket rt ON rt.id = st.source_reschedule_ticket_id
+        LEFT JOIN dbo.JournalVoucher jv ON jv.source_ssr_ticket_id = st.id
+        WHERE st.id = @Id AND st.company_id = @CompanyId;
+        RETURN;
+    END
+
+    IF @Action = 'GET_LINES'
+    BEGIN
+        SELECT sl.id, sl.original_ticket_line_id, sl.reschedule_line_id, sl.ticket_no, sl.passenger_name,
+               sl.pax_type, sl.airline_category, sl.sector, sl.office_id, sl.supplier_ledger_id,
+               supp.name AS supplier_name, supp.state_name AS supplier_state, sl.fop, sl.ssr_items,
+               sl.seat, sl.meal, sl.baggage, sl.other_ssr, sl.markup, sl.service_fee,
+               sl.supp_markup, sl.supp_service_fee, sl.total_billed
+        FROM dbo.SSR_AL_TicketLines sl
+        INNER JOIN dbo.SSR_AL_Tickets st ON st.id = sl.ssr_ticket_id
+        LEFT JOIN dbo.Ledgers supp ON supp.id = sl.supplier_ledger_id
+        WHERE sl.ssr_ticket_id = @Id AND st.company_id = @CompanyId
+        ORDER BY sl.id;
+        RETURN;
+    END
+
+    IF @Action = 'SAVE'
+    BEGIN
+        DECLARE @CustLedgerId INT, @ResultId INT, @VoucherId INT, @VoucherNo NVARCHAR(20), @LineIds NVARCHAR(MAX);
+        DECLARE @BadSupplier NVARCHAR(150), @BadLine NVARCHAR(30);
+
+        IF @Id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM dbo.SSR_AL_Tickets WHERE id = @Id AND company_id = @CompanyId)
+        BEGIN
+            SELECT NULL AS id, 'Error' AS status, 'SSR Updation not found.' AS error;
+            RETURN;
+        END
+
+        SELECT @CustLedgerId = id FROM dbo.Ledgers
+        WHERE company_id = @CompanyId AND name = @CustomerName AND ledger_category = 'DEBTOR';
+        IF @CustLedgerId IS NULL
+        BEGIN
+            SELECT NULL AS id, 'Error' AS status, '"' + ISNULL(@CustomerName, '') + '" is not a real customer ledger (Sundry Debtors).' AS error;
+            RETURN;
+        END
+
+        IF NOT EXISTS (SELECT 1 FROM dbo.AL_Tickets WHERE id = @OriginalTicketId AND company_id = @CompanyId)
+        BEGIN
+            SELECT NULL AS id, 'Error' AS status, 'The original booking for this SSR was not found.' AS error;
+            RETURN;
+        END
+
+        -- Invoice Number is shared across Booking / Reschedule / Cancellation / SSR.
+        IF EXISTS (SELECT 1 FROM dbo.AL_Tickets WHERE company_id = @CompanyId AND invoice_number = @InvoiceNumber)
+           OR EXISTS (SELECT 1 FROM dbo.Rescheduled_Al_Ticket WHERE company_id = @CompanyId AND invoice_number = @InvoiceNumber)
+           OR EXISTS (SELECT 1 FROM dbo.Cancellation_AL_Tickets WHERE company_id = @CompanyId AND invoice_number = @InvoiceNumber)
+           OR EXISTS (SELECT 1 FROM dbo.SSR_AL_Tickets WHERE company_id = @CompanyId AND invoice_number = @InvoiceNumber AND (@Id IS NULL OR id <> @Id))
+        BEGIN
+            SELECT NULL AS id, 'Error' AS status, 'Invoice Number "' + @InvoiceNumber + '" already exists.' AS error;
+            RETURN;
+        END
+
+        IF EXISTS (SELECT 1 FROM dbo.SSR_AL_Tickets WHERE company_id = @CompanyId AND ssr_reference = @SsrReference AND (@Id IS NULL OR id <> @Id))
+        BEGIN
+            SELECT NULL AS id, 'Error' AS status, 'SSR Reference "' + @SsrReference + '" already exists.' AS error;
+            RETURN;
+        END
+
+        -- Every line must be a passenger of the original booking.
+        SELECT TOP 1 @BadLine = ISNULL(j.ticket_no, '?')
+        FROM OPENJSON(@LinesJson) WITH (original_ticket_line_id INT '$.original_ticket_line_id', ticket_no NVARCHAR(30) '$.ticket_no') j
+        WHERE NOT EXISTS (SELECT 1 FROM dbo.AL_TicketLines tl WHERE tl.id = j.original_ticket_line_id AND tl.ticket_id = @OriginalTicketId);
+        IF @BadLine IS NOT NULL
+        BEGIN
+            SELECT NULL AS id, 'Error' AS status, 'Ticket No. ' + @BadLine + ' is not a passenger of the original booking.' AS error;
+            RETURN;
+        END
+
+        SELECT TOP 1 @BadSupplier = j.supplier_name
+        FROM OPENJSON(@LinesJson) WITH (supplier_name NVARCHAR(150) '$.supplier_name') j
+        WHERE j.supplier_name IS NOT NULL AND j.supplier_name <> ''
+          AND NOT EXISTS (SELECT 1 FROM dbo.Ledgers l WHERE l.company_id = @CompanyId AND l.name = j.supplier_name AND l.ledger_category = 'CREDITOR');
+        IF @BadSupplier IS NOT NULL
+        BEGIN
+            SELECT NULL AS id, 'Error' AS status, '"' + @BadSupplier + '" is not a real supplier ledger (Sundry Creditors).' AS error;
+            RETURN;
+        END
+
+        BEGIN TRY
+            BEGIN TRAN;
+
+            IF @Id IS NULL
+            BEGIN
+                INSERT INTO dbo.SSR_AL_Tickets
+                    (company_id, branch_name, original_ticket_id, source_reschedule_ticket_id, invoice_number, invoice_date,
+                     invoice_type, booking_mode, booking_status, customer_ledger_id, travel_type, user_name, currency, roe,
+                     ssr_reference, ssr_ref_date, airline_pnr, gds_pnr, payment_mode, created_at, updated_at)
+                VALUES
+                    (@CompanyId, @BranchName, @OriginalTicketId, @SourceRescheduleTicketId, @InvoiceNumber, @InvoiceDate,
+                     @InvoiceType, 'Manual', 'SSR Updated', @CustLedgerId, @TravelType, @UserName, ISNULL(@Currency, 'INR'), ISNULL(@Roe, 1),
+                     @SsrReference, @SsrRefDate, @AirlinePnr, @GdsPnr, @PaymentMode, SYSUTCDATETIME(), SYSUTCDATETIME());
+                SET @ResultId = CAST(SCOPE_IDENTITY() AS INT);
+            END
+            ELSE
+            BEGIN
+                SET @ResultId = @Id;
+                UPDATE dbo.SSR_AL_Tickets
+                SET invoice_number = @InvoiceNumber, invoice_date = @InvoiceDate, invoice_type = @InvoiceType,
+                    user_name = @UserName, ssr_reference = @SsrReference, ssr_ref_date = @SsrRefDate,
+                    payment_mode = @PaymentMode, updated_at = SYSUTCDATETIME()
+                WHERE id = @Id AND company_id = @CompanyId;
+                -- Lines have no children of their own - replaced wholesale.
+                DELETE FROM dbo.SSR_AL_TicketLines WHERE ssr_ticket_id = @Id;
+            END
+
+            INSERT INTO dbo.SSR_AL_TicketLines
+                (ssr_ticket_id, original_ticket_line_id, reschedule_line_id, ticket_no, passenger_name, pax_type,
+                 airline_category, sector, office_id, supplier_ledger_id, fop, ssr_items,
+                 seat, meal, baggage, other_ssr, markup, service_fee, supp_markup, supp_service_fee, total_billed)
+            SELECT @ResultId, j.original_ticket_line_id, j.reschedule_line_id, j.ticket_no, j.passenger_name, j.pax_type,
+                   j.airline_category, j.sector, j.office_id,
+                   (SELECT id FROM dbo.Ledgers WHERE company_id = @CompanyId AND name = j.supplier_name AND ledger_category = 'CREDITOR'),
+                   j.fop, j.ssr_items,
+                   ISNULL(j.seat, 0), ISNULL(j.meal, 0), ISNULL(j.baggage, 0), ISNULL(j.other_ssr, 0),
+                   ISNULL(j.markup, 0), ISNULL(j.service_fee, 0), ISNULL(j.supp_markup, 0), ISNULL(j.supp_service_fee, 0),
+                   ISNULL(j.total_billed, 0)
+            FROM OPENJSON(@LinesJson) WITH (
+                original_ticket_line_id INT '$.original_ticket_line_id', reschedule_line_id INT '$.reschedule_line_id',
+                ticket_no NVARCHAR(20) '$.ticket_no', passenger_name NVARCHAR(100) '$.passenger_name',
+                pax_type NVARCHAR(10) '$.pax_type', airline_category NVARCHAR(5) '$.airline_category',
+                sector NVARCHAR(20) '$.sector', office_id NVARCHAR(30) '$.office_id',
+                supplier_name NVARCHAR(150) '$.supplier_name', fop NVARCHAR(20) '$.fop', ssr_items NVARCHAR(MAX) '$.ssr_items',
+                seat DECIMAL(14,2) '$.seat', meal DECIMAL(14,2) '$.meal', baggage DECIMAL(14,2) '$.baggage',
+                other_ssr DECIMAL(14,2) '$.other_ssr', markup DECIMAL(14,2) '$.markup', service_fee DECIMAL(14,2) '$.service_fee',
+                supp_markup DECIMAL(14,2) '$.supp_markup', supp_service_fee DECIMAL(14,2) '$.supp_service_fee',
+                total_billed DECIMAL(14,2) '$.total_billed'
+            ) j;
+
+            -- One JV per SSR Updation - upserted in place on edit.
+            SELECT @VoucherId = id FROM dbo.JournalVoucher WHERE source_ssr_ticket_id = @ResultId;
+            IF @VoucherId IS NOT NULL
+            BEGIN
+                UPDATE dbo.JournalVoucher
+                SET voucher_date = @InvoiceDate, narration = @JvNarration, total_debit = @JvTotalDebit,
+                    total_credit = @JvTotalCredit, updated_at = SYSUTCDATETIME()
+                WHERE id = @VoucherId;
+            END
+            ELSE
+            BEGIN
+                DECLARE @NextNum INT = (SELECT ISNULL(MAX(TRY_CAST(SUBSTRING(voucher_no, 5, 20) AS INT)), 0) + 1
+                                        FROM dbo.JournalVoucher
+                                        WHERE company_id = @CompanyId AND category = 'AIRLINE_SSR' AND voucher_no LIKE 'ALS-%');
+                INSERT INTO dbo.JournalVoucher
+                    (company_id, branch_name, voucher_type, voucher_date, narration, category, voucher_no,
+                     source_ssr_ticket_id, total_debit, total_credit, lines_json, created_at, updated_at)
+                VALUES
+                    (@CompanyId, ISNULL(@BranchName, 'Chennai Branch'), 'Tax Invoice', @InvoiceDate, @JvNarration, 'AIRLINE_SSR',
+                     'ALS-' + CAST(@NextNum AS NVARCHAR(10)), @ResultId, @JvTotalDebit, @JvTotalCredit, '[]', SYSUTCDATETIME(), SYSUTCDATETIME());
+                SET @VoucherId = CAST(SCOPE_IDENTITY() AS INT);
+            END
+            SELECT @VoucherNo = voucher_no FROM dbo.JournalVoucher WHERE id = @VoucherId;
+
+            COMMIT TRAN;
+
+            SELECT @LineIds = STRING_AGG(CAST(id AS NVARCHAR(10)), ',') FROM dbo.SSR_AL_TicketLines WHERE ssr_ticket_id = @ResultId;
+            SELECT @ResultId AS id, @LineIds AS line_ids, @VoucherId AS voucher_id, @VoucherNo AS voucher_no, 'Success' AS status;
+        END TRY
+        BEGIN CATCH
+            IF @@TRANCOUNT > 0 ROLLBACK TRAN;
+            SELECT NULL AS id, 'Error' AS status, ERROR_MESSAGE() AS error;
         END CATCH
         RETURN;
     END

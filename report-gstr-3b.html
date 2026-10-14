@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
   <link href="assets/css/design-system.css" rel="stylesheet" />
-  <link href="assets/css/app.css" rel="stylesheet" />
+  <link href="assets/css/app.css?v=7" rel="stylesheet" />
   <link rel="icon" type="image/png" href="assets/img/favicon.png" />
   <style>
     .page-header-row { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 1.25rem; flex-wrap: wrap; }
@@ -70,7 +70,7 @@
 <body>
   <header class="app-topnav" id="shell-topnav"></header>
   <div class="app-body">
-    <main class="app-main" style="max-width: 1440px; margin: 0 auto; padding: 1.5rem 2rem;">
+    <main class="app-main rpt-lock" style="max-width: 1440px; margin: 0 auto; padding: 1.5rem 2rem;">
       <div class="page-header-row">
         <div class="page-title-group">
           <div class="breadcrumb">Reports &rsaquo; Statutory Reports &rsaquo; GST Reports &rsaquo; GSTR-3B</div>
@@ -99,21 +99,11 @@
         </div>
         <div class="filter-group">
           <label>Branch / Office</label>
-          <select class="form-control-custom" style="height:34px; min-width:140px;">
-            <option value="">All Branches</option>
-            <option value="DEL">Delhi HQ</option>
-            <option value="BOM">Mumbai Branch</option>
-            <option value="DXB">Dubai Branch</option>
-          </select>
+          <select class="form-control-custom" style="height:34px; min-width:140px;" data-options="branches"><option value="">All Branches</option></select>
         </div>
         <div class="filter-group">
           <label>Status</label>
-          <select class="form-control-custom" style="height:34px; min-width:120px;">
-            <option value="">All Statuses</option>
-            <option value="ISSUED">Confirmed / Issued</option>
-            <option value="PENDING">Pending</option>
-            <option value="CANCELLED">Cancelled</option>
-          </select>
+          <select class="form-control-custom" style="height:34px; min-width:120px;" data-options="recordStatuses"><option value="">All Statuses</option></select>
         </div>
         <button type="button" class="dom-nav-btn btn-primary" style="height:34px;" onclick="voyagerAlert('Filters applied successfully.')">Apply</button>
       </div>
@@ -142,7 +132,7 @@
           <div style="font-weight:700; font-size:0.92rem; color:var(--color-text-dark);">GSTR-3B Monthly Return Summary & Tax Liability</div>
           <input type="text" class="form-control-custom table-search" placeholder="Search records..." oninput="filterTable(this.value)" />
         </div>
-        <div style="overflow-x:auto;">
+        <div class="rpt-lock-scroll" style="overflow-x:auto;">
           <table class="table-custom" id="main-data-table">
             <thead>
               <tr>
@@ -202,9 +192,9 @@
   </div>
 
   <script src="assets/js/mock-data.js"></script>
-  <script src="assets/js/api.js?v=3"></script>
-  <script src="assets/js/hardcode.js"></script>
-  <script src="assets/js/shell.js?v=21"></script>
+  <script src="assets/js/api.js?v=4"></script>
+  <script src="assets/js/hardcode.js?v=2"></script>
+  <script src="assets/js/shell.js?v=28"></script>
   <script>
     // Not gated on DOMContentLoaded - this page's <script> can be injected
     // by the app's SPA navigation (shell.js's navigateTo) into a document
@@ -216,6 +206,12 @@
     // lot of data per day, so a multi-week default window would be
     // slow/overwhelming to load on first open.
     document.getElementById("filter-from").value = document.getElementById("filter-to").value = new Date().toISOString().slice(0, 10);
+    // Browser Back to this report -> same dates, search text and scroll.
+    (() => {
+      const rs = VoyagerShell.reportState.consume();
+      VoyagerShell.reportState.applyInputs(rs);
+      VoyagerShell.reportState.restoreAfterLoad(rs);
+    })();
 
     // Keyboard row navigation - Up/Down moves a highlighted "current row"
     // (same look as mouse hover), same convention as the DSR report. This

@@ -38,9 +38,6 @@ from django.db import models
 # so an edited mapping is never served stale for longer than that.
 _field_gst_pct_cache = {}
 
-def clear_gst_pct_cache():
-    _field_gst_pct_cache.clear()
-
 
 class LedgerGroup(models.Model):
     ACCOUNT_TYPE_CHOICES = [
@@ -159,15 +156,6 @@ class Ledger(models.Model):
     agent_id = models.CharField(max_length=30, null=True, blank=True)
     maintain_balance_bill_wise = models.CharField(max_length=5, null=True, blank=True)  # "Yes" / "No"
     place_of_supply = models.CharField(max_length=60, null=True, blank=True)
-
-    # Credit terms - customer_type/credit_limit are Debtor-only (Customers
-    # page); credit_days applies to either side (Customers AND Suppliers
-    # pages both show it).
-    CUSTOMER_TYPE_CHOICES = [("RETAIL", "Retail"), ("CORPORATE", "Corporate"), ("AGENT", "Agent")]
-    customer_type = models.CharField(max_length=20, choices=CUSTOMER_TYPE_CHOICES, null=True, blank=True)
-    credit_limit = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True, default=0)
-    credit_days = models.IntegerField(null=True, blank=True, default=0)
-
 
     # Debtor — India
     city = models.CharField(max_length=60, null=True, blank=True)
@@ -387,6 +375,10 @@ class TicketLine(models.Model):
     supp_addl_markup = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     supp_service_fee = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     supp_addl_service_fee = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    # Booking only - the Supplier side's own SSR Markup / SSR Service Fee
+    # (same pair the Customer side has).
+    supp_ssr_markup = models.DecimalField(max_digits=14, decimal_places=2, default=0, db_default=0)
+    supp_ssr_service_fee = models.DecimalField(max_digits=14, decimal_places=2, default=0, db_default=0)
     supp_gst_pct = models.DecimalField(max_digits=5, decimal_places=2, default=0)
 
     # Computed at save time server-side (never trust the client's total)
@@ -465,8 +457,9 @@ class TicketLine(models.Model):
         return float(self.supplier_cost) - float(self.computed_discount) + float(self.computed_tds) \
             + float(self.markup) + float(self.addl_markup) + float(self.ssr_markup) \
             + float(self.service_fee) + float(self.addl_service_fee) + float(self.ssr_service_fee) + float(self.computed_gst) \
-            + float(self.supp_markup) + float(self.supp_addl_markup) \
-            + float(self.supp_service_fee) + float(self.supp_addl_service_fee) + float(self.computed_supp_gst)
+            + float(self.supp_markup) + float(self.supp_addl_markup) + float(self.supp_ssr_markup) \
+            + float(self.supp_service_fee) + float(self.supp_addl_service_fee) + float(self.supp_ssr_service_fee) \
+            + float(self.computed_supp_gst)
 
     @property
     def supplier_cost(self):
@@ -580,6 +573,7 @@ class TicketLine(models.Model):
         return (
             float(self.supp_service_fee) * field_ledger_gst_pct("Supplier Service Fee A/c") / 100
             + float(self.supp_addl_service_fee) * field_ledger_gst_pct("Supplier Addl Service Fee A/c") / 100
+            + float(self.supp_ssr_service_fee) * field_ledger_gst_pct("Supplier SSR Service Fee A/c") / 100
         )
 
 
@@ -772,6 +766,10 @@ class RescheduleAirlineTicketLine(models.Model):
     supp_addl_markup = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     supp_service_fee = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     supp_addl_service_fee = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    # Supplier SSR Markup / SSR Service Fee - same as TicketLine's (db_default:
+    # every INSERT goes through dbo.sp_RescheduleTicket's raw SQL).
+    supp_ssr_markup = models.DecimalField(max_digits=14, decimal_places=2, default=0, db_default=0)
+    supp_ssr_service_fee = models.DecimalField(max_digits=14, decimal_places=2, default=0, db_default=0)
     supp_gst_pct = models.DecimalField(max_digits=5, decimal_places=2, default=0)
 
     # New to the Reschedule flow only - TicketLine has no equivalent
@@ -819,8 +817,8 @@ class RescheduleAirlineTicketLine(models.Model):
         return float(self.supplier_cost) - float(self.computed_discount) + float(self.computed_tds) \
             + float(self.markup) + float(self.addl_markup) + float(self.ssr_markup) \
             + float(self.service_fee) + float(self.addl_service_fee) + float(self.ssr_service_fee) + float(self.computed_gst) \
-            + float(self.supp_markup) + float(self.supp_addl_markup) \
-            + float(self.supp_service_fee) + float(self.supp_addl_service_fee) + float(self.computed_supp_gst)
+            + float(self.supp_markup) + float(self.supp_addl_markup) + float(self.supp_ssr_markup) \
+            + float(self.supp_service_fee) + float(self.supp_addl_service_fee) + float(self.supp_ssr_service_fee) + float(self.computed_supp_gst)
 
     @property
     def supplier_cost(self):
@@ -903,6 +901,7 @@ class RescheduleAirlineTicketLine(models.Model):
         return (
             float(self.supp_service_fee) * field_ledger_gst_pct("Supplier Service Fee A/c") / 100
             + float(self.supp_addl_service_fee) * field_ledger_gst_pct("Supplier Addl Service Fee A/c") / 100
+            + float(self.supp_ssr_service_fee or 0) * field_ledger_gst_pct("Supplier SSR Service Fee A/c") / 100
         )
 
 
@@ -1219,6 +1218,114 @@ class CancellationAirlineTicketLine(models.Model):
         )
 
 
+class SSRAirlineTicket(models.Model):
+    """
+    SSR Updation (trans-airline-ssr.html) header - extra SSR (baggage / meal
+    / seat / other) sold on an already-issued Airline ticket. Points at the
+    original Booking (original_ticket) and, when the passenger's live data
+    sits on a reschedule, that reschedule (source_reschedule_ticket). Every
+    Save/Update posts its own Journal Voucher (JournalVoucher.source_ssr_ticket,
+    category "AIRLINE_SSR", ALS-1, ALS-2, ...) - see views._compute_ssr_jv_lines.
+    Written only through dbo.sp_SSRTicket.
+    """
+    id = models.AutoField(primary_key=True)
+    company_id = models.IntegerField()
+    branch_name = models.CharField(max_length=100, null=True, blank=True)
+
+    original_ticket = models.ForeignKey(
+        Ticket, on_delete=models.PROTECT, related_name="ssr_updations", db_column="original_ticket_id"
+    )
+    source_reschedule_ticket = models.ForeignKey(
+        RescheduleAirlineTicket, on_delete=models.PROTECT, null=True, blank=True,
+        related_name="ssr_updations", db_column="source_reschedule_ticket_id"
+    )
+
+    invoice_number = models.CharField(max_length=20)
+    invoice_date = models.DateField()
+    invoice_type = models.CharField(max_length=100, null=True, blank=True)
+    booking_mode = models.CharField(max_length=20, default="Manual", db_default="Manual")
+    booking_status = models.CharField(max_length=20, default="SSR Updated", db_default="SSR Updated")
+
+    customer = models.ForeignKey(
+        Ledger, on_delete=models.PROTECT, related_name="ssr_updations_as_customer", db_column="customer_ledger_id"
+    )
+    travel_type = models.CharField(max_length=20, null=True, blank=True)
+    user_name = models.CharField(max_length=100, null=True, blank=True)
+    currency = models.CharField(max_length=5, default="INR", db_default="INR")
+    roe = models.DecimalField(max_digits=10, decimal_places=4, default=1, db_default=1)
+
+    ssr_reference = models.CharField(max_length=30)
+    ssr_ref_date = models.DateField(null=True, blank=True)
+    airline_pnr = models.CharField(max_length=13, null=True, blank=True)
+    gds_pnr = models.CharField(max_length=13, null=True, blank=True)
+    payment_mode = models.CharField(max_length=20, null=True, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "SSR_AL_Tickets"
+        constraints = [
+            models.UniqueConstraint(fields=["company_id", "invoice_number"], name="uq_ssr_ticket_company_invoice_no"),
+            models.UniqueConstraint(fields=["company_id", "ssr_reference"], name="uq_ssr_ticket_company_ssr_ref"),
+        ]
+        indexes = [models.Index(fields=["company_id"], name="ssr_ticket_company_idx"),
+                   models.Index(fields=["original_ticket"], name="ssr_ticket_original_idx")]
+
+    def __str__(self):
+        return self.invoice_number
+
+
+class SSRAirlineTicketLine(models.Model):
+    """
+    One SSR line = one passenger on one sector. ssr_items is the SSR detail
+    text per SSR type (dropdowns.xml "ssrTypes"), stored as JSON text, e.g.
+    {"Extra Baggage": "BAG15 (15 KG)", "Meal": "VGML"}. Customer side:
+    SSR charges + SSR Markup + SSR Service Fee (+ GST at the "SSR Service
+    Fee A/c" ledger's GST %). Supplier side: SSR charges + supplier SSR
+    Markup + SSR Service Fee (+ GST at the "Supplier SSR Service Fee A/c"
+    ledger's GST %).
+    """
+    id = models.AutoField(primary_key=True)
+    ssr_ticket = models.ForeignKey(SSRAirlineTicket, on_delete=models.CASCADE, related_name="lines", db_column="ssr_ticket_id")
+    original_ticket_line = models.ForeignKey(
+        TicketLine, on_delete=models.PROTECT, related_name="ssr_lines", db_column="original_ticket_line_id"
+    )
+    reschedule_line = models.ForeignKey(
+        RescheduleAirlineTicketLine, on_delete=models.PROTECT, null=True, blank=True,
+        related_name="ssr_lines", db_column="reschedule_line_id"
+    )
+
+    ticket_no = models.CharField(max_length=20, null=True, blank=True)
+    passenger_name = models.CharField(max_length=100, null=True, blank=True)
+    pax_type = models.CharField(max_length=10, null=True, blank=True)
+    airline_category = models.CharField(max_length=5, null=True, blank=True)
+    sector = models.CharField(max_length=20, null=True, blank=True)
+    office_id = models.CharField(max_length=30, null=True, blank=True)
+    supplier = models.ForeignKey(
+        Ledger, on_delete=models.PROTECT, null=True, blank=True, related_name="ssr_lines_as_supplier", db_column="supplier_ledger_id"
+    )
+    fop = models.CharField(max_length=20, null=True, blank=True)
+    ssr_items = models.TextField(null=True, blank=True)
+
+    seat = models.DecimalField(max_digits=14, decimal_places=2, default=0, db_default=0)
+    meal = models.DecimalField(max_digits=14, decimal_places=2, default=0, db_default=0)
+    baggage = models.DecimalField(max_digits=14, decimal_places=2, default=0, db_default=0)
+    other_ssr = models.DecimalField(max_digits=14, decimal_places=2, default=0, db_default=0)
+    markup = models.DecimalField(max_digits=14, decimal_places=2, default=0, db_default=0)
+    service_fee = models.DecimalField(max_digits=14, decimal_places=2, default=0, db_default=0)
+    supp_markup = models.DecimalField(max_digits=14, decimal_places=2, default=0, db_default=0)
+    supp_service_fee = models.DecimalField(max_digits=14, decimal_places=2, default=0, db_default=0)
+    total_billed = models.DecimalField(max_digits=14, decimal_places=2, default=0, db_default=0)
+
+    class Meta:
+        db_table = "SSR_AL_TicketLines"
+        indexes = [models.Index(fields=["ssr_ticket"], name="ssr_line_ticket_idx")]
+
+    def __str__(self):
+        return f"{self.ticket_no} {self.sector}"
+
+
 class JournalVoucher(models.Model):
     """
     The auto-posted GL entry for a Ticket's JV (Airline/Hotel/Visa/
@@ -1245,7 +1352,7 @@ class JournalVoucher(models.Model):
     """
     CATEGORY_PREFIX = {
         "AIRLINE": "AL", "HOTEL": "HTL", "VISA": "VSA", "INSURANCE": "INS", "TOUR": "TUR",
-        "AIRLINE_RESCHEDULE": "ALR", "AIRLINE_CANCELLATION": "ALC",
+        "AIRLINE_RESCHEDULE": "ALR", "AIRLINE_CANCELLATION": "ALC", "AIRLINE_SSR": "ALS",
     }
 
     id = models.AutoField(primary_key=True)
@@ -1273,6 +1380,10 @@ class JournalVoucher(models.Model):
         CancellationAirlineTicket, on_delete=models.SET_NULL, null=True, blank=True,
         related_name="vouchers", db_column="source_cancellation_ticket_id"
     )
+    source_ssr_ticket = models.ForeignKey(
+        SSRAirlineTicket, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="vouchers", db_column="source_ssr_ticket_id"
+    )
 
     total_debit = models.DecimalField(max_digits=16, decimal_places=2, default=0)
     total_credit = models.DecimalField(max_digits=16, decimal_places=2, default=0)
@@ -1294,6 +1405,7 @@ class JournalVoucher(models.Model):
             models.Index(fields=["source_ticket"], name="journal_voucher_ticket_idx"),
             models.Index(fields=["source_reschedule_ticket"], name="journal_voucher_rtid_idx"),
             models.Index(fields=["source_cancellation_ticket"], name="journal_voucher_ctid_idx"),
+            models.Index(fields=["source_ssr_ticket"], name="journal_voucher_ssrid_idx"),
         ]
 
     def __str__(self):
@@ -1670,6 +1782,21 @@ class CompanyMaster(models.Model):
     # (each capped at 2MB client-side) that infra isn't worth adding.
     logo_base64 = models.TextField(null=True, blank=True)
     seal_base64 = models.TextField(null=True, blank=True)
+    # Invoice print layout chosen in Company Master (Choose Invoice Template):
+    # "classic" (Tax Invoice) or "payment" (Payment Invoice) - see
+    # assets/js/invoice-templates.js.
+    invoice_template = models.CharField(max_length=20, default="classic", db_default="classic")
+    # Printed in the invoice's "Terms and Conditions" (Tax Invoice) / "Notes"
+    # (Payment Invoice) box.
+    terms_conditions = models.TextField(null=True, blank=True)
+    # Bank details (Company Master > Bank Details popup) - printed in the
+    # Payment Invoice's Bank Info row.
+    bank_account_holder = models.CharField(max_length=100, null=True, blank=True)
+    bank_account_no = models.CharField(max_length=30, null=True, blank=True)
+    bank_ifsc = models.CharField(max_length=15, null=True, blank=True)
+    bank_swift = models.CharField(max_length=15, null=True, blank=True)
+    bank_name = models.CharField(max_length=100, null=True, blank=True)
+    bank_branch = models.CharField(max_length=100, null=True, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

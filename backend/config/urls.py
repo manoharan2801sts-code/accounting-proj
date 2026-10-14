@@ -6,5 +6,5 @@ urlpatterns = [
     path("api/", include("accounting.urls")),
     path("favicon.ico", RedirectView.as_view(url="/assets/img/favicon.png", permanent=True)),
     path("", serve_frontend_page, name="home"),
-    re_path(r"^(?P<path>[a-zA-Z0-9_\-]+(?:\.html)?)$", serve_frontend_page, name="frontend_page"),
+    re_path(r"^(?P<path>[a-zA-Z0-9_\-]+(?:\.html)?)/?$", serve_frontend_page, name="frontend_page"),
 ]

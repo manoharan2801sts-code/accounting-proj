@@ -588,6 +588,148 @@
     });
   }
 
+
+  // ============================================================
+  // Report state - Back returns to a report exactly as it was left
+  // (same dates, filters, checkboxes, search text and scroll position)
+  // instead of reloading it from scratch. Every report page is
+  // snapshotted when it's left (full page load or SPA navigation, or
+  // just before an in-page zoom); a snapshot is only restored when the
+  // page is reached through a Back action - a breadcrumb link, a
+  // "<- Back to ..." link, or the browser's own Back/Forward. Opening a
+  // report from the menu still starts fresh. Stored per page URL in
+  // sessionStorage (this browser tab only).
+  // Report pages use it as: const rs = reportState.consume(); set their
+  // own defaults; reportState.applyInputs(rs); load data; reportState.
+  // restoreAfterLoad(rs). reportState.provide(fn) adds page-specific
+  // extras (e.g. the Filter popup's conditions) to the snapshot.
+  // ============================================================
+  const reportState = (() => {
+    const STORE = "voyager_report_states";
+    const BACK_FLAG = "voyager_report_back";
+    let provider = null;
+    const keyOf = (url) => {
+      try {
+        const u = new URL(url || window.location.href, window.location.href);
+        return (u.pathname.split("/").pop() || "") + u.search;
+      } catch (_) { return ""; }
+    };
+    const isReport = (url) => /^(report-[\w-]+|customers|suppliers)\.html/.test(keyOf(url));
+    const readAll = () => { try { return JSON.parse(sessionStorage.getItem(STORE) || "{}"); } catch (_) { return {}; } };
+    const writeAll = (all) => {
+      try { sessionStorage.setItem(STORE, JSON.stringify(all)); } catch (_) { /* storage full/blocked - Back just reloads fresh */ }
+    };
+    const main = () => document.querySelector(".app-main");
+    const fields = () => Array.from((main() || document).querySelectorAll("input, select, textarea"));
+    const fieldKey = (el, i) => (el.id ? `#${el.id}` : `@${i}`);
+    // Stable path to a scroll container: tag:nth-child steps up to the
+    // nearest ancestor with an id (rows rendered inside it don't change it).
+    function pathOf(el) {
+      const steps = [];
+      while (el && el !== document.body) {
+        if (el.id) { steps.unshift(`#${el.id}`); break; }
+        const parent = el.parentElement;
+        steps.unshift(`${el.tagName.toLowerCase()}:nth-child(${parent ? Array.from(parent.children).indexOf(el) + 1 : 1})`);
+        el = parent;
+      }
+      return steps.join(" > ");
+    }
+
+    function capture() {
+      if (!isReport() || !main()) return;
+      const inputs = {};
+      fields().forEach((el, i) => {
+        if (el.type === "file" || el.type === "password") return;
+        inputs[fieldKey(el, i)] = (el.type === "checkbox" || el.type === "radio") ? { checked: el.checked } : { value: el.value };
+      });
+      const scroll = [{ path: "window", top: window.scrollY, left: window.scrollX }];
+      main().querySelectorAll("*").forEach((el) => {
+        if (el.scrollTop > 0 || el.scrollLeft > 0) scroll.push({ path: pathOf(el), top: el.scrollTop, left: el.scrollLeft });
+      });
+      if (main().scrollTop > 0) scroll.push({ path: pathOf(main()), top: main().scrollTop, left: main().scrollLeft });
+      let extra = null;
+      try { extra = provider ? provider() : null; } catch (_) { extra = null; }
+      const all = readAll();
+      all[keyOf()] = { inputs, scroll, extra, at: Date.now() };
+      // Keep the store small - newest 30 pages only.
+      const keys = Object.keys(all).sort((a, b) => all[b].at - all[a].at);
+      keys.slice(30).forEach((k) => delete all[k]);
+      writeAll(all);
+    }
+    function markBack(url) {
+      try { sessionStorage.setItem(BACK_FLAG, keyOf(url)); } catch (_) { /* ignore */ }
+    }
+    // The snapshot to restore for THIS page, or null for a normal (fresh) open.
+    function consume() {
+      const key = keyOf();
+      let flag = null;
+      try { flag = sessionStorage.getItem(BACK_FLAG); sessionStorage.removeItem(BACK_FLAG); } catch (_) { /* ignore */ }
+      let isBack = flag === key;
+      if (!isBack && !window.__voyagerSpaLoaded) {
+        const nav = performance.getEntriesByType && performance.getEntriesByType("navigation")[0];
+        isBack = !!nav && nav.type === "back_forward";
+      }
+      window.__voyagerSpaLoaded = true;
+      if (!isBack) return null;
+      return readAll()[key] || null;
+    }
+    // Put the saved field values back (no events) - after the page's own
+    // defaults, before its data load reads them.
+    function applyInputs(snap) {
+      if (!snap) return;
+      fields().forEach((el, i) => {
+        const v = snap.inputs[fieldKey(el, i)];
+        if (!v) return;
+        if ("checked" in v) el.checked = v.checked;
+        else el.value = v.value;
+        if (el.type === "date") el.dispatchEvent(new Event("change", { bubbles: false }));
+      });
+    }
+    // After the data is on screen: re-run any search box filter, then put
+    // the scroll position back (retried briefly while the layout settles).
+    function restoreAfterLoad(snap) {
+      if (!snap) return;
+      fields().forEach((el, i) => {
+        const v = snap.inputs[fieldKey(el, i)];
+        if (v && "value" in v && v.value && (el.type === "text" || el.type === "search") && el.getAttribute("oninput")) {
+          el.dispatchEvent(new Event("input", { bubbles: true }));
+        }
+      });
+      const started = Date.now();
+      const apply = () => {
+        let pending = false;
+        (snap.scroll || []).forEach((s) => {
+          if (s.path === "window") { window.scrollTo(s.left || 0, s.top || 0); return; }
+          let el = null;
+          try { el = document.querySelector(s.path); } catch (_) { el = null; }
+          if (!el) { pending = true; return; }
+          el.scrollTop = s.top; el.scrollLeft = s.left;
+          if (Math.abs(el.scrollTop - s.top) > 2) pending = true;
+        });
+        if (pending && Date.now() - started < 2000) setTimeout(apply, 100);
+      };
+      requestAnimationFrame(apply);
+    }
+    function provide(fn) { provider = fn; }
+    function resetProvider() { provider = null; }
+
+    // Leaving by a full page load (drill-downs use window.location.href).
+    window.addEventListener("pagehide", capture);
+    // Back actions: breadcrumb links, "<- Back to ..." links, explicit
+    // [data-back] links. Capture phase - runs before page handlers that
+    // stop propagation (e.g. ticket-entry's own Back link).
+    document.addEventListener("click", (e) => {
+      const a = e.target.closest && e.target.closest("a[href]");
+      if (!a) return;
+      const href = a.getAttribute("href");
+      if (!href || href === "#" || href.startsWith("javascript:")) return;
+      const isBackLink = a.closest(".rpt-breadcrumb") || a.hasAttribute("data-back") || /^\s*(<-|\u2190)/.test(a.textContent || "");
+      if (isBackLink && isReport(href)) markBack(href);
+    }, true);
+
+    return { capture, markBack, consume, applyInputs, restoreAfterLoad, provide, resetProvider, keyOf, isReport };
+  })();
+
   async function navigateTo(url, push = true) {
     if (!url || url === "#" || url.startsWith("javascript:") || isNavigating) return;
     if (url === "index.html" || url.endsWith("/index.html")) {
@@ -596,6 +738,9 @@
     }
 
     isNavigating = true;
+    reportState.capture();
+    reportState.resetProvider();
+    window.__voyagerSpaLoaded = true; // later pages are SPA loads, not a browser Back
     try {
       // Close any modal left open on the outgoing page - these live outside
       // .app-main (siblings of .app-body), so swapping .app-main's innerHTML
@@ -611,6 +756,9 @@
       const html = await res.text();
       const parser = new DOMParser();
       const doc = parser.parseFromString(html, "text/html");
+      // Fixed dropdowns (dropdowns.xml) - filled before the swap so the new
+      // page's scripts already see every option.
+      if (window.VoyagerHardcode && window.VoyagerHardcode.fillDropdowns) window.VoyagerHardcode.fillDropdowns(doc);
 
       // 1. Update Document Title
       if (doc.title) {
@@ -679,6 +827,24 @@
       if (push) {
         window.history.pushState({ url }, "", url);
       }
+      markReportPage();
+
+      // 2b. (Runs BEFORE 2a's inline scripts, so a page script that wires up
+      // its own popup on load - Day Book / Ledger's Filter popup - finds it.)
+      // Sync page-specific markup that lives OUTSIDE .app-main (e.g.
+      // ticket-entry.html's modals, which are siblings of .app-body, not
+      // descendants of .app-main) - swapping .app-main's innerHTML alone
+      // never brings these over, so any script that does
+      // document.getElementById() on them gets null and buttons silently
+      // do nothing until a full page reload re-parses the whole file.
+      document.querySelectorAll(".spa-extra-content").forEach((el) => el.remove());
+      Array.from(doc.body.children).forEach((el) => {
+        const tag = el.tagName.toLowerCase();
+        if (tag === "script" || tag === "style" || tag === "link") return;
+        if (el.id === "shell-topnav" || el.id === "shell-menubar" || el.classList.contains("app-body")) return;
+        el.classList.add("spa-extra-content");
+        document.body.appendChild(document.importNode(el, true));
+      });
 
       // 2a. Run every INLINE script (no src) immediately, right after the
       // swap above - setting .innerHTML does NOT execute embedded
@@ -710,21 +876,6 @@
         } catch (e) {
           console.error("Inline script execution error:", e);
         }
-      });
-
-      // 2b. Sync page-specific markup that lives OUTSIDE .app-main (e.g.
-      // ticket-entry.html's modals, which are siblings of .app-body, not
-      // descendants of .app-main) - swapping .app-main's innerHTML alone
-      // never brings these over, so any script that does
-      // document.getElementById() on them gets null and buttons silently
-      // do nothing until a full page reload re-parses the whole file.
-      document.querySelectorAll(".spa-extra-content").forEach((el) => el.remove());
-      Array.from(doc.body.children).forEach((el) => {
-        const tag = el.tagName.toLowerCase();
-        if (tag === "script" || tag === "style" || tag === "link") return;
-        if (el.id === "shell-topnav" || el.id === "shell-menubar" || el.classList.contains("app-body")) return;
-        el.classList.add("spa-extra-content");
-        document.body.appendChild(document.importNode(el, true));
       });
 
       // 3. Update Page Styles
@@ -835,15 +986,40 @@
 
   // Handle Browser Back and Forward buttons seamlessly
   window.addEventListener("popstate", (e) => {
-    if (e.state && e.state.url) {
-      navigateTo(e.state.url, false);
-    } else {
-      navigateTo(window.location.pathname + window.location.search, false);
-    }
+    const target = (e.state && e.state.url) || (window.location.pathname + window.location.search);
+    if (reportState.isReport(target)) reportState.markBack(target);
+    navigateTo(target, false);
   });
+
+  // Company Master's uploaded logo replaces the default project logo in the
+  // topnav (and is remembered for the sign-in page, which can't call the
+  // API before login). No upload -> default assets/img logo.
+  const DEFAULT_LOGO = "assets/img/travel-agency-logo.png";
+  async function applyCompanyLogo(companyId) {
+    let logo = null;
+    try {
+      const res = await fetch(`http://localhost:8000/api/company-master/?id=${companyId}&images=logo`);
+      if (res.ok) logo = (await res.json()).logo_base64 || null;
+    } catch (err) {
+      console.error("Could not load the company logo", err);
+      return;
+    }
+    try {
+      if (logo) localStorage.setItem("voyager_company_logo", logo);
+      else localStorage.removeItem("voyager_company_logo");
+    } catch (_) { /* storage full/blocked - topnav still updates below */ }
+    document.querySelectorAll("#shell-topnav .logo-img").forEach((img) => { img.src = logo || DEFAULT_LOGO; });
+  }
+
+  // body.report-page on every report screen (report-*.html, Receivables,
+  // Payables) - app.css styles all their table headers from it (black, bold).
+  function markReportPage() {
+    document.body.classList.toggle("report-page", reportState.isReport());
+  }
 
   async function init({ activeKey, onCompanyChange }) {
     currentOnCompanyChange = onCompanyChange;
+    markReportPage();
 
     // Not signed in - go to the login page. The returned promise never
     // settles, so the page's own code (awaiting init) stops here.
@@ -1064,6 +1240,7 @@
       }
     }
 
+    if (!isShellInitialized && select) applyCompanyLogo(select.value);
     isShellInitialized = true;
     const active = select && select.selectedOptions[0];
     return {
@@ -1445,5 +1622,5 @@
   window.addEventListener("resize", () => { if (calInput) positionCalendar(); });
 
   // can("add" | "edit" | "delete" | "view") for the page currently shown.
-  window.VoyagerShell = { init, navigateTo, can: (action) => !!pagePerm[action] };
+  window.VoyagerShell = { init, navigateTo, can: (action) => !!pagePerm[action], reportState };
 })(window);

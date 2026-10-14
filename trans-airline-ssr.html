@@ -1,233 +1,420 @@
 <!DOCTYPE html>
-<html lang="en-GB">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
-  <title>Airline Ticket — SSR Updation — TRAVEL AGENCY</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
-  <link href="assets/css/design-system.css" rel="stylesheet" />
-  <link href="assets/css/app.css" rel="stylesheet" />
-  <link rel="icon" type="image/png" href="assets/img/favicon.png" />
-  <style>
-    .page-header-row { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 1.25rem; flex-wrap: wrap; }
-    .page-title-group h1 { font-size: 1.25rem; font-weight: 700; margin: 0; display: flex; align-items: center; gap: 0.5rem; }
-    .page-title-group .breadcrumb { font-size: 0.8rem; color: var(--color-text-muted); margin-bottom: 0.25rem; display: flex; gap: 0.4rem; align-items: center; }
-    
-    .filter-card {
-      background: var(--color-white); border: 1px solid var(--color-border);
-      border-radius: var(--radius-md); padding: 1rem 1.25rem; margin-bottom: 1.25rem;
-      display: flex; align-items: flex-end; gap: 1rem; flex-wrap: wrap;
-    }
-    .filter-group { display: flex; flex-direction: column; gap: 0.35rem; }
-    .filter-group label { font-size: 11px; font-weight: 700; color: var(--color-text-muted); letter-spacing: 0.03em; }
-    
-    .kpi-grid {
-      display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-      gap: 1rem; margin-bottom: 1.25rem;
-    }
-    .kpi-card {
-      background: var(--color-white); border: 1px solid var(--color-border);
-      border-radius: var(--radius-md); padding: 1rem 1.25rem;
-    }
-    .kpi-card .kpi-label { font-size: 12px; font-weight: 600; color: var(--color-text-muted); margin-bottom: 0.35rem; }
-    .kpi-card .kpi-val { font-size: 1.4rem; font-weight: 800; font-family: var(--font-display); color: var(--color-text-dark); }
-    .kpi-card.highlight { border-left: 4px solid var(--color-primary); }
-    .kpi-card.accent-success { border-left: 4px solid var(--color-success); }
-    .kpi-card.accent-warning { border-left: 4px solid var(--color-warning); }
-    
-    .table-container {
-      background: var(--color-white); border: 1px solid var(--color-border);
-      border-radius: var(--radius-md); overflow: hidden;
-    }
-    .table-toolbar {
-      padding: 0.85rem 1.25rem; display: flex; align-items: center; justify-content: space-between;
-      border-bottom: 1px solid var(--color-border); gap: 1rem; flex-wrap: wrap; background: #FAFBFD;
-    }
-    .table-search { max-width: 300px; width: 100%; }
-    .table-custom { width: 100%; border-collapse: collapse; text-align: left; }
-    .table-custom th { padding: 0.75rem 1rem; background: #F8FAFC; border-bottom: 1px solid var(--color-border);
-      font-size: 11.5px; font-weight: 700; color: var(--color-text-muted); letter-spacing: 0.03em; }
-    .table-custom td {
-      padding: 0.75rem 1rem; border-bottom: 1px solid var(--color-border-subtle);
-      font-size: 13px; color: var(--color-text); vertical-align: middle;
-    }
-    .table-custom tbody tr:hover { background: #F8FAFC; }
-    .table-custom tbody tr:last-child td { border-bottom: none; }
-    .status-badge { display: inline-flex; align-items: center; padding: 0.2rem 0.55rem;
-      border-radius: 4px; font-size: 11.5px; font-weight: 700; }
-    .badge-issued, .badge-success { background: #DCFCE7; color: #166534; }
-    .badge-pending, .badge-warning { background: #FEF3C7; color: #92400E; }
-    .badge-cancelled, .badge-danger { background: #FEE2E2; color: #991B1B; }
-    .badge-rescheduled, .badge-info { background: #E0E7FF; color: #3730A3; }
-    
-    .amt { font-family: var(--font-mono); font-weight: 600; text-align: right; }
-    th.amt-header { text-align: right; }
-  </style>
-</head>
-<body>
-  <header class="app-topnav" id="shell-topnav"></header>
-  <div class="app-body">
-    <main class="app-main" style="max-width: 1440px; margin: 0 auto; padding: 1.5rem 2rem;">
-      <div class="page-header-row">
-        <div class="page-title-group">
-          <div class="breadcrumb">Transactions &rsaquo; Airline Ticket &rsaquo; SSR Updation</div>
-          <h1><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--color-primary)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg> Airline Ticket — SSR Updation</h1>
+<html lang="en-GB"><head>
+<meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+<title>SSR Updation — TRAVEL AGENCY</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
+<link href="assets/css/design-system.css" rel="stylesheet" />
+<link href="assets/css/app.css?v=7" rel="stylesheet" />
+<link rel="icon" type="image/png" href="assets/img/favicon.png" />
+<style>
+  /* Same screen layout as New Airline Ticket (ticket-entry.html) - the
+     dom-* classes come from app.css; only this page's own bits are here. */
+  html, body { height: 100%; overflow: hidden; margin: 0; }
+  .pax-circle-btn {
+    min-width: 62px; height: 22px; border-radius: 3px; cursor: pointer;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 10.5px; font-weight: 700; letter-spacing: 0.03em; line-height: 1; padding: 0 8px;
+    background: var(--color-white); border: 1.5px solid var(--color-primary-light); color: var(--color-primary);
+  }
+  .pax-circle-btn + .pax-circle-btn { margin-left: 4px; }
+  .pax-circle-add:hover { background: var(--color-primary); border-color: var(--color-primary); color: #FFFFFF; }
+  .pax-circle-remove { border-color: var(--color-danger); color: var(--color-danger); }
+  .pax-circle-remove:hover { background: var(--color-danger); color: #FFFFFF; }
+  .pax-row.pax-add-row td { color: #94A3B8; }
+  .ssr-row { cursor: pointer; }
+  .ssr-filter-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 10px; }
+  .ssr-filter { display: flex; flex-direction: column; gap: 2px; font-size: 11px; }
+  .ssr-filter label { font-weight: 600; color: #334155; }
+  .ssr-pick-box { border: 1px solid var(--color-border, #CBD5E1); border-radius: 3px; overflow: hidden; display: flex; flex-direction: column; max-height: 320px; }
+  .ssr-pick-head { padding: 8px 10px; font-weight: 700; font-size: 12px; background: #FAFBFD; border-bottom: 1px solid var(--color-border, #CBD5E1); }
+  .ssr-pick-head label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+  .ssr-pick-scroll { overflow-y: auto; flex: 1; min-height: 0; }
+  .ssr-pick-table { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+  .ssr-pick-table th { position: sticky; top: 0; background: #3B6DB5; color: #FFFFFF; font-weight: 700; text-align: left; padding: 4px 8px; height: 26px; }
+  .ssr-pick-table td { padding: 4px 8px; border-bottom: 1px solid #EEF1F5; }
+  #ssr-modal .dom-modal-form-grid .dom-input-readonly { justify-content: flex-start !important; text-align: left; }
+  .ssr-result-row { cursor: pointer; border-bottom: 1px solid #E2E8F0; }
+  .ssr-result-row:hover td { background: var(--color-primary); color: #FFFFFF; }
+</style>
+</head><body>
+<header class="app-topnav" id="shell-topnav"></header>
+<div class="app-body" style="height: calc(100vh - var(--topnav-height) - var(--menubar-height, 0px));">
+  <aside class="app-sidebar" id="shell-sidebar"></aside>
+  <main class="app-main" style="max-width:100%; padding:6px 40px; display:flex; flex-direction:column; height:calc(100vh - var(--topnav-height) - var(--menubar-height, 0px)); overflow:hidden;">
+
+    <div class="dom-window" style="position:relative;">
+      <div class="dom-titlebar">
+        <div class="dom-titlebar-title"><span id="page-title" style="font-weight:700; font-size:12.5px;">SSR Updation</span></div>
+      </div>
+
+      <form id="ssr-form" style="display:flex; flex-direction:column; flex:1; min-height:0; overflow:hidden;">
+        <div class="dom-main-content">
+
+          <!-- Header - same field grid as the Booking screen. Customer /
+               PNR / ticket fields are filled from the ticket picked via New. -->
+          <div class="dom-form-grid">
+            <div class="dom-field">
+              <label class="dom-label">Invoice Number<span class="dom-req">*</span></label>
+              <input class="dom-input" id="invoice_number" maxlength="20" />
+            </div>
+            <div class="dom-field">
+              <label class="dom-label">Invoice Date<span class="dom-req">*</span></label>
+              <input type="date" class="dom-input" id="invoice_date" />
+            </div>
+            <div class="dom-field">
+              <label class="dom-label">Invoice Type<span class="dom-req">*</span></label>
+              <select class="dom-select" id="invoice_type"><option value="">Select...</option></select>
+            </div>
+            <div class="dom-field">
+              <label class="dom-label">Booking Mode</label>
+              <select class="dom-select" id="booking_mode" data-options="bookingModes" disabled></select>
+            </div>
+            <div class="dom-field">
+              <label class="dom-label">Original Invoice</label>
+              <div class="dom-input-readonly" id="original_invoice">—</div>
+            </div>
+            <div class="dom-field">
+              <label class="dom-label">Booking Status</label>
+              <div class="dom-input-readonly" id="booking_status">SSR Updated</div>
+            </div>
+            <div class="dom-field">
+              <label class="dom-label">Customer Name</label>
+              <div class="dom-input-readonly" id="customer">—</div>
+            </div>
+            <div class="dom-field">
+              <label class="dom-label">Customer Code</label>
+              <div class="dom-input-readonly" id="customer_code" style="flex:0 0 90px;">—</div>
+              <label class="dom-label" style="min-width:52px;">Agent ID</label>
+              <div class="dom-input-readonly" id="customer_agent_id" style="flex:1;">—</div>
+            </div>
+            <div class="dom-field field-address">
+              <label class="dom-label">Customer Address</label>
+              <div class="dom-input-readonly readonly-address" id="customer_address">—</div>
+            </div>
+            <div class="dom-field">
+              <label class="dom-label">Customer GST/TRN</label>
+              <div class="dom-input-readonly" id="customer_gst">—</div>
+            </div>
+            <div class="dom-field">
+              <label class="dom-label">Travel Type</label>
+              <div class="dom-input-readonly" id="travel_type">—</div>
+            </div>
+            <div class="dom-field">
+              <label class="dom-label">User Name</label>
+              <input class="dom-input" id="user_name" list="ssr-user-name-options" placeholder="Type to search…" autocomplete="off" />
+              <datalist id="ssr-user-name-options"></datalist>
+            </div>
+            <div class="dom-field">
+              <label class="dom-label">Currency</label>
+              <div class="dom-input-readonly" id="currency" style="font-weight:700; flex:0 0 60px;">INR</div>
+              <label class="dom-label" style="min-width:36px;">ROE</label>
+              <div class="dom-input-readonly" id="roe" style="flex:0 0 80px;">1.0000</div>
+            </div>
+            <div class="dom-field">
+              <label class="dom-label">SSR Reference<span class="dom-req">*</span></label>
+              <input class="dom-input" id="ssr_reference" maxlength="25" />
+            </div>
+            <div class="dom-field">
+              <label class="dom-label">SSR Ref Date<span class="dom-req">*</span></label>
+              <input type="date" class="dom-input" id="ssr_ref_date" />
+            </div>
+            <div class="dom-field">
+              <label class="dom-label">Airline PNR</label>
+              <div class="dom-input-readonly" id="airline_pnr">—</div>
+            </div>
+            <div class="dom-field">
+              <label class="dom-label">GDS PNR</label>
+              <div class="dom-input-readonly" id="gds_pnr">—</div>
+            </div>
+            <div class="dom-field">
+              <label class="dom-label">Payment Mode</label>
+              <select class="dom-select" id="payment_mode" data-options="paymentModes" style="flex:0 0 130px;"><option value="">Select...</option></select>
+            </div>
+          </div>
+
+          <!-- SSR lines - one row per passenger SSR (baggage / meal / seat). -->
+          <div class="dom-grid-container">
+            <div class="dom-grid-scroll">
+              <table class="dom-grid-table pax-table" id="ssr-grid">
+                <thead>
+                  <tr>
+                    <th style="width:32px; text-align:center;">#</th>
+                    <th>Ticket No.</th>
+                    <th>Pax Name</th>
+                    <th>Sector</th>
+                    <th>SSR Details</th>
+                    <th class="num">Seat</th>
+                    <th class="num">Meal</th>
+                    <th class="num">Baggage</th>
+                    <th class="num">Other SSR</th>
+                    <th class="num">Markup</th>
+                    <th class="num">Service Fee</th>
+                    <th class="num">GST</th>
+                    <th class="num">Total</th>
+                  </tr>
+                </thead>
+                <tbody id="ssr-lines"></tbody>
+              </table>
+            </div>
+          </div>
+
         </div>
-        <div style="display:flex; gap:0.5rem;">
-          <button type="button" class="dom-nav-btn" onclick="window.print()">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9V2h12v7M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2m-12 0v4h12v-4"/></svg>
-            Print
-          </button>
-          <button type="button" class="dom-nav-btn btn-primary" onclick="exportCSV()">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4m14-7l-5 5-5-5m5 5V3"/></svg>
-            Export CSV
-          </button>
+      </form>
+
+      <div class="dom-summary-strip">
+        <table class="dom-dtls-table">
+          <thead>
+            <tr><th>Summary</th><th>SSR Amount</th><th>Markup</th><th>Service Fee</th><th>GST Amount</th><th>Total</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td style="font-weight:700; color:#3B6DB5;">Purchase Cost</td>
+              <td id="pc-ssr">0.00</td><td id="pc-markup">0.00</td><td id="pc-sfee">0.00</td><td id="pc-gst">0.00</td>
+              <td id="pc-total" style="font-weight:800; color:#3B6DB5; font-size:12px;">0.00</td>
+            </tr>
+            <tr>
+              <td style="font-weight:700; color:#3B6DB5;">Sales Cost</td>
+              <td id="sc-ssr">0.00</td><td id="sc-markup">0.00</td><td id="sc-sfee">0.00</td><td id="sc-gst">0.00</td>
+              <td id="sc-total" style="font-weight:800; color:#3B6DB5; font-size:12px;">0.00</td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="dom-bal-card">
+          <div class="bal-title">Earnings (INR)</div>
+          <div class="dom-bal-pill"><span id="earnings_total">0.00</span></div>
         </div>
       </div>
 
-      <div class="filter-card">
-        <div class="filter-group">
-          <label>From Date</label>
-          <input type="date" class="form-control-custom" id="filter-from" value="2026-09-01" style="height:34px; padding:0.25rem 0.6rem;" />
-        </div>
-        <div class="filter-group">
-          <label>To Date</label>
-          <input type="date" class="form-control-custom" id="filter-to" value="2026-09-21" style="height:34px; padding:0.25rem 0.6rem;" />
-        </div>
-        <div class="filter-group">
-          <label>Branch / Office</label>
-          <select class="form-control-custom" style="height:34px; min-width:140px;">
-            <option value="">All Branches</option>
-            <option value="DEL">Delhi HQ</option>
-            <option value="BOM">Mumbai Branch</option>
-            <option value="DXB">Dubai Branch</option>
-          </select>
-        </div>
-        <div class="filter-group">
-          <label>Status</label>
-          <select class="form-control-custom" style="height:34px; min-width:120px;">
-            <option value="">All Statuses</option>
-            <option value="ISSUED">Confirmed / Issued</option>
-            <option value="PENDING">Pending</option>
-            <option value="CANCELLED">Cancelled</option>
-          </select>
-        </div>
-        <button type="button" class="dom-nav-btn btn-primary" style="height:34px;" onclick="voyagerAlert('Filters applied successfully.')">Apply</button>
+      <div class="dom-bottom-toolbar">
+        <button type="button" class="dom-nav-btn btn-primary" id="ssr-new-btn" style="font-weight:700;" title="Find the ticket to add SSR to">New</button>
+        <button type="button" class="dom-nav-btn" id="ssr-find-btn" title="Find a saved SSR Updation">Find</button>
+        <button type="button" class="dom-nav-btn btn-primary" id="ssr-save-btn" style="font-weight:700;">Save SSR</button>
+        <button type="button" class="dom-nav-btn" id="ssr-edit-btn" style="display:none;" title="Edit this saved SSR Updation">Edit</button>
+        <a href="trans-airline-ssr.html" class="dom-nav-btn" id="ssr-discard-btn">Discard</a>
+        <button type="button" class="dom-nav-btn btn-primary" id="ssr-jv-btn" style="font-weight:700; min-width:54px;" title="View Journal Voucher (J.V)">J.V</button>
+        <button type="button" class="dom-nav-btn" id="ssr-print-btn" style="display:none;" title="Print the Tax Invoice">Print</button>
+        <a href="dashboard.html" class="dom-nav-btn btn-danger" id="ssr-exit-btn">Exit</a>
       </div>
+    </div>
 
-      <div class="kpi-grid">
-  <div class="kpi-card highlight">
-    <div class="kpi-label">Total SSR Items</div>
-    <div class="kpi-val">42</div>
-  </div>
-  <div class="kpi-card accent-success">
-    <div class="kpi-label">Meals Confirmed</div>
-    <div class="kpi-val">18</div>
-  </div>
-  <div class="kpi-card standard">
-    <div class="kpi-label">Extra Baggage (kg)</div>
-    <div class="kpi-val">240 kg</div>
-  </div>
-  <div class="kpi-card accent-warning">
-    <div class="kpi-label">SSR Total Revenue</div>
-    <div class="kpi-val">₹36,400</div>
+  </main>
+</div>
+
+<!-- New - find the live Booking / Reschedule ticket the SSR is for
+     (same filters as the Reschedule / Cancellation New popups). -->
+<div class="dom-modal-backdrop spa-extra-content" id="ssr-lookup-modal">
+  <div class="dom-modal-window" style="max-width:900px; width:95%; max-height:90vh;">
+    <div class="dom-modal-titlebar">
+      <div>Find Ticket for SSR</div>
+      <button type="button" class="dom-titlebar-btn btn-close" data-close="ssr-lookup-modal" title="Close">&times;</button>
+    </div>
+    <div class="dom-modal-body dom-modal-body-scroll" style="display:block; padding:12px; max-height:76vh;">
+      <div class="ssr-filter-grid">
+        <div class="ssr-filter"><label>Invoice Number</label><input class="dom-input" type="text" id="nl-invoice" placeholder="e.g. TA/TAX/00001/26-27" autocomplete="off" /></div>
+        <div class="ssr-filter"><label>S PNR / Booking Ref</label><input class="dom-input" type="text" id="nl-spnr" placeholder="Booking Reference" autocomplete="off" /></div>
+        <div class="ssr-filter"><label>Airline PNR</label><input class="dom-input" type="text" id="nl-airline-pnr" placeholder="Airline PNR" autocomplete="off" /></div>
+        <div class="ssr-filter"><label>GDS PNR</label><input class="dom-input" type="text" id="nl-gds-pnr" placeholder="GDS PNR" autocomplete="off" /></div>
+        <div class="ssr-filter"><label>Ticket No</label><input class="dom-input" type="text" id="nl-ticket-no" placeholder="Ticket No" autocomplete="off" /></div>
+        <div class="ssr-filter"><label>Customer Name</label><input class="dom-input" type="text" id="nl-customer" placeholder="e.g. Sundaram Traders" autocomplete="off" /></div>
+        <div class="ssr-filter"><label>Airline Code</label><input class="dom-input" type="text" id="nl-airline-code" placeholder="e.g. 6E" autocomplete="off" /></div>
+        <div aria-hidden="true"></div>
+        <div class="ssr-filter"><label>Date Type</label>
+          <div class="dom-date-type-toggle" id="nl-date-type" data-value="travel_date">
+            <button type="button" class="dom-date-type-btn active" data-value="travel_date">Travel Date</button>
+            <button type="button" class="dom-date-type-btn" data-value="issue_date">Booking Date</button>
+          </div>
+        </div>
+        <div class="ssr-filter"><label>Date From</label><input class="dom-input" type="date" id="nl-date-from" placeholder="" autocomplete="off" /></div>
+        <div class="ssr-filter"><label>Date To</label><input class="dom-input" type="date" id="nl-date-to" placeholder="" autocomplete="off" /></div>
+      </div>
+      <div style="display:flex; justify-content:flex-end; margin-bottom:10px;">
+        <button type="button" class="dom-nav-btn btn-primary" id="nl-proceed-btn" style="font-weight:700;">Proceed</button>
+      </div>
+      <div id="nl-results-wrap" style="display:none; max-height:260px; overflow:auto; border:1px solid #CBD5E1;">
+        <table style="width:100%; font-size:11px; border-collapse:collapse;">
+          <thead><tr style="color:#fff;"><th style="padding:5px 8px; text-align:left; position:sticky; top:0; background:#3B6DB5;">Invoice Number</th><th style="padding:5px 8px; text-align:left; position:sticky; top:0; background:#3B6DB5;">Booking Ref</th><th style="padding:5px 8px; text-align:left; position:sticky; top:0; background:#3B6DB5;">Airline PNR</th><th style="padding:5px 8px; text-align:left; position:sticky; top:0; background:#3B6DB5;">Customer</th><th style="padding:5px 8px; text-align:left; position:sticky; top:0; background:#3B6DB5;">Airline</th><th style="padding:5px 8px; text-align:left; position:sticky; top:0; background:#3B6DB5;">Pax</th></tr></thead>
+          <tbody id="nl-results-body"></tbody>
+        </table>
+      </div>
+    </div>
   </div>
 </div>
 
-      <div class="table-container">
-        <div class="table-toolbar">
-          <div style="font-weight:700; font-size:0.92rem; color:var(--color-text-dark);">Special Service Requests (Baggage / Meals / Seats)</div>
-          <input type="text" class="form-control-custom table-search" placeholder="Search records..." oninput="filterTable(this.value)" />
+<!-- Passenger + Sector picker - which passenger(s) and sector(s) get SSR. -->
+<div class="dom-modal-backdrop spa-extra-content" id="ssr-pax-modal">
+  <div class="dom-modal-window" style="max-width:760px; width:95%; max-height:90vh;">
+    <div class="dom-modal-titlebar">
+      <div>Select Passenger(s) &amp; Sector(s) for SSR</div>
+      <button type="button" class="dom-titlebar-btn btn-close" data-close="ssr-pax-modal" title="Close">&times;</button>
+    </div>
+    <div class="dom-modal-body dom-modal-body-scroll" style="display:block; padding:12px; max-height:76vh;">
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem; margin-bottom:1rem;">
+        <div class="ssr-pick-box">
+          <div class="ssr-pick-head"><label><input type="checkbox" id="sp-pax-all" /> Passengers</label></div>
+          <div class="ssr-pick-scroll"><table class="ssr-pick-table">
+            <thead><tr><th style="width:30px;"></th><th>Pax Type</th><th>Pax Name</th><th>Ticket No</th></tr></thead>
+            <tbody id="sp-pax-tbody"></tbody>
+          </table></div>
         </div>
-        <div style="overflow-x:auto;">
-          <table class="table-custom" id="main-data-table">
-            <thead>
-              <tr>
-                  <th class="">SSR Ref</th>
-  <th class="">Ticket / PNR</th>
-  <th class="">Passenger</th>
-  <th class="">Service Type</th>
-  <th class="">SSR Code / Item</th>
-  <th class="amt-header">Cost (Supplier)</th>
-  <th class="">Markup</th>
-  <th class="amt-header">Billed Amount</th>
-  <th class="">Status</th>
-
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-  <td class="">SSR-201</td>
-  <td class="">098-23489102 (PNR61B)</td>
-  <td class="">Gokul Kumar</td>
-  <td class="">Extra Baggage</td>
-  <td class="">BAG15 (15 KG)</td>
-  <td class="amt">₹1,800</td>
-  <td class="">₹300</td>
-  <td class="amt">₹2,100</td>
-  <td class=""><span class='status-badge badge-issued'>Confirmed</span></td>
-</tr>
-<tr>
-  <td class="">SSR-202</td>
-  <td class="">098-44210983 (QPIXB6)</td>
-  <td class="">Priya Sharma</td>
-  <td class="">Special Meal</td>
-  <td class="">VGML (Asian Veg)</td>
-  <td class="amt">₹450</td>
-  <td class="">₹150</td>
-  <td class="amt">₹600</td>
-  <td class=""><span class='status-badge badge-issued'>Confirmed</span></td>
-</tr>
-<tr>
-  <td class="">SSR-203</td>
-  <td class="">176-88192031 (AI882K)</td>
-  <td class="">Manoharan T</td>
-  <td class="">Preferred Seat</td>
-  <td class="">SEAT-12B (Extra Legroom)</td>
-  <td class="amt">₹800</td>
-  <td class="">₹200</td>
-  <td class="amt">₹1,000</td>
-  <td class=""><span class='status-badge badge-issued'>Confirmed</span></td>
-</tr>
-
-            </tbody>
-          </table>
+        <div class="ssr-pick-box">
+          <div class="ssr-pick-head"><label><input type="checkbox" id="sp-sector-all" /> Sectors</label></div>
+          <div class="ssr-pick-scroll"><table class="ssr-pick-table">
+            <thead><tr><th style="width:30px;"></th><th>Sector</th><th>Flight No</th><th>Class</th><th>Date</th></tr></thead>
+            <tbody id="sp-sector-tbody"></tbody>
+          </table></div>
         </div>
       </div>
-    </main>
+      <div style="display:flex; flex-direction:column; align-items:center; gap:6px;">
+        <button type="button" class="dom-nav-btn btn-primary" id="sp-add-btn" style="height:36px; padding:0 28px; font-weight:700;" disabled>Add SSR</button>
+        <span style="font-size:11px; color:#64748B;">One SSR line per selected passenger &amp; sector</span>
+      </div>
+    </div>
   </div>
+</div>
 
-  <script src="assets/js/api.js?v=3"></script>
-  <script src="assets/js/hardcode.js"></script>
-  <script src="assets/js/shell.js?v=21"></script>
-  <script>
-    document.addEventListener("DOMContentLoaded", () => {
-      VoyagerShell.init({ activeKey: "trans-airline-ssr" });
-    });
+<!-- Find - saved SSR Updations (same filters as the other Find popups). -->
+<div class="dom-modal-backdrop spa-extra-content" id="ssr-find-modal">
+  <div class="dom-modal-window" style="max-width:820px; width:95%; max-height:90vh;">
+    <div class="dom-modal-titlebar">
+      <div>Find SSR Updation</div>
+      <button type="button" class="dom-titlebar-btn btn-close" data-close="ssr-find-modal" title="Close">&times;</button>
+    </div>
+    <div class="dom-modal-body dom-modal-body-scroll" style="display:block; padding:12px; max-height:76vh;">
+      <div class="ssr-filter-grid">
+        <div class="ssr-filter"><label>Invoice Number</label><input class="dom-input" type="text" id="fd-invoice" placeholder="e.g. TA/TAX/00001/26-27" autocomplete="off" /></div>
+        <div class="ssr-filter"><label>S PNR / Booking Ref</label><input class="dom-input" type="text" id="fd-spnr" placeholder="Booking Reference" autocomplete="off" /></div>
+        <div class="ssr-filter"><label>Airline PNR</label><input class="dom-input" type="text" id="fd-airline-pnr" placeholder="Airline PNR" autocomplete="off" /></div>
+        <div class="ssr-filter"><label>GDS PNR</label><input class="dom-input" type="text" id="fd-gds-pnr" placeholder="GDS PNR" autocomplete="off" /></div>
+        <div class="ssr-filter"><label>Ticket No</label><input class="dom-input" type="text" id="fd-ticket-no" placeholder="Ticket No" autocomplete="off" /></div>
+        <div class="ssr-filter"><label>Customer Name</label><input class="dom-input" type="text" id="fd-customer" placeholder="e.g. Sundaram Traders" autocomplete="off" /></div>
+        <div class="ssr-filter"><label>Airline Code</label><input class="dom-input" type="text" id="fd-airline-code" placeholder="e.g. 6E" autocomplete="off" /></div>
+        <div aria-hidden="true"></div>
+        <div class="ssr-filter"><label>Date Type</label>
+          <div class="dom-date-type-toggle" id="fd-date-type" data-value="travel_date">
+            <button type="button" class="dom-date-type-btn active" data-value="travel_date">Travel Date</button>
+            <button type="button" class="dom-date-type-btn" data-value="issue_date">Booking Date</button>
+          </div>
+        </div>
+        <div class="ssr-filter"><label>Date From</label><input class="dom-input" type="date" id="fd-date-from" placeholder="" autocomplete="off" /></div>
+        <div class="ssr-filter"><label>Date To</label><input class="dom-input" type="date" id="fd-date-to" placeholder="" autocomplete="off" /></div>
+      </div>
+      <div style="display:flex; justify-content:flex-end; gap:6px; margin-bottom:10px;">
+        <button type="button" class="dom-nav-btn" id="fd-clear-btn">Clear</button>
+        <button type="button" class="dom-nav-btn btn-primary" id="fd-search-btn" style="font-weight:700;">Search</button>
+      </div>
+      <div style="max-height:260px; overflow:auto; border:1px solid #CBD5E1;">
+        <table style="width:100%; font-size:11px; border-collapse:collapse;">
+          <thead><tr style="color:#fff;"><th style="padding:5px 8px; text-align:left; position:sticky; top:0; background:#3B6DB5;">Invoice No</th><th style="padding:5px 8px; text-align:left; position:sticky; top:0; background:#3B6DB5;">SSR Ref</th><th style="padding:5px 8px; text-align:left; position:sticky; top:0; background:#3B6DB5;">Airline PNR</th><th style="padding:5px 8px; text-align:left; position:sticky; top:0; background:#3B6DB5;">Ticket No</th><th style="padding:5px 8px; text-align:left; position:sticky; top:0; background:#3B6DB5;">Passenger</th><th style="padding:5px 8px; text-align:left; position:sticky; top:0; background:#3B6DB5;">SSR</th><th style="padding:5px 8px; text-align:right; position:sticky; top:0; background:#3B6DB5;">Total</th></tr></thead>
+          <tbody id="fd-results-body"><tr><td colspan="7" style="text-align:center; padding:14px; color:#64748B;">Enter filters and click Search.</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
 
-    function filterTable(query) {
-      const q = query.toLowerCase();
-      const rows = document.querySelectorAll("#main-data-table tbody tr");
-      rows.forEach(r => {
-        r.style.display = r.textContent.toLowerCase().includes(q) ? "" : "none";
-      });
-    }
+<!-- SSR fare breakup popup - same layout as the Booking screen's Passenger
+     Fare popup. Passenger & segment details come from the live booking /
+     reschedule (read-only); only the SSR charges and their markup / service
+     fee are entered here. Opened by double-clicking an SSR row. -->
+<div class="dom-modal-backdrop spa-extra-content" id="ssr-modal">
+  <div class="dom-modal-window">
+    <div class="dom-modal-titlebar">
+      <div id="ssr-modal-title">SSR Fare Details</div>
+      <button type="button" class="dom-titlebar-btn btn-close" data-close="ssr-modal" title="Close">&times;</button>
+    </div>
+    <div class="dom-modal-body">
+      <div class="dom-modal-col-left">
+        <div class="dom-modal-section-title">Passenger &amp; Segment Details</div>
+        <div class="dom-modal-form-grid">
+          <label>Airline Category</label><div class="dom-input-readonly" id="m-airline-category">—</div>
+          <label>Ticket No</label><div class="dom-input-readonly" id="m-ticket-no">—</div>
+          <label>Pax Name</label><div class="dom-input-readonly" id="m-pax-name">—</div>
+          <label>Pax Type</label><div class="dom-input-readonly" id="m-pax-type">—</div>
+          <label>Sector</label><div class="dom-input-readonly" id="m-sector">—</div>
+          <label>Office ID</label><div class="dom-input-readonly" id="m-office-id">—</div>
+          <label>Supplier</label><div class="dom-input-readonly" id="m-supplier">—</div>
+          <label>FOP</label><div class="dom-input-readonly" id="m-fop">—</div>
+        </div>
+        <div class="dom-modal-section-title" style="margin-top:10px;">SSR Details</div>
+        <!-- One label + textbox per SSR type (dropdowns.xml "ssrTypes"),
+             filled in by page-ssr-entry.js. -->
+        <div class="dom-modal-form-grid" id="m-ssr-items"></div>
+      </div>
 
-    function exportCSV() {
-      let csv = [];
-      const rows = document.querySelectorAll("#main-data-table tr");
-      rows.forEach(row => {
-        let cols = Array.from(row.querySelectorAll("th, td")).map(td => `"${td.innerText.replace(/"/g, '""')}"`);
-        csv.push(cols.join(","));
-      });
-      const blob = new Blob([csv.join("\n")], { type: "text/csv;charset=utf-8;" });
-      const link = document.createElement("a");
-      link.href = URL.createObjectURL(blob);
-      link.download = "trans-airline-ssr.csv";
-      link.click();
-    }
-  </script>
-</body>
-</html>
+      <div class="dom-modal-col-right">
+        <div class="dom-modal-fares-card">
+          <div class="dom-modal-section-title">SSR Charges (INR)</div>
+          <div class="dom-modal-fares-grid">
+            <div class="fare-item"><label>Seat Charges</label><input class="dom-input ssr-calc dom-amount" type="text" inputmode="decimal" id="m-seat" value="0.00" /></div>
+            <div class="fare-item"><label>Meal Charges</label><input class="dom-input ssr-calc dom-amount" type="text" inputmode="decimal" id="m-meal" value="0.00" /></div>
+            <div class="fare-item"><label>Baggage</label><input class="dom-input ssr-calc dom-amount" type="text" inputmode="decimal" id="m-baggage" value="0.00" /></div>
+            <div class="fare-item"><label>Other SSR</label><input class="dom-input ssr-calc dom-amount" type="text" inputmode="decimal" id="m-other-ssr" value="0.00" /></div>
+            <div class="fare-item"><label>SSR Total</label><div class="dom-input-readonly" id="m-ssr-total">0.00</div></div>
+          </div>
+        </div>
+
+        <div class="dom-modal-accounting-row">
+          <div class="dom-modal-section-title">Customer</div>
+          <div class="dom-modal-section-title">Supplier</div>
+          <div class="dom-acct-box">
+            <div class="dom-acct-body">
+              <div class="dom-acct-field"><label>SSR Markup</label><input class="dom-input ssr-calc dom-amount" type="text" inputmode="decimal" id="m-markup" value="0.00" /></div>
+              <div class="dom-acct-field"><label>SSR Service Fee</label><input class="dom-input ssr-calc dom-amount" type="text" inputmode="decimal" id="m-service-fee" value="0.00" /></div>
+              <div class="dom-acct-field"><label>GST %</label><div class="dom-input-readonly" id="m-gst-pct" style="text-align:right; justify-content:flex-end;" title="GST % of the ledger mapped in Ledger Mapping">0.00</div></div>
+              <div class="dom-acct-field"><label>Taxable Amount</label><div class="dom-input-readonly" id="m-taxable" style="text-align:right; justify-content:flex-end;">0.00</div></div>
+              <div class="dom-acct-field"><label>GST Amount</label><div class="dom-input-readonly" id="m-gst-amt" style="text-align:right; justify-content:flex-end;">0.00</div></div>
+            </div>
+          </div>
+          <div class="dom-acct-box">
+            <div class="dom-acct-body">
+              <div class="dom-acct-field"><label>SSR Markup</label><input class="dom-input ssr-calc dom-amount" type="text" inputmode="decimal" id="m-supp-markup" value="0.00" /></div>
+              <div class="dom-acct-field"><label>SSR Service Fee</label><input class="dom-input ssr-calc dom-amount" type="text" inputmode="decimal" id="m-supp-service-fee" value="0.00" /></div>
+              <div class="dom-acct-field"><label>GST %</label><div class="dom-input-readonly" id="m-supp-gst-pct" style="text-align:right; justify-content:flex-end;" title="GST % of the ledger mapped in Ledger Mapping">0.00</div></div>
+              <div class="dom-acct-field"><label>Taxable Amount</label><div class="dom-input-readonly" id="m-supp-taxable" style="text-align:right; justify-content:flex-end;">0.00</div></div>
+              <div class="dom-acct-field"><label>GST Amount</label><div class="dom-input-readonly" id="m-supp-gst-amt" style="text-align:right; justify-content:flex-end;">0.00</div></div>
+            </div>
+            <div class="dom-acct-box-actions">
+              <button type="button" class="dom-nav-btn btn-danger" id="m-remove-btn" title="Remove this SSR line">Remove</button>
+              <button type="button" class="dom-nav-btn" data-close="ssr-modal">Cancel</button>
+              <button type="button" class="dom-nav-btn btn-primary" id="m-save-btn">Save &amp; Apply</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="dom-modal-footer">
+      <div class="dom-modal-total-bar">
+        <span>Total:</span><span>INR</span>
+        <span id="m-total" style="font-size:16px; font-weight:800; font-family:var(--font-mono);">0.00</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- J.V - the SSR Updation's Journal Voucher (ledgers from Ledger Mapping). -->
+<div class="dom-modal-backdrop spa-extra-content" id="ssr-jv-modal">
+  <div class="dom-modal-window" style="max-width:760px; width:95%; max-height:90vh;">
+    <div class="dom-modal-titlebar">
+      <div id="ssr-jv-title">Journal Voucher</div>
+      <button type="button" class="dom-titlebar-btn btn-close" data-close="ssr-jv-modal" title="Close">&times;</button>
+    </div>
+    <div class="dom-modal-body dom-modal-body-scroll" style="display:block; padding:12px; max-height:76vh;">
+      <div id="ssr-jv-meta" style="font-size:11.5px; color:#334155; margin-bottom:8px;"></div>
+      <table class="ssr-pick-table">
+        <thead><tr><th>Ledger</th><th style="text-align:right;">Debit</th><th style="text-align:right;">Credit</th></tr></thead>
+        <tbody id="ssr-jv-body"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script src="assets/js/hardcode.js?v=2"></script>
+<script src="assets/js/mock-data.js"></script>
+<script src="assets/js/api.js?v=4"></script>
+<script src="assets/js/util.js?v=3"></script>
+<script src="assets/js/shell.js?v=28"></script>
+<script src="assets/js/invoice-templates.js?v=14"></script>
+<script src="assets/js/page-ssr-entry.js?v=18"></script>
+</body></html>

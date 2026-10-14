@@ -222,6 +222,7 @@
     set("cr_alias_name", ledger.alias_name); set("cr_address_line1", ledger.address_line1); set("cr_address_line2", ledger.address_line2);
     set("cr_city", ledger.city); set("cr_pincode", ledger.pincode); set("cr_state_name", ledger.state_name);
     set("cr_gst_no", ledger.gst_no); set("cr_gst_type", ledger.gst_registration_type); set("cr_pan_no", ledger.pan_no);
+    set("cr_bill_wise", ledger.maintain_balance_bill_wise);
     set("agent_id", ledger.agent_id);
     set("tax_category", ledger.tax_category); set("tax_type", ledger.tax_type);
     if (ledger.tax_category === "GST") document.getElementById("tax-type-wrap").style.display = "block";
@@ -339,6 +340,7 @@
         gst_no: val("cr_gst_no") ? val("cr_gst_no").toUpperCase() : null,
         gst_registration_type: val("cr_gst_type"),
         pan_no: val("cr_pan_no") ? val("cr_pan_no").toUpperCase() : null,
+        maintain_balance_bill_wise: val("cr_bill_wise"),
       });
     } else if (cat === "INCOME" || cat === "EXPENSE") {
       Object.assign(payload, {
