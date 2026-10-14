@@ -164,8 +164,8 @@
     const kv = (rows) => rows.filter(([, v]) => v).map(([k, v]) => `<tr><td class="k">${esc(k)}</td><td class="v">${esc(v)}</td></tr>`).join("");
     const multi = (v) => String(v || "").split(",").map((x) => esc(x.trim())).filter(Boolean).join("<br/>");
     const paxRows = d.lines.map((l) => `<tr><td>${esc(l.pax)}</td><td class="c">${esc(l.paxType)}</td><td class="c">${esc(l.productType)}</td>
-      <td class="c">${esc(l.gdsPnr)}</td><td class="c">${esc(l.airlineName || l.airline)}</td><td class="c">${esc(l.ticketNo)}</td>
-      <td class="c">${multi(l.cls)}</td><td class="c">${multi(l.sector)}</td><td class="c">${multi(l.flight)}</td><td class="c">${multi(l.travelDate)}</td></tr>`).join("");
+      <td class="c">${esc(l.gdsPnr)}</td><td class="c nw">${esc(l.airlineName || l.airline)}</td><td class="c nw">${esc(l.ticketNo)}</td>
+      <td class="c">${multi(l.cls)}</td><td class="c nw">${multi(l.sector)}</td><td class="c">${multi(l.flight)}</td><td class="c">${multi(l.travelDate)}</td></tr>`).join("");
 
     // Fare table. Total (per line) = the billed amount before GST and TDS -
     // both are added back in the summary below, like the reference invoice.
@@ -239,6 +239,7 @@
         .grid.pax tr:last-child td { border-bottom: 1px solid #BBB; }
         .grid.fare td { border: 1px solid #BBB; }
         .grid .c { text-align: center; } .grid .r { text-align: right; }
+        .grid .nw { white-space: nowrap; }
         .grid th.l { text-align: left; }
         .grid tr.tot td { font-weight: bold; }
         .sum-wrap { display: flex; justify-content: flex-end; margin-top: 12px; }
@@ -280,7 +281,7 @@
           <tr><td class="k">IRN No :</td><td>-</td></tr>
         </table>
         <table class="grid pax">
-          <thead><tr><th class="l">Passenger Name</th><th>Passenger Type</th><th>Product Type</th><th>GDS PNR</th><th>Airline</th><th>Ticket No</th><th>Class</th><th>Sector</th><th>Travel Details</th><th>Travel Date</th></tr></thead>
+          <thead><tr><th class="l">Passenger Name</th><th>Passenger Type</th><th>Product Type</th><th>GDS PNR</th><th>Airline</th><th>Ticket No</th><th>Class</th><th>Sector</th><th>Flight No</th><th>Travel Date</th></tr></thead>
           <tbody>${paxRows}</tbody>
         </table>
         <table class="grid fare">

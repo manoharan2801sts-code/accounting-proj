@@ -557,7 +557,7 @@
                 <span id="default-disc-pct-slot">
                   <span id="modal-disc-value-field" style="display:none;">
                     <label id="modal-disc-val-label">Discount %</label>
-                    <input class="dom-input modal-calc dom-acct-input-sm dom-amount" type="text" inputmode="decimal" id="modal-disc-value" min="0" step="0.01" value="0.00" />
+                    <input class="dom-input modal-calc dom-acct-input-sm dom-amount dom-pct" type="text" inputmode="decimal" id="modal-disc-value" min="0" step="0.01" value="0.00" />
                   </span>
                 </span>
                 <label>Discount Amount</label>
@@ -623,7 +623,7 @@
               <div class="dom-acct-field dom-acct-field-dual" id="acct-default-tds-row" style="grid-template-columns: 84px 1fr 68px 1fr;">
                 <label style="white-space:normal; line-height:1.1; font-size:10px;">TDS %</label>
                 <span id="default-tdspct-slot">
-                  <input class="dom-input modal-calc dom-acct-input-sm dom-amount" type="text" inputmode="decimal" id="modal-tds-per" min="0" step="0.01" value="0.00" />
+                  <input class="dom-input modal-calc dom-acct-input-sm dom-amount dom-pct" type="text" inputmode="decimal" id="modal-tds-per" min="0" step="0.01" value="0.00" />
                 </span>
                 <label style="white-space:normal; line-height:1.1; font-size:10px;">TDS Amount</label>
                 <span id="default-tdsamt-slot">
@@ -677,7 +677,7 @@
               </div>
               <div class="dom-acct-field dom-acct-field-dual" style="display:none;">
                 <label>GST %</label>
-                <input class="dom-input modal-calc dom-acct-input-sm dom-amount" type="text" inputmode="decimal" id="modal-gst-pct" min="0" step="0.01" value="0.00" />
+                <input class="dom-input modal-calc dom-acct-input-sm dom-amount dom-pct" type="text" inputmode="decimal" id="modal-gst-pct" min="0" step="0.01" value="0.00" />
               </div>
             </div>
           </div>
@@ -691,7 +691,7 @@
                 <span id="default-supp-comm-pct-slot">
                   <span id="modal-supp-comm-value-field" style="display:contents;">
                     <label id="modal-supp-comm-val-label">Commission %</label>
-                    <input class="dom-input modal-calc dom-acct-input-sm dom-amount" type="text" inputmode="decimal" id="modal-supp-comm-value" min="0" step="0.01" value="0.00" />
+                    <input class="dom-input modal-calc dom-acct-input-sm dom-amount dom-pct" type="text" inputmode="decimal" id="modal-supp-comm-value" min="0" step="0.01" value="0.00" />
                   </span>
                 </span>
               </div>
@@ -763,7 +763,7 @@
               <div class="dom-acct-field dom-acct-field-dual" id="acct-default-supp-tds-row">
                 <label>TDS %</label>
                 <span id="default-supp-tdspct-slot">
-                  <input class="dom-input modal-calc dom-acct-input-sm dom-amount" type="text" inputmode="decimal" id="modal-supp-tds-per" min="0" step="0.01" value="0.00" />
+                  <input class="dom-input modal-calc dom-acct-input-sm dom-amount dom-pct" type="text" inputmode="decimal" id="modal-supp-tds-per" min="0" step="0.01" value="0.00" />
                 </span>
                 <label>TDS Amount</label>
                 <span id="default-supp-tdsamt-slot">
@@ -830,7 +830,7 @@
                    pattern as the Customer card's own modal-gst-pct above. -->
               <div class="dom-acct-field dom-acct-field-dual" style="display:none;">
                 <label>Supplier GST %</label>
-                <input class="dom-input modal-calc dom-acct-input-sm dom-amount" type="text" inputmode="decimal" id="modal-supp-gst-pct" min="0" step="0.01" value="0.00" />
+                <input class="dom-input modal-calc dom-acct-input-sm dom-amount dom-pct" type="text" inputmode="decimal" id="modal-supp-gst-pct" min="0" step="0.01" value="0.00" />
               </div>
             </div>
             <div class="dom-acct-box-actions">
@@ -1117,23 +1117,23 @@
       <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:8px; margin-bottom:10px;">
         <div style="display:flex; flex-direction:column; gap:2px; font-size:11px;">
           <label style="font-weight:600; color:#334155;">Invoice Number</label>
-          <input class="dom-input" type="text" id="find-invoice-number" placeholder="e.g. INV-IN-00001" />
+          <input class="dom-upper dom-input" type="text" id="find-invoice-number" placeholder="e.g. INV-IN-00001" />
         </div>
         <div style="display:flex; flex-direction:column; gap:2px; font-size:11px;">
           <label style="font-weight:600; color:#334155;">Booking Ref</label>
-          <input class="dom-input" type="text" id="find-booking-ref" placeholder="e.g. BREF-IN-00001" />
+          <input class="dom-upper dom-input" type="text" id="find-booking-ref" placeholder="e.g. BREF-IN-00001" />
         </div>
         <div style="display:flex; flex-direction:column; gap:2px; font-size:11px;">
           <label style="font-weight:600; color:#334155;">Airline PNR</label>
-          <input class="dom-input" type="text" id="find-airline-pnr" placeholder="e.g. X1234" />
+          <input class="dom-upper dom-input" type="text" id="find-airline-pnr" placeholder="e.g. X1234" />
         </div>
         <div style="display:flex; flex-direction:column; gap:2px; font-size:11px;">
           <label style="font-weight:600; color:#334155;">GDS PNR</label>
-          <input class="dom-input" type="text" id="find-gds-pnr" placeholder="e.g. GDSX1234" />
+          <input class="dom-upper dom-input" type="text" id="find-gds-pnr" placeholder="e.g. GDSX1234" />
         </div>
         <div style="display:flex; flex-direction:column; gap:2px; font-size:11px;">
           <label style="font-weight:600; color:#334155;">Ticket No</label>
-          <input class="dom-input" type="text" id="find-ticket-no" placeholder="e.g. F4KHTD-1" />
+          <input class="dom-upper dom-input" type="text" id="find-ticket-no" placeholder="e.g. F4KHTD-1" />
         </div>
         <div style="display:flex; flex-direction:column; gap:2px; font-size:11px;">
           <label style="font-weight:600; color:#334155;">Customer Name</label>
@@ -1141,7 +1141,7 @@
         </div>
         <div style="display:flex; flex-direction:column; gap:2px; font-size:11px;">
           <label style="font-weight:600; color:#334155;">Airline Code</label>
-          <input class="dom-input" type="text" id="find-airline-code" placeholder="e.g. 6E" />
+          <input class="dom-upper dom-input" type="text" id="find-airline-code" placeholder="e.g. 6E" />
         </div>
         <div aria-hidden="true"></div>
         <div style="display:flex; flex-direction:column; gap:2px; font-size:11px;">
@@ -1211,23 +1211,23 @@
       <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:8px; margin-bottom:10px;">
         <div style="display:flex; flex-direction:column; gap:2px; font-size:11px;">
           <label style="font-weight:600; color:#334155;">Invoice Number</label>
-          <input class="dom-input" type="text" id="rs-f-invoice-number" placeholder="e.g. INV-IN-00001" autocomplete="off" />
+          <input class="dom-upper dom-input" type="text" id="rs-f-invoice-number" placeholder="e.g. INV-IN-00001" autocomplete="off" />
         </div>
         <div style="display:flex; flex-direction:column; gap:2px; font-size:11px;">
           <label style="font-weight:600; color:#334155;">S PNR / Booking Ref</label>
-          <input class="dom-input" type="text" id="rs-search-spnr" placeholder="Booking Reference" autocomplete="off" />
+          <input class="dom-upper dom-input" type="text" id="rs-search-spnr" placeholder="Booking Reference" autocomplete="off" />
         </div>
         <div style="display:flex; flex-direction:column; gap:2px; font-size:11px;">
           <label style="font-weight:600; color:#334155;">Airline PNR</label>
-          <input class="dom-input" type="text" id="rs-search-airline-pnr" placeholder="Airline PNR" autocomplete="off" />
+          <input class="dom-upper dom-input" type="text" id="rs-search-airline-pnr" placeholder="Airline PNR" autocomplete="off" />
         </div>
         <div style="display:flex; flex-direction:column; gap:2px; font-size:11px;">
           <label style="font-weight:600; color:#334155;">GDS PNR</label>
-          <input class="dom-input" type="text" id="rs-f-gds-pnr" placeholder="e.g. GDSX1234" autocomplete="off" />
+          <input class="dom-upper dom-input" type="text" id="rs-f-gds-pnr" placeholder="e.g. GDSX1234" autocomplete="off" />
         </div>
         <div style="display:flex; flex-direction:column; gap:2px; font-size:11px;">
           <label style="font-weight:600; color:#334155;">Ticket No</label>
-          <input class="dom-input" type="text" id="rs-search-ticket-no" placeholder="Ticket No" autocomplete="off" />
+          <input class="dom-upper dom-input" type="text" id="rs-search-ticket-no" placeholder="Ticket No" autocomplete="off" />
         </div>
         <div style="display:flex; flex-direction:column; gap:2px; font-size:11px;">
           <label style="font-weight:600; color:#334155;">Customer Name</label>
@@ -1235,7 +1235,7 @@
         </div>
         <div style="display:flex; flex-direction:column; gap:2px; font-size:11px;">
           <label style="font-weight:600; color:#334155;">Airline Code</label>
-          <input class="dom-input" type="text" id="rs-f-airline-code" placeholder="e.g. 6E" autocomplete="off" />
+          <input class="dom-upper dom-input" type="text" id="rs-f-airline-code" placeholder="e.g. 6E" autocomplete="off" />
         </div>
         <div aria-hidden="true"></div>
         <div style="display:flex; flex-direction:column; gap:2px; font-size:11px;">
@@ -1293,7 +1293,7 @@
             <table style="width:100%; border-collapse:collapse; font-size:11.5px;">
               <thead>
                 <tr style="background:#3B6DB5; color:#FFFFFF; font-weight:700; text-align:left; height:26px;">
-                  <th style="width:30px; position:sticky; top:0; background:#3B6DB5;"></th>
+                  <th style="width:30px; padding:4px 8px; position:sticky; top:0; background:#3B6DB5;"><input type="checkbox" id="rs-pax-check-all" title="Select all passengers" /></th>
                   <th style="padding:4px 8px; position:sticky; top:0; background:#3B6DB5;">Pax Type</th>
                   <th style="padding:4px 8px; position:sticky; top:0; background:#3B6DB5;">Pax Name</th>
                 </tr>
@@ -1308,7 +1308,7 @@
             <table style="width:100%; border-collapse:collapse; font-size:11.5px;">
               <thead>
                 <tr style="background:#3B6DB5; color:#FFFFFF; font-weight:700; text-align:left; height:26px;">
-                  <th style="width:30px; position:sticky; top:0; background:#3B6DB5;"></th>
+                  <th style="width:30px; padding:4px 8px; position:sticky; top:0; background:#3B6DB5;"><input type="checkbox" id="rs-sector-check-all" title="Select all sectors" /></th>
                   <th style="padding:4px 8px; position:sticky; top:0; background:#3B6DB5;">Sector</th>
                   <th style="padding:4px 8px; position:sticky; top:0; background:#3B6DB5;">Flight No</th>
                   <th style="padding:4px 8px; position:sticky; top:0; background:#3B6DB5;">Class</th>
@@ -1354,23 +1354,23 @@
       <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:8px; margin-bottom:10px;">
         <div style="display:flex; flex-direction:column; gap:2px; font-size:11px;">
           <label style="font-weight:600; color:#334155;">Invoice Number</label>
-          <input class="dom-input" type="text" id="cx-f-invoice-number" placeholder="e.g. INV-IN-00001" autocomplete="off" />
+          <input class="dom-upper dom-input" type="text" id="cx-f-invoice-number" placeholder="e.g. INV-IN-00001" autocomplete="off" />
         </div>
         <div style="display:flex; flex-direction:column; gap:2px; font-size:11px;">
           <label style="font-weight:600; color:#334155;">S PNR / Booking Ref</label>
-          <input class="dom-input" type="text" id="cx-search-spnr" placeholder="Booking Reference" autocomplete="off" />
+          <input class="dom-upper dom-input" type="text" id="cx-search-spnr" placeholder="Booking Reference" autocomplete="off" />
         </div>
         <div style="display:flex; flex-direction:column; gap:2px; font-size:11px;">
           <label style="font-weight:600; color:#334155;">Airline PNR</label>
-          <input class="dom-input" type="text" id="cx-search-airline-pnr" placeholder="Airline PNR" autocomplete="off" />
+          <input class="dom-upper dom-input" type="text" id="cx-search-airline-pnr" placeholder="Airline PNR" autocomplete="off" />
         </div>
         <div style="display:flex; flex-direction:column; gap:2px; font-size:11px;">
           <label style="font-weight:600; color:#334155;">GDS PNR</label>
-          <input class="dom-input" type="text" id="cx-f-gds-pnr" placeholder="e.g. GDSX1234" autocomplete="off" />
+          <input class="dom-upper dom-input" type="text" id="cx-f-gds-pnr" placeholder="e.g. GDSX1234" autocomplete="off" />
         </div>
         <div style="display:flex; flex-direction:column; gap:2px; font-size:11px;">
           <label style="font-weight:600; color:#334155;">Ticket No</label>
-          <input class="dom-input" type="text" id="cx-search-ticket-no" placeholder="Ticket No" autocomplete="off" />
+          <input class="dom-upper dom-input" type="text" id="cx-search-ticket-no" placeholder="Ticket No" autocomplete="off" />
         </div>
         <div style="display:flex; flex-direction:column; gap:2px; font-size:11px;">
           <label style="font-weight:600; color:#334155;">Customer Name</label>
@@ -1378,7 +1378,7 @@
         </div>
         <div style="display:flex; flex-direction:column; gap:2px; font-size:11px;">
           <label style="font-weight:600; color:#334155;">Airline Code</label>
-          <input class="dom-input" type="text" id="cx-f-airline-code" placeholder="e.g. 6E" autocomplete="off" />
+          <input class="dom-upper dom-input" type="text" id="cx-f-airline-code" placeholder="e.g. 6E" autocomplete="off" />
         </div>
         <div aria-hidden="true"></div>
         <div style="display:flex; flex-direction:column; gap:2px; font-size:11px;">
@@ -1478,9 +1478,9 @@
 <script src="assets/js/mock-data.js"></script>
 <script src="assets/js/loader.js?v=5"></script>
 <script src="assets/js/api.js?v=4"></script>
-<script src="assets/js/util.js?v=3"></script>
-<script src="assets/js/shell.js?v=28"></script>
+<script src="assets/js/util.js?v=5"></script>
+<script src="assets/js/shell.js?v=29"></script>
 <script src="assets/js/entry-common.js"></script>
-<script src="assets/js/invoice-templates.js?v=14"></script>
-<script src="assets/js/page-ticket-entry.js?v=138"></script>
+<script src="assets/js/invoice-templates.js?v=15"></script>
+<script src="assets/js/page-ticket-entry.js?v=144"></script>
 </body></html>

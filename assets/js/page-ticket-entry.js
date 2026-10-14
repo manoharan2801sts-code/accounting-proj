@@ -1019,6 +1019,7 @@
         chain_ssr_markup: passengers[editingIndex].chain_ssr_markup,
         chain_supp_markup: passengers[editingIndex].chain_supp_markup,
         chain_supp_addl_markup: passengers[editingIndex].chain_supp_addl_markup,
+        chain_supp_ssr_markup: passengers[editingIndex].chain_supp_ssr_markup,
         cust_markup_reversal_checked: passengers[editingIndex].cust_markup_reversal_checked,
         supp_markup_reversal_checked: passengers[editingIndex].supp_markup_reversal_checked,
         // Booking/Reschedule chain SSR amounts - what each "Return ..." SSR
@@ -1143,6 +1144,7 @@
     supplier: [
       { key: "supp_markup", label: "Supplier Markup", amountField: "chain_supp_markup" },
       { key: "supp_addl_markup", label: "Supplier Additional Markup", amountField: "chain_supp_addl_markup" },
+      { key: "supp_ssr_markup", label: "Supplier SSR Markup", amountField: "chain_supp_ssr_markup" },
     ],
   };
   const markupReversalCheckedKey = (side) => (side === "customer" ? "cust_markup_reversal_checked" : "supp_markup_reversal_checked");
@@ -1176,6 +1178,7 @@
       cust_ssr_markup_reversal: custChecked.ssr_markup ? (p.chain_ssr_markup || 0) : 0,
       supp_markup_reversal: suppChecked.supp_markup ? (p.chain_supp_markup || 0) : 0,
       supp_addl_markup_reversal: suppChecked.supp_addl_markup ? (p.chain_supp_addl_markup || 0) : 0,
+      supp_ssr_markup_reversal: suppChecked.supp_ssr_markup ? (p.chain_supp_ssr_markup || 0) : 0,
     };
   }
 
@@ -1466,6 +1469,10 @@
   // inside it: the sector label + its Flight No/Class/Travel Date as
   // disabled text boxes (same data as the Add Sector popup, just surfaced
   // here so it's visible without reopening it).
+  // Sector chips / Add Sector / the Sector popup are view-only while the
+  // ticket is just being viewed, and always in Cancellation (a cancelled
+  // passenger's segments come from the picked ticket, never edited).
+  function sectorReadOnly() { return viewMode || cancellationMode; }
   function renderSectorDetails() {
     const box = document.getElementById("modal-sector-details");
     if (rescheduleMode) {
@@ -1483,7 +1490,7 @@
       box.style.visibility = "visible";
     }
     box.innerHTML = modalSectors.map((s, i) => `
-      <div class="dom-sector-detail-row" data-idx="${i}" style="cursor:pointer;" title="${viewMode ? "Click to view this sector" : "Click to view/edit this sector"}">
+      <div class="dom-sector-detail-row" data-idx="${i}" style="cursor:pointer;" title="${sectorReadOnly() ? "Click to view this sector" : "Click to view/edit this sector"}">
         <span class="dom-sector-detail-head">${s.from}-${s.to}</span>
         <input class="dom-input dsd-flight" value="${s.flightNo || ""}" disabled placeholder="Flight No" />
         <input class="dom-input dsd-class" value="${s.cls || ""}" disabled placeholder="Class" />
@@ -1502,9 +1509,9 @@
       return;
     }
     box.innerHTML = modalSectors.map((s, i) => `
-      <span class="dom-sector-chip" data-idx="${i}" style="cursor:pointer;" title="${viewMode ? "Click to view this sector" : "Click to view/edit this sector"}">
+      <span class="dom-sector-chip" data-idx="${i}" style="cursor:pointer;" title="${sectorReadOnly() ? "Click to view this sector" : "Click to view/edit this sector"}">
         <span class="dom-sector-chip-label">${s.from}-${s.to}</span>
-        ${viewMode ? "" : `<button type="button" class="dom-chip-remove" data-idx="${i}" title="Remove">&times;</button>`}
+        ${sectorReadOnly() ? "" : `<button type="button" class="dom-chip-remove" data-idx="${i}" title="Remove">&times;</button>`}
       </span>`).join("");
     box.querySelectorAll(".dom-sector-chip").forEach((chip) => {
       chip.addEventListener("click", (e) => {
@@ -1547,14 +1554,14 @@
     // clicking a sector chip/detail row here should just let the user see
     // its full breakdown, never let them change it outside Edit mode.
     ["sector-from", "sector-to", "sector-airline-code", "sector-airline-name", "sector-flight-no", "sector-class", "sector-cabin", "sector-fare-type"]
-      .forEach((id) => { document.getElementById(id).disabled = viewMode; });
-    document.getElementById("sector-travel-date").querySelector(".dg-native").disabled = viewMode;
-    document.getElementById("sector-modal-title").textContent = viewMode ? "Sector Details" : (index === null ? "Add Sector" : "Edit Sector");
-    document.getElementById("sector-save-btn").style.display = viewMode ? "none" : "";
-    document.getElementById("sector-cancel-btn").textContent = viewMode ? "Close" : "Cancel";
+      .forEach((id) => { document.getElementById(id).disabled = sectorReadOnly(); });
+    document.getElementById("sector-travel-date").querySelector(".dg-native").disabled = sectorReadOnly();
+    document.getElementById("sector-modal-title").textContent = sectorReadOnly() ? "Sector Details" : (index === null ? "Add Sector" : "Edit Sector");
+    document.getElementById("sector-save-btn").style.display = sectorReadOnly() ? "none" : "";
+    document.getElementById("sector-cancel-btn").textContent = sectorReadOnly() ? "Close" : "Cancel";
 
     sectorModal.classList.add("open");
-    if (!viewMode) setTimeout(() => document.getElementById("sector-from").focus(), 50);
+    if (!sectorReadOnly()) setTimeout(() => document.getElementById("sector-from").focus(), 50);
   }
   function closeSectorModal() { sectorModal.classList.remove("open"); editingSectorIndex = null; }
   // Auto-fill the other field once the typed value exactly matches a
@@ -1571,11 +1578,11 @@
     if (match) document.getElementById("sector-airline-code").value = match.code;
   });
   document.getElementById("modal-sector-box").addEventListener("click", (e) => {
-    if (viewMode) return;
+    if (sectorReadOnly()) return;
     if (e.target.closest(".dom-sector-chip") || e.target.closest("#modal-sector-add-btn")) return;
     openSectorModal(null);
   });
-  document.getElementById("modal-sector-add-btn").addEventListener("click", () => { if (!viewMode) openSectorModal(null); });
+  document.getElementById("modal-sector-add-btn").addEventListener("click", () => { if (!sectorReadOnly()) openSectorModal(null); });
   document.getElementById("sector-close-x-btn").addEventListener("click", closeSectorModal);
   document.getElementById("sector-cancel-btn").addEventListener("click", closeSectorModal);
   // Origin/Destination's CSS text-transform:uppercase is visual only - the
@@ -1761,7 +1768,7 @@
     if (rescheduleMode) showSuppSsrFields();
     writeModalPassenger(isNew ? newPaxDefaults : passengers[index]);
     document.getElementById("modal-save-btn").style.display = viewMode ? "none" : "";
-    document.getElementById("modal-sector-add-btn").style.display = viewMode ? "none" : "";
+    document.getElementById("modal-sector-add-btn").style.display = sectorReadOnly() ? "none" : "";
     // Reschedule's tab bar replaces the plain titlebar entirely (it carries
     // its own close X) rather than sitting awkwardly under it.
     document.querySelector("#fare-breakdown-modal .dom-modal-titlebar").style.display = rescheduleMode ? "none" : "";
@@ -1781,6 +1788,13 @@
       layoutAcctFieldsForReschedule(true);
       document.getElementById("modal-fare-supplier-penalty-field").style.display = "";
       setupCxSsrReturn(isNew ? null : passengers[index]);
+      // Passenger & Segment Details are view-only in Cancellation - they
+      // describe the passenger being cancelled, straight from the picked
+      // ticket (sectors too - see sectorReadOnly).
+      ["modal-airline-category", "modal-ticket-no", "modal-pax-name", "modal-pax-type",
+        "modal-office-id", "modal-supplier", "modal-fop", "modal-card-number"].forEach((id) => {
+        document.getElementById(id).disabled = true;
+      });
       document.getElementById("modal-reschedule-penalty-label").textContent = "Penalty Amount";
       // Customer Discount and Supplier Commission (incl. both their own
       // TDS) are auto-fetched from the booking/reschedule chain and stay
@@ -3793,6 +3807,7 @@
               // themselves are reset to 0 below, same as a fresh entry.
               chain_markup: tot.markup, chain_addl_markup: tot.addl_markup, chain_ssr_markup: tot.ssr_markup,
               chain_supp_markup: tot.supp_markup, chain_supp_addl_markup: tot.supp_addl_markup,
+              chain_supp_ssr_markup: tot.supp_ssr_markup || 0,
               chain_payment_gateway: !!tot.chain_payment_gateway,
             };
           });
@@ -3961,6 +3976,10 @@
     cancellationMode = true;
     viewMode = true;
     cxEditSavedCancellationId = ct.id;
+    // Summary grid's Markup Reversal column - opening a saved cancellation
+    // doesn't go through enterBlankCancellationShell, which is where a new
+    // cancellation shows it, so it has to be shown here too.
+    document.querySelectorAll(".cx-summary-col").forEach((el) => { el.style.display = ""; });
     const extraPaxSuffix = ct.lines.length > 1 ? ` +${ct.lines.length - 1} more` : "";
     document.getElementById("page-title").textContent =
       `View Cancellation - ${ct.lines[0]?.ticket_no || ct.invoice_number} (${ct.lines[0]?.passenger_name || ""})${extraPaxSuffix}`;
@@ -3995,6 +4014,7 @@
       const saved = {
         markup: l.cust_markup_reversal || 0, addl_markup: l.cust_addl_markup_reversal || 0, ssr_markup: l.cust_ssr_markup_reversal || 0,
         supp_markup: l.supp_markup_reversal || 0, supp_addl_markup: l.supp_addl_markup_reversal || 0,
+        supp_ssr_markup: l.supp_ssr_markup_reversal || 0,
       };
       return {
         ...blankPassenger(), ...l,
@@ -4003,10 +4023,11 @@
         chain_ssr_markup: l.chain_ssr_markup != null ? l.chain_ssr_markup : saved.ssr_markup,
         chain_supp_markup: l.chain_supp_markup != null ? l.chain_supp_markup : saved.supp_markup,
         chain_supp_addl_markup: l.chain_supp_addl_markup != null ? l.chain_supp_addl_markup : saved.supp_addl_markup,
+        chain_supp_ssr_markup: l.chain_supp_ssr_markup != null ? l.chain_supp_ssr_markup : saved.supp_ssr_markup,
         cust_markup_reversal_checked: { markup: saved.markup > 0, addl_markup: saved.addl_markup > 0, ssr_markup: saved.ssr_markup > 0 },
-        supp_markup_reversal_checked: { supp_markup: saved.supp_markup > 0, supp_addl_markup: saved.supp_addl_markup > 0 },
+        supp_markup_reversal_checked: { supp_markup: saved.supp_markup > 0, supp_addl_markup: saved.supp_addl_markup > 0, supp_ssr_markup: saved.supp_ssr_markup > 0 },
         cust_markup_reversal: saved.markup + saved.addl_markup + saved.ssr_markup,
-        supp_markup_reversal: saved.supp_markup + saved.supp_addl_markup,
+        supp_markup_reversal: saved.supp_markup + saved.supp_addl_markup + saved.supp_ssr_markup,
       };
     });
     if (!passengers.length) passengers = [blankPassenger()];
@@ -4166,7 +4187,24 @@
     const anyPax = document.querySelectorAll(".rs-pax-check:checked").length > 0;
     const anySector = document.querySelectorAll(".rs-sector-check:checked").length > 0;
     document.getElementById("rs-reschedule-btn").disabled = !(anyPax && anySector);
+    // Each header "select all" box mirrors its own list's rows: ticked only
+    // when every row is ticked, half-ticked when only some are.
+    [["rs-pax-check-all", ".rs-pax-check"], ["rs-sector-check-all", ".rs-sector-check"]].forEach(([boxId, rowSel]) => {
+      const total = document.querySelectorAll(rowSel).length;
+      const checked = document.querySelectorAll(`${rowSel}:checked`).length;
+      const allBox = document.getElementById(boxId);
+      allBox.checked = total > 0 && checked === total;
+      allBox.indeterminate = checked > 0 && checked < total;
+    });
   }
+  // Selects (or clears) every row of its own list only - Passengers'
+  // box never touches Sectors, and vice versa.
+  [["rs-pax-check-all", ".rs-pax-check"], ["rs-sector-check-all", ".rs-sector-check"]].forEach(([boxId, rowSel]) => {
+    document.getElementById(boxId).addEventListener("change", (e) => {
+      document.querySelectorAll(rowSel).forEach((cb) => { cb.checked = e.target.checked; });
+      updateRsRescheduleButtonState();
+    });
+  });
   document.getElementById("rs-reschedule-btn").addEventListener("click", () => {
     const checkedPax = Array.from(document.querySelectorAll(".rs-pax-check:checked"))
       .map((cb) => rsLookupPassengers[Number(cb.dataset.idx)]);
@@ -4206,6 +4244,7 @@
       supp_comm_value: l.supp_comm_value, supp_tds_per: l.supp_tds_per,
       supp_markup: l.supp_markup || 0, supp_addl_markup: l.supp_addl_markup || 0,
       supp_service_fee: l.supp_service_fee || 0, supp_addl_service_fee: l.supp_addl_service_fee || 0,
+      supp_ssr_markup: l.supp_ssr_markup || 0, supp_ssr_service_fee: l.supp_ssr_service_fee || 0,
       supp_gst_pct: l.supp_gst_pct || 0,
       // Only ever non-zero once the cumulative chain fetch in
       // enterRescheduleMode/enterSavedRescheduleMode below has replaced

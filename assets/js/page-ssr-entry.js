@@ -7,7 +7,13 @@
   // the Supplier SSR Markup / Supplier SSR Service Fee fields).
   const API = "http://localhost:8000/api/";
   const n = (v) => Number(String(v || "").replace(/,/g, "")) || 0;
-  const f2 = (v) => n(v).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  // Money amounts follow Company Master's "No. of Decimals" (same as the
+  // ticket screen's fmtN) - f2 for display, fmtN for amount input boxes.
+  // Percentages (GST %) stay at 2 decimals.
+  const dp = () => VoyagerUtil.getDecimalPlaces();
+  const f2 = (v) => n(v).toLocaleString("en-IN", { minimumFractionDigits: dp(), maximumFractionDigits: dp() });
+  const fmtN = (v) => n(v).toFixed(dp());
+  const pct = (v) => n(v).toFixed(2);
   const $ = (id) => document.getElementById(id);
   const esc = (v) => String(v == null ? "" : v).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
   const savedId = new URLSearchParams(window.location.search).get("ssr_saved_id");
@@ -29,6 +35,7 @@
 
   const active = await VoyagerShell.init({ activeKey: "trans-airline-ssr" });
   activeCompanyId = Number(active && active.id) || 1;
+  await VoyagerUtil.loadDecimalPlaces(activeCompanyId);
   $("ssr-user-name-options").innerHTML = window.VoyagerHardcode.dropdownValues("userNames").map((v) => `<option value="${esc(v)}">`).join("");
 
   // ---------- Ledger Mapping: GST % + which fields have a ledger ----------
@@ -44,6 +51,22 @@
   } catch (_) { mapped = new Set(); gstPct = {}; }
   const custGstPct = () => gstPct[FIELD.service_fee] || 0;
   const suppGstPct = () => gstPct[FIELD.supp_service_fee] || 0;
+
+  // ---------- Payment Mode -> Gateway Ref (same as the Booking screen) ----------
+  // Gateway Ref lists PG Master's active gateways and is only enabled (and
+  // only saved) when Payment Mode is Payment Gateway.
+  try {
+    const res = await fetch(`${API}pg-master/?company_id=${activeCompanyId}`);
+    const gateways = (res.ok ? await res.json() : []).filter((g) => g.is_active).map((g) => g.gateway_name);
+    $("payment_gateway_ref").innerHTML = `<option value="">Select...</option>` +
+      gateways.map((g) => `<option value="${esc(g)}">${esc(g)}</option>`).join("");
+  } catch (_) { /* leave just "Select..." */ }
+  function syncGatewayRef() {
+    const isGateway = $("payment_mode").value === "Payment Gateway";
+    if (!isGateway) $("payment_gateway_ref").value = "";
+    $("payment_gateway_ref").disabled = viewMode || !isGateway;
+  }
+  $("payment_mode").addEventListener("change", syncGatewayRef);
 
   // ---------- Invoice Type + numbering (same rules as the Booking screen) ----------
   try {
@@ -66,23 +89,28 @@
   });
 
   // ---------- SSR lines grid + summary ----------
-  // Customer: SSR charges + SSR Markup + SSR Service Fee + GST on the fee.
-  // Supplier: SSR charges + SSR Markup + SSR Service Fee + GST on the fee.
+  // Total (what the customer pays) = SSR charges + Customer SSR Markup +
+  // Customer SSR Service Fee + its GST + Supplier SSR Markup + Supplier SSR
+  // Service Fee + its GST - same convention as a Booking's Total.
+  // Purchase (what the supplier is owed) = SSR charges + Supplier SSR
+  // Markup + Supplier SSR Service Fee + its GST.
   // Earnings = Sales - Purchase. Same formula as views._ssr_line_amounts.
   function lineTotals(l) {
     const ssr = n(l.seat) + n(l.meal) + n(l.baggage) + n(l.other_ssr);
     const gst = n(l.service_fee) * custGstPct() / 100;
     const suppGst = n(l.supp_service_fee) * suppGstPct() / 100;
+    const purchase = ssr + n(l.supp_markup) + n(l.supp_service_fee) + suppGst;
     return {
-      ssr, gst, suppGst,
-      total: ssr + n(l.markup) + n(l.service_fee) + gst,
-      purchase: ssr + n(l.supp_markup) + n(l.supp_service_fee) + suppGst,
+      ssr, gst, suppGst, purchase,
+      total: purchase + n(l.markup) + n(l.service_fee) + gst,
     };
   }
   function ssrSummary(l) {
     return Object.entries(l.ssr_items || {}).filter(([, v]) => v).map(([k, v]) => `${k}: ${v}`).join(", ");
   }
 
+  // Grid Markup / Service Fee / GST columns = customer + supplier SSR
+  // figures (the customer is billed both - see lineTotals).
   function render() {
     $("ssr-lines").innerHTML = lines.length
       ? lines.map((l, i) => {
@@ -91,7 +119,8 @@
             <td style="text-align:center;">${i + 1}</td><td>${esc(l.ticket_no) || "-"}</td><td>${esc(l.pax_name) || "-"}</td>
             <td>${esc(l.sector) || "-"}</td><td>${esc(ssrSummary(l)) || "-"}</td>
             <td class="num">${f2(l.seat)}</td><td class="num">${f2(l.meal)}</td><td class="num">${f2(l.baggage)}</td><td class="num">${f2(l.other_ssr)}</td>
-            <td class="num">${f2(l.markup)}</td><td class="num">${f2(l.service_fee)}</td><td class="num">${f2(t.gst)}</td>
+            <td class="num">${f2(n(l.markup) + n(l.supp_markup))}</td><td class="num">${f2(n(l.service_fee) + n(l.supp_service_fee))}</td>
+            <td class="num">${f2(t.gst + t.suppGst)}</td>
             <td class="num" style="font-weight:700;">${f2(t.total)}</td>
           </tr>`;
         }).join("")
@@ -99,8 +128,13 @@
 
     const sum = (fn) => lines.reduce((s, l) => s + fn(l), 0);
     const ssr = sum((l) => lineTotals(l).ssr);
-    const sc = { markup: sum((l) => n(l.markup)), sfee: sum((l) => n(l.service_fee)), gst: sum((l) => lineTotals(l).gst) };
     const pc = { markup: sum((l) => n(l.supp_markup)), sfee: sum((l) => n(l.supp_service_fee)), gst: sum((l) => lineTotals(l).suppGst) };
+    // Sales Cost's Markup / Service Fee / GST fold in the supplier side too
+    // (the customer is billed both), same as the ticket screen's summary.
+    const sc = {
+      markup: sum((l) => n(l.markup)) + pc.markup, sfee: sum((l) => n(l.service_fee)) + pc.sfee,
+      gst: sum((l) => lineTotals(l).gst) + pc.gst,
+    };
     const salesTotal = ssr + sc.markup + sc.sfee + sc.gst, purchaseTotal = ssr + pc.markup + pc.sfee + pc.gst;
     $("pc-ssr").textContent = f2(ssr); $("pc-markup").textContent = f2(pc.markup); $("pc-sfee").textContent = f2(pc.sfee);
     $("pc-gst").textContent = f2(pc.gst); $("pc-total").textContent = f2(purchaseTotal);
@@ -125,23 +159,29 @@
   const INFO_FIELDS = { airline_category: "m-airline-category", ticket_no: "m-ticket-no", pax_name: "m-pax-name",
     pax_type: "m-pax-type", sector: "m-sector", office_id: "m-office-id", supplier: "m-supplier", fop: "m-fop" };
   const SSR_TYPES = window.VoyagerHardcode.dropdownValues("ssrTypes");
-  $("m-ssr-items").innerHTML = SSR_TYPES.map((t, i) =>
-    `<label>${esc(t)}</label><input class="dom-input m-ssr-item" data-type="${esc(t)}" id="m-ssr-item-${i}" maxlength="60" placeholder="Code / item" />`).join("");
+  // One row per SSR type: SSR Ticket Number + SSR detail text.
+  $("m-ssr-items").innerHTML = `<span></span><span class="m-ssr-head">SSR Ticket No</span><span class="m-ssr-head">SSR Details</span>` +
+    SSR_TYPES.map((t, i) =>
+      `<label>${esc(t)}</label>` +
+      `<input class="dom-input m-ssr-tkt" data-type="${esc(t)}" id="m-ssr-tkt-${i}" maxlength="30" placeholder="Ticket number" />` +
+      `<input class="dom-input m-ssr-item" data-type="${esc(t)}" id="m-ssr-item-${i}" maxlength="60" placeholder="Code / item" />`).join("");
   function readModal() {
-    const l = { ssr_items: {} };
+    const l = { ssr_items: {}, ssr_ticket_numbers: {} };
     Object.entries(EDIT_FIELDS).forEach(([k, id]) => { l[k] = n($(id).value); });
     document.querySelectorAll(".m-ssr-item").forEach((el) => { if (el.value.trim()) l.ssr_items[el.dataset.type] = el.value.trim(); });
+    document.querySelectorAll(".m-ssr-tkt").forEach((el) => { if (el.value.trim()) l.ssr_ticket_numbers[el.dataset.type] = el.value.trim(); });
     return l;
   }
   function recalcModal() {
     const l = readModal();
     const t = lineTotals(l);
     $("m-ssr-total").textContent = f2(t.ssr);
-    $("m-gst-pct").textContent = f2(custGstPct()); $("m-supp-gst-pct").textContent = f2(suppGstPct());
+    $("m-gst-pct").textContent = pct(custGstPct()); $("m-supp-gst-pct").textContent = pct(suppGstPct());
     $("m-taxable").textContent = f2(l.service_fee); $("m-gst-amt").textContent = f2(t.gst);
     $("m-supp-taxable").textContent = f2(l.supp_service_fee); $("m-supp-gst-amt").textContent = f2(t.suppGst);
     $("m-total").textContent = f2(t.total);
   }
+  // (Leaving a box formats it to the company's decimals - shared, util.js.)
   document.querySelectorAll(".ssr-calc").forEach((el) => el.addEventListener("input", recalcModal));
   // Same rule as the Booking screen: a markup / service fee can't hold an
   // amount until its ledger is set in Ledger Mapping.
@@ -149,17 +189,29 @@
   Object.entries({ markup: "m-markup", service_fee: "m-service-fee", supp_markup: "m-supp-markup", supp_service_fee: "m-supp-service-fee" })
     .forEach(([k, id]) => $(id).addEventListener("input", (e) => {
       if (mapped.has(FIELD[k]) || n(e.target.value) === 0) return;
-      e.target.value = "0.00";
+      e.target.value = fmtN(0);
       if (!guardWarned.has(id)) { guardWarned.add(id); voyagerAlert(`Required Ledger account is not mapped ("${FIELD[k]}" in Ledger Mapping).`); }
       recalcModal();
     }));
 
+  // A line nothing has been entered on yet (no SSR detail, every amount 0).
+  const isBlankLine = (l) => !ssrSummary(l) && Object.keys(EDIT_FIELDS).every((k) => !n(l[k]));
   function openLine(idx) {
     editing = idx;
     const l = lines[idx];
     Object.entries(INFO_FIELDS).forEach(([k, id]) => { $(id).textContent = l[k] || "—"; });
-    Object.entries(EDIT_FIELDS).forEach(([k, id]) => { $(id).value = n(l[k]).toFixed(2); });
-    document.querySelectorAll(".m-ssr-item").forEach((el) => { el.value = (l.ssr_items || {})[el.dataset.type] || ""; });
+    // Same as the ticket screen: a blank line's fare figures AND SSR details
+    // auto-fill from the FIRST already-entered line of the same Pax Type
+    // (Adult from the 1st Adult, Child from the 1st Child). SSR Ticket
+    // Numbers are not copied - each passenger's SSR ticket is their own.
+    // Not saved until Save & Apply.
+    const template = !viewMode && isBlankLine(l)
+      ? lines.find((o, i) => i !== idx && o.pax_type === l.pax_type && !isBlankLine(o))
+      : null;
+    const src = template || l;
+    Object.entries(EDIT_FIELDS).forEach(([k, id]) => { $(id).value = fmtN(src[k]); });
+    document.querySelectorAll(".m-ssr-item").forEach((el) => { el.value = (src.ssr_items || {})[el.dataset.type] || ""; });
+    document.querySelectorAll(".m-ssr-tkt").forEach((el) => { el.value = (l.ssr_ticket_numbers || {})[el.dataset.type] || ""; });
     document.querySelectorAll("#ssr-modal input").forEach((el) => { el.disabled = viewMode; });
     $("m-save-btn").style.display = viewMode ? "none" : "";
     $("m-remove-btn").style.display = viewMode ? "none" : "";
@@ -169,7 +221,7 @@
   }
   $("m-save-btn").addEventListener("click", () => {
     const l = readModal();
-    if (!Object.keys(l.ssr_items).length) { voyagerAlert("Enter at least one SSR detail (Extra Baggage, Meal, Seat...)."); return; }
+    if (!Object.keys(l.ssr_items).length) { voyagerAlert("Enter at least one SSR detail (Baggage, Meal, Seat...)."); return; }
     lines[editing] = { ...lines[editing], ...l };
     close("ssr-modal"); render();
   });
@@ -335,8 +387,8 @@
     source = { ticketId: lookupData.ticket_id, rescheduleId: rid || null, customer: t.customer_name || "" };
     // Invoice Type follows the picked Booking / Reschedule's own type, and
     // its change handler fills Invoice Number with that type's last number + 1.
-    // SSR Reference defaults to the picked ticket's own Booking Reference
-    // (still editable), same as Cancellation's reference.
+    // SSR Reference is the picked ticket's own Booking Reference (not
+    // editable - the field stays disabled).
     $("ssr_reference").value = t.booking_reference || "";
     const typeSel = $("invoice_type");
     if (t.invoice_type && Array.from(typeSel.options).some((o) => o.value === t.invoice_type)) {
@@ -359,7 +411,7 @@
         ticket_no: p.ticket_no, pax_name: p.passenger_name, pax_type: p.pax_type || tl.pax_type || "",
         sector: s.sector, airline_category: tl.airline_category || "", office_id: tl.office_id || "",
         supplier: tl.supplier_name || t.supplier_name || "", fop: tl.fop || "",
-        ssr_items: {}, seat: 0, meal: 0, baggage: 0, other_ssr: 0, markup: 0, service_fee: 0, supp_markup: 0, supp_service_fee: 0,
+        ssr_items: {}, ssr_ticket_numbers: {}, seat: 0, meal: 0, baggage: 0, other_ssr: 0, markup: 0, service_fee: 0, supp_markup: 0, supp_service_fee: 0,
       }));
     });
     close("ssr-pax-modal");
@@ -386,7 +438,9 @@
   }
 
   // ---------- Save / payload ----------
-  const EDITABLE_HEADER_IDS = ["invoice_number", "invoice_date", "invoice_type", "user_name", "ssr_reference", "ssr_ref_date", "payment_mode"];
+  // SSR Reference is never editable (always disabled in the HTML), and
+  // Gateway Ref follows Payment Mode (see syncGatewayRef) - neither is here.
+  const EDITABLE_HEADER_IDS = ["invoice_number", "invoice_date", "invoice_type", "user_name", "ssr_ref_date", "payment_mode"];
   function buildPayload() {
     return {
       company_id: activeCompanyId,
@@ -395,13 +449,15 @@
       invoice_number: $("invoice_number").value.trim(), invoice_date: $("invoice_date").value,
       invoice_type: $("invoice_type").value, user_name: $("user_name").value.trim(),
       ssr_reference: $("ssr_reference").value.trim(), ssr_ref_date: $("ssr_ref_date").value,
-      payment_mode: $("payment_mode").value, travel_type: $("travel_type").textContent.replace("—", ""),
+      payment_mode: $("payment_mode").value, payment_gateway_ref: $("payment_gateway_ref").value,
+      travel_type: $("travel_type").textContent.replace("—", ""),
       airline_pnr: $("airline_pnr").textContent.replace("—", ""), gds_pnr: $("gds_pnr").textContent.replace("—", ""),
       currency: $("currency").textContent, roe: $("roe").textContent,
       lines: lines.map((l) => ({
         original_ticket_line_id: l.original_ticket_line_id, reschedule_line_id: l.reschedule_line_id,
         ticket_no: l.ticket_no, passenger_name: l.pax_name, pax_type: l.pax_type, airline_category: l.airline_category,
         sector: l.sector, office_id: l.office_id, supplier_name: l.supplier, fop: l.fop, ssr_items: l.ssr_items || {},
+        ssr_ticket_numbers: l.ssr_ticket_numbers || {},
         seat: n(l.seat), meal: n(l.meal), baggage: n(l.baggage), other_ssr: n(l.other_ssr),
         markup: n(l.markup), service_fee: n(l.service_fee), supp_markup: n(l.supp_markup), supp_service_fee: n(l.supp_service_fee),
       })),
@@ -431,6 +487,7 @@
   function setViewMode(on) {
     viewMode = on;
     EDITABLE_HEADER_IDS.forEach((id) => { $(id).disabled = on; });
+    syncGatewayRef();
     $("ssr-save-btn").style.display = on ? "none" : "";
     $("ssr-edit-btn").style.display = on && savedId ? "" : "none";
     $("ssr-print-btn").style.display = on && savedId ? "" : "none";
@@ -466,12 +523,20 @@
       $("ssr_reference").value = d.ssr_reference || "";
       setDate("ssr_ref_date", d.ssr_ref_date);
       $("payment_mode").value = d.payment_mode || "";
+      $("payment_gateway_ref").value = d.payment_gateway_ref || "";
       source = { ticketId: d.original_ticket_id, rescheduleId: d.source_reschedule_ticket_id, customer: d.customer_name };
       await fillHeaderInfo({
         original_invoice: d.source_reschedule_invoice_number || d.original_invoice_number, customer_name: d.customer_name,
         travel_type: d.travel_type, airline_pnr: d.airline_pnr, gds_pnr: d.gds_pnr, currency: d.currency, roe: d.roe,
       });
-      lines = (d.lines || []).map((l) => ({ ...l, pax_name: l.passenger_name, supplier: l.supplier_name }));
+      lines = (d.lines || []).map((l) => {
+        // "Extra Baggage" was renamed "Baggage" - older saved lines still
+        // carry the old key, so show it in the Baggage box.
+        const items = { ...(l.ssr_items || {}) };
+        if (items["Extra Baggage"] && !items.Baggage) items.Baggage = items["Extra Baggage"];
+        delete items["Extra Baggage"];
+        return { ...l, ssr_items: items, pax_name: l.passenger_name, supplier: l.supplier_name };
+      });
       setViewMode(true);
     } catch (err) {
       voyagerAlert(err.message || "Could not load this SSR Updation.", { icon: "error" });

@@ -315,7 +315,7 @@
 
   <!-- ============ SSR Updation ============ -->
   <list key="ssrTypes">
-    <option>Extra Baggage</option>
+    <option>Baggage</option>
     <option>Meal</option>
     <option>Seat</option>
     <option>Other SSR</option>

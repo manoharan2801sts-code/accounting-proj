@@ -48,7 +48,7 @@
     <td>${ruleSelectHtml("sm-rule-comm-on", OPT.custDiscountOn, "Select...")}</td>
     <td>${ruleSelectHtml("sm-rule-calc-type", OPT.custDiscountTypes, "Select...")}</td>
     <td>
-      <input class="form-control-custom sm-rule-calc-pct dom-amount" type="text" inputmode="decimal" value="0.00" style="display:none;" />
+      <input class="form-control-custom sm-rule-calc-pct dom-amount dom-pct" type="text" inputmode="decimal" value="0.00" style="display:none;" />
       <input class="form-control-custom sm-rule-flat-amt dom-amount" type="text" inputmode="decimal" value="0.00" style="display:none;" />
     </td>
     <td><input class="form-control-custom sm-rule-valid-upto" type="date" /></td>

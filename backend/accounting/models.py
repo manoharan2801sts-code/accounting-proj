@@ -23,7 +23,16 @@ Django's migration history matches without re-running the DDL:
     python manage.py migrate accounting --fake
 """
 from decimal import Decimal
+import django
 from django.db import models
+
+if django.VERSION < (5, 0):
+    from django.db.models.fields import Field as _Field
+    _orig_field_init = _Field.__init__
+    def _compat_field_init(self, *args, **kwargs):
+        kwargs.pop("db_default", None)
+        return _orig_field_init(self, *args, **kwargs)
+    _Field.__init__ = _compat_field_init
 
 # Process-level cache for TicketLine.computed_gst's per-field GST% lookup
 # (see field_ledger_gst_pct below) - MasterMapping rarely changes (an
@@ -1091,6 +1100,7 @@ class CancellationAirlineTicketLine(models.Model):
     cust_ssr_markup_reversal = models.DecimalField(max_digits=14, decimal_places=2, default=0, db_default=0)
     supp_markup_reversal = models.DecimalField(max_digits=14, decimal_places=2, default=0, db_default=0)
     supp_addl_markup_reversal = models.DecimalField(max_digits=14, decimal_places=2, default=0, db_default=0)
+    supp_ssr_markup_reversal = models.DecimalField(max_digits=14, decimal_places=2, default=0, db_default=0)
     # Locked Customer/Supplier TDS carried from the booking/reschedule chain
     # (see computed_tds). NULL = no override, TDS is Amount x TDS %.
     tds_amount_override = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
@@ -1135,7 +1145,7 @@ class CancellationAirlineTicketLine(models.Model):
 
     @property
     def supp_markup_reversal_total(self):
-        return self.supp_markup_reversal + self.supp_addl_markup_reversal
+        return self.supp_markup_reversal + self.supp_addl_markup_reversal + self.supp_ssr_markup_reversal
 
     @property
     def computed_discount(self):
@@ -1265,6 +1275,9 @@ class SSRAirlineTicket(models.Model):
     airline_pnr = models.CharField(max_length=13, null=True, blank=True)
     gds_pnr = models.CharField(max_length=13, null=True, blank=True)
     payment_mode = models.CharField(max_length=20, null=True, blank=True)
+    # Only meaningful when payment_mode == "Payment Gateway" - the PG
+    # Master gateway name, same as Ticket.payment_gateway_ref.
+    payment_gateway_ref = models.CharField(max_length=60, null=True, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -1313,6 +1326,9 @@ class SSRAirlineTicketLine(models.Model):
     )
     fop = models.CharField(max_length=20, null=True, blank=True)
     ssr_items = models.TextField(null=True, blank=True)
+    # SSR Ticket Number per SSR type, same JSON-text shape as ssr_items,
+    # e.g. {"Baggage": "0981234567890"} - optional per type.
+    ssr_ticket_numbers = models.TextField(null=True, blank=True)
 
     seat = models.DecimalField(max_digits=14, decimal_places=2, default=0, db_default=0)
     meal = models.DecimalField(max_digits=14, decimal_places=2, default=0, db_default=0)

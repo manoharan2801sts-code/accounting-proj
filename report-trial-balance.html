@@ -84,9 +84,11 @@
     .tb-detailed-toggle { display: flex; align-items: center; gap: 0.5rem; font-size: 13px; color: var(--color-text-dark); cursor: pointer; user-select: none; }
     .tb-detailed-toggle input { width: 16px; height: 16px; cursor: pointer; }
 
-    .tb-back-row { padding: 0.85rem 1.25rem; border-top: 1px solid var(--color-border); background: #FAFBFD; }
-    .tb-back-link { display: inline-flex; align-items: center; gap: 0.4rem; font-size: 13px; font-weight: 600; color: var(--color-primary); text-decoration: none; cursor: pointer; }
-    .tb-back-link:hover { text-decoration: underline; }
+    .page-header-row { flex-direction: column; align-items: stretch; gap: 0.5rem; }
+    .rpt-breadcrumb { font-size: 0.8rem; color: var(--color-text-muted); display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; }
+    .rpt-breadcrumb a { color: var(--color-primary); text-decoration: none; }
+    .rpt-breadcrumb a:hover { text-decoration: underline; }
+    .rpt-breadcrumb .rpt-breadcrumb-current { color: var(--color-primary); font-weight: 700; text-decoration: underline; text-decoration-color: var(--color-primary); text-underline-offset: 3px; }
 
     th.amt-header { text-align: right; }
   </style>
@@ -96,6 +98,7 @@
   <div class="app-body">
     <main class="app-main tb-main" style="max-width: 1440px; margin: 0 auto; padding: 1.5rem 2rem; width: 100%;">
       <div class="page-header-row">
+        <div class="rpt-breadcrumb" id="rpt-breadcrumb"></div>
         <div class="tb-toolbar">
           <span class="tb-toolbar-label">From</span>
           <input type="date" class="form-control-custom tb-toolbar-date" id="filter-from" />
@@ -149,12 +152,6 @@
             </tfoot>
           </table>
         </div>
-        <div class="tb-back-row" id="tb-back-row" style="display:none;">
-          <a href="#" class="tb-back-link" id="tb-back-link">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
-            <span id="tb-back-label">Back</span>
-          </a>
-        </div>
       </div>
     </main>
   </div>
@@ -162,8 +159,8 @@
   <script src="assets/js/mock-data.js"></script>
   <script src="assets/js/api.js?v=4"></script>
   <script src="assets/js/hardcode.js?v=2"></script>
-  <script src="assets/js/util.js?v=3"></script>
-  <script src="assets/js/shell.js?v=28"></script>
+  <script src="assets/js/util.js?v=5"></script>
+  <script src="assets/js/shell.js?v=29"></script>
   <script>
     // Not gated on DOMContentLoaded - this page's <script> can be injected
     // by the app's SPA navigation (shell.js's navigateTo) into a document
@@ -253,8 +250,7 @@
         lastLoadedData = data;
 
         document.getElementById("tb-title").textContent = data.context ? data.context.name : "Trial Balance";
-        document.getElementById("tb-back-row").style.display = data.back ? "" : "none";
-        if (data.back) document.getElementById("tb-back-label").textContent = `Back to ${data.back.label}`;
+        renderBreadcrumb(data);
 
         renderTable(data);
       } catch (err) {
@@ -393,10 +389,31 @@
       renderTotals(data.total_debit, data.total_credit);
     }
 
-    document.getElementById("tb-back-link").addEventListener("click", (e) => {
+    // Reports > Trial Balance > every ancestor group > the group being
+    // viewed. Every segment above the current one is clickable and jumps
+    // straight back to that level (data-group-id="" = the top level).
+    function escHtml(str) {
+      return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    }
+    function renderBreadcrumb(data) {
+      const crumbs = [{ group_id: null, label: "Trial Balance" }].concat(data && data.context ? (data.path || []) : []);
+      const current = data && data.context ? data.context.name : null;
+      const parts = [`<span>Reports</span>`];
+      crumbs.forEach((c, i) => {
+        const isLast = !current && i === crumbs.length - 1;
+        parts.push(`<span>&rsaquo;</span>`, isLast
+          ? `<span class="rpt-breadcrumb-current">${escHtml(c.label)}</span>`
+          : `<a href="#" data-group-id="${c.group_id || ""}">${escHtml(c.label)}</a>`);
+      });
+      if (current) parts.push(`<span>&rsaquo;</span>`, `<span class="rpt-breadcrumb-current">${escHtml(current)}</span>`);
+      document.getElementById("rpt-breadcrumb").innerHTML = parts.join(" ");
+    }
+
+    document.getElementById("rpt-breadcrumb").addEventListener("click", (e) => {
+      const a = e.target.closest("a[data-group-id]");
+      if (!a) return;
       e.preventDefault();
-      const back = lastLoadedData && lastLoadedData.back;
-      currentGroupId = back ? back.group_id : null;
+      currentGroupId = a.dataset.groupId || null;
       const url = new URL(window.location.href);
       if (currentGroupId) url.searchParams.set("group_id", currentGroupId);
       else url.searchParams.delete("group_id");

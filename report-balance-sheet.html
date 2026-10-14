@@ -60,15 +60,17 @@
     .bs-drill-scroll thead th { position: sticky; top: 0; z-index: 1; }
     .bs-drill .bs-table { table-layout: auto; }
     .bs-drill-total td { position: sticky; bottom: 0; font-weight: 800; border-top: 1px solid var(--color-border); background: #F8FAFC; }
-    .bs-back-row { flex-shrink: 0; padding: 0.85rem 1rem; border-top: 1px solid var(--color-border); background: #FAFBFD; }
-    .bs-back-link { display: inline-flex; align-items: center; gap: 0.4rem; font-size: 13px; font-weight: 600; color: var(--color-primary); text-decoration: none; cursor: pointer; }
-    .bs-back-link:hover { text-decoration: underline; }
+    .rpt-breadcrumb { flex-shrink: 0; font-size: 0.8rem; color: var(--color-text-muted); display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; }
+    .rpt-breadcrumb a { color: var(--color-primary); text-decoration: none; }
+    .rpt-breadcrumb a:hover { text-decoration: underline; }
+    .rpt-breadcrumb .rpt-breadcrumb-current { color: var(--color-primary); font-weight: 700; text-decoration: underline; text-decoration-color: var(--color-primary); text-underline-offset: 3px; }
   </style>
 </head>
 <body>
   <header class="app-topnav" id="shell-topnav"></header>
   <div class="app-body">
     <main class="app-main bs-main" style="max-width: 1440px; margin: 0 auto; padding: 1.5rem 2rem; width: 100%;">
+      <div class="rpt-breadcrumb" id="rpt-breadcrumb"></div>
       <div class="filter-card">
         <span class="bs-toolbar-label">As at</span>
         <input type="date" class="form-control-custom bs-toolbar-date" id="filter-to" />
@@ -119,12 +121,6 @@
             <tfoot id="bs-drill-total"></tfoot>
           </table>
         </div>
-        <div class="bs-back-row">
-          <a href="#" class="bs-back-link" id="bs-back-link">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
-            <span id="bs-back-label">Back</span>
-          </a>
-        </div>
       </div>
     </main>
   </div>
@@ -132,7 +128,7 @@
   <script src="assets/js/mock-data.js"></script>
   <script src="assets/js/api.js?v=4"></script>
   <script src="assets/js/hardcode.js?v=2"></script>
-  <script src="assets/js/shell.js?v=28"></script>
+  <script src="assets/js/shell.js?v=29"></script>
   <script>
     // Not gated on DOMContentLoaded - this page's <script> can be injected
     // by the app's SPA navigation (shell.js's navigateTo) into a document
@@ -226,6 +222,24 @@
       const totalRow = `<tr class="bs-total-row"><td>Total</td><td></td><td class="bs-amt">${fmtPlain(data.total)}</td></tr>`;
       document.getElementById("bs-left-total").innerHTML = totalRow;
       document.getElementById("bs-right-total").innerHTML = totalRow;
+      renderBreadcrumb(null);
+    }
+
+    // Reports > Balance Sheet > every ancestor group > the group being
+    // viewed. Every segment above the current one is clickable and jumps
+    // straight back to that level (data-group-id="" = the main sheet).
+    function renderBreadcrumb(data) {
+      const crumbs = [{ group_id: null, label: "Balance Sheet" }].concat(data && data.context ? (data.path || []) : []);
+      const current = data && data.context ? data.context.name : null;
+      const parts = [`<span>Reports</span>`];
+      crumbs.forEach((c, i) => {
+        const isLast = !current && i === crumbs.length - 1;
+        parts.push(`<span>&rsaquo;</span>`, isLast
+          ? `<span class="rpt-breadcrumb-current">${esc(c.label)}</span>`
+          : `<a href="#" data-group-id="${c.group_id || ""}">${esc(c.label)}</a>`);
+      });
+      if (current) parts.push(`<span>&rsaquo;</span>`, `<span class="rpt-breadcrumb-current">${esc(current)}</span>`);
+      document.getElementById("rpt-breadcrumb").innerHTML = parts.join(" ");
     }
 
     function renderDrill(data) {
@@ -241,10 +255,7 @@
         : `<tr class="bs-empty-row"><td colspan="3">Nothing posted under this group.</td></tr>`;
       document.getElementById("bs-drill-total").innerHTML =
         `<tr class="bs-drill-total"><td>Grand Total</td>${cell(data.total_debit)}${cell(data.total_credit)}</tr>`;
-      // The shared group breakdown labels its top level "Trial Balance" -
-      // here the top level is this Balance Sheet.
-      const back = data.back && data.back.group_id ? data.back.label : "Balance Sheet";
-      document.getElementById("bs-back-label").textContent = `Back to ${back}`;
+      renderBreadcrumb(data);
     }
 
     document.getElementById("bs-box").addEventListener("click", rowClick);
@@ -255,9 +266,11 @@
       if (row.dataset.ledgerId) openLedger(row.dataset.ledgerId);
       else if (row.dataset.groupId) zoomInto(row.dataset.groupId);
     }
-    document.getElementById("bs-back-link").addEventListener("click", (e) => {
+    document.getElementById("rpt-breadcrumb").addEventListener("click", (e) => {
+      const a = e.target.closest("a[data-group-id]");
+      if (!a) return;
       e.preventDefault();
-      zoomInto(lastData && lastData.back ? lastData.back.group_id : null, true);
+      zoomInto(a.dataset.groupId || null, true);
     });
     window.addEventListener("popstate", () => {
       if (!document.getElementById("bs-box")) return;

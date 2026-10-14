@@ -99,6 +99,33 @@
     if (neg) v = `-${v}`;
     if (v !== e.target.value) e.target.value = v;
   });
+  // .dom-upper fields (the Find / New lookup popups' Invoice Number, S PNR,
+  // Airline PNR, GDS PNR, Ticket No and Airline Code - never Customer Name)
+  // turn whatever is typed or pasted into capital letters straight away,
+  // keeping the cursor where it was.
+  document.addEventListener("input", (e) => {
+    if (!e.target.matches || !e.target.matches(".dom-upper")) return;
+    const el = e.target;
+    const upper = el.value.toUpperCase();
+    if (upper === el.value) return;
+    const start = el.selectionStart, end = el.selectionEnd;
+    el.value = upper;
+    if (start != null) el.setSelectionRange(start, end);
+  });
+  // Leaving an amount field formats what was typed to Company Master's
+  // "No. of Decimals" (e.g. "245" -> "245.00", or "245.000" for a
+  // 3-decimal company). Percentage boxes (.dom-pct - GST %, TDS %,
+  // Discount % ...) are rates, not money, so they always use 2. A blank
+  // box stays blank (e.g. an unused Debit/Credit cell). Capture phase, so
+  // every page's own change handler already sees the formatted value.
+  document.addEventListener("change", (e) => {
+    if (!e.target.matches || !e.target.matches(".dom-amount")) return;
+    const raw = String(e.target.value).replace(/,/g, "").trim();
+    if (raw === "" || raw === "-") return;
+    const v = Number(raw);
+    if (!isFinite(v)) return;
+    e.target.value = v.toFixed(e.target.matches(".dom-pct") ? 2 : decimalPlaces);
+  }, true);
   // Clicking/tabbing into an amount field selects its current text (e.g.
   // the default "0.00") so typing straight away overwrites it, instead of
   // the user having to manually delete the 0 first.

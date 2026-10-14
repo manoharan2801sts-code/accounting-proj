@@ -918,6 +918,16 @@ def ssr_tickets_list(company_id):
     return exec_sp("dbo.sp_SSRTicket", {"Action": "LIST", "CompanyId": company_id})
 
 
+def ssr_lines_for_original_lines(company_id, original_ticket_line_ids):
+    """Every SSR line sold on these booking passengers (AL_TicketLines ids) -
+    id, original_ticket_line_id, reschedule_line_id, seat, meal, baggage, other_ssr."""
+    import json as _json
+    ids = [int(i) for i in original_ticket_line_ids if i]
+    if not ids:
+        return []
+    return exec_sp("dbo.sp_SSRTicket", {"Action": "LIST_FOR_ORIGINAL_LINES", "CompanyId": company_id, "LinesJson": _json.dumps(ids)})
+
+
 def ssr_ticket_get(ssr_id, company_id):
     """One SSR Updation's header + its lines. Returns (header, lines) or (None, None)."""
     header = exec_sp_one("dbo.sp_SSRTicket", {"Action": "GET_HEADER", "Id": ssr_id, "CompanyId": company_id})
@@ -948,6 +958,7 @@ def ssr_ticket_save(company_id, header_fields, lines, jv_narration, jv_total_deb
         "Roe": header_fields.get("roe"), "SsrReference": header_fields.get("ssr_reference"),
         "SsrRefDate": header_fields.get("ssr_ref_date"), "AirlinePnr": header_fields.get("airline_pnr"),
         "GdsPnr": header_fields.get("gds_pnr"), "PaymentMode": header_fields.get("payment_mode"),
+        "PaymentGatewayRef": header_fields.get("payment_gateway_ref"),
         "LinesJson": _json.dumps(lines, default=str),
         "JvNarration": jv_narration, "JvTotalDebit": jv_total_debit, "JvTotalCredit": jv_total_credit,
     }

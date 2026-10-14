@@ -75,6 +75,30 @@ def ssr_ticket_list(params):
         [company_id],
     )
 
+@sp("dbo.sp_SSRTicket", "LIST_FOR_ORIGINAL_LINES")
+def ssr_ticket_list_for_original_lines(params):
+    company_id = _p_int(params, "CompanyId")
+    lines_json = params.get("LinesJson")
+    if not lines_json:
+        return []
+    try:
+        ids = json.loads(lines_json) if isinstance(lines_json, str) else list(lines_json)
+    except Exception:
+        ids = []
+    if not ids:
+        return []
+    placeholders = ", ".join(["%s"] * len(ids))
+    return query(
+        f"SELECT sl.id, sl.original_ticket_line_id, sl.reschedule_line_id, "
+        f"sl.seat, sl.meal, sl.baggage, sl.other_ssr "
+        f"FROM `SSR_AL_TicketLines` sl "
+        f"INNER JOIN `SSR_AL_Tickets` st ON st.id = sl.ssr_ticket_id "
+        f"WHERE st.company_id = %s "
+        f"AND sl.original_ticket_line_id IN ({placeholders}) "
+        f"ORDER BY sl.id",
+        [company_id] + [int(x) for x in ids],
+    )
+
 @sp("dbo.sp_SSRTicket", "GET_HEADER")
 def ssr_ticket_get_header(params):
     ssr_id = _p_int(params, "Id")
@@ -91,7 +115,7 @@ def ssr_ticket_get_header(params):
         "SELECT st.id, st.original_ticket_id, st.source_reschedule_ticket_id, st.invoice_number, st.invoice_date, "
         "st.invoice_type, st.booking_mode, st.booking_status, cust.name AS customer_name, st.customer_ledger_id, "
         "cust.state_name AS customer_state, st.travel_type, st.user_name, st.currency, st.roe, "
-        "st.ssr_reference, st.ssr_ref_date, st.airline_pnr, st.gds_pnr, st.payment_mode, st.branch_name, "
+        "st.ssr_reference, st.ssr_ref_date, st.airline_pnr, st.gds_pnr, st.payment_mode, st.payment_gateway_ref, st.branch_name, "
         "ot.invoice_number AS original_invoice_number, rt.invoice_number AS source_reschedule_invoice_number, "
         "jv.id AS voucher_id, jv.voucher_no, jv.total_debit AS jv_total_debit, jv.total_credit AS jv_total_credit, "
         "'Success' AS status "
@@ -112,7 +136,7 @@ def ssr_ticket_get_lines(params):
     return query(
         "SELECT sl.id, sl.original_ticket_line_id, sl.reschedule_line_id, sl.ticket_no, sl.passenger_name, "
         "sl.pax_type, sl.airline_category, sl.sector, sl.office_id, sl.supplier_ledger_id, "
-        "supp.name AS supplier_name, supp.state_name AS supplier_state, sl.fop, sl.ssr_items, "
+        "supp.name AS supplier_name, supp.state_name AS supplier_state, sl.fop, sl.ssr_items, sl.ssr_ticket_numbers, "
         "sl.seat, sl.meal, sl.baggage, sl.other_ssr, sl.markup, sl.service_fee, "
         "sl.supp_markup, sl.supp_service_fee, sl.total_billed "
         "FROM `SSR_AL_TicketLines` sl "
@@ -143,6 +167,7 @@ def ssr_ticket_save(params):
     airline_pnr = _p_str(params, "AirlinePnr", 13)
     gds_pnr = _p_str(params, "GdsPnr", 13)
     payment_mode = _p_str(params, "PaymentMode", 20)
+    payment_gateway_ref = _p_str(params, "PaymentGatewayRef", 60)
     lines_json_raw = params.get("LinesJson")
     jv_narration = _p_str(params, "JvNarration", 250)
     jv_total_debit = _p_dec(params, "JvTotalDebit", 16, 2)
@@ -217,13 +242,13 @@ def ssr_ticket_save(params):
                     "(`company_id`, `branch_name`, `original_ticket_id`, `source_reschedule_ticket_id`, "
                     "`invoice_number`, `invoice_date`, `invoice_type`, `booking_mode`, `booking_status`, "
                     "`customer_ledger_id`, `travel_type`, `user_name`, `currency`, `roe`, "
-                    "`ssr_reference`, `ssr_ref_date`, `airline_pnr`, `gds_pnr`, `payment_mode`, `created_at`, `updated_at`) "
-                    "VALUES (%s, %s, %s, %s, %s, %s, %s, 'Manual', 'SSR Updated', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                    "`ssr_reference`, `ssr_ref_date`, `airline_pnr`, `gds_pnr`, `payment_mode`, `payment_gateway_ref`, `created_at`, `updated_at`) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s, 'Manual', 'SSR Updated', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
                     [
                         company_id, branch_name, original_ticket_id, source_reschedule_ticket_id,
                         invoice_number, invoice_date, invoice_type,
                         cust_ledger_id, travel_type, user_name, currency, roe,
-                        ssr_reference, ssr_ref_date, airline_pnr, gds_pnr, payment_mode, now, now,
+                        ssr_reference, ssr_ref_date, airline_pnr, gds_pnr, payment_mode, payment_gateway_ref, now, now,
                     ],
                 )
             else:
@@ -232,12 +257,12 @@ def ssr_ticket_save(params):
                     "UPDATE `SSR_AL_Tickets` SET "
                     "`invoice_number` = %s, `invoice_date` = %s, `invoice_type` = %s, "
                     "`user_name` = %s, `ssr_reference` = %s, `ssr_ref_date` = %s, "
-                    "`payment_mode` = %s, `updated_at` = %s "
+                    "`payment_mode` = %s, `payment_gateway_ref` = %s, `updated_at` = %s "
                     "WHERE `id` = %s AND `company_id` = %s",
                     [
                         invoice_number, invoice_date, invoice_type,
                         user_name, ssr_reference, ssr_ref_date,
-                        payment_mode, now, ssr_id, company_id,
+                        payment_mode, payment_gateway_ref, now, ssr_id, company_id,
                     ],
                 )
                 execute("DELETE FROM `SSR_AL_TicketLines` WHERE `ssr_ticket_id` = %s", [ssr_id])
@@ -257,18 +282,22 @@ def ssr_ticket_save(params):
                 if isinstance(ssr_items_val, (dict, list)):
                     ssr_items_val = json.dumps(ssr_items_val)
 
+                ssr_ticket_numbers_val = l.get("ssr_ticket_numbers")
+                if isinstance(ssr_ticket_numbers_val, (dict, list)):
+                    ssr_ticket_numbers_val = json.dumps(ssr_ticket_numbers_val)
+
                 _, lid = execute(
                     "INSERT INTO `SSR_AL_TicketLines` "
                     "(`ssr_ticket_id`, `original_ticket_line_id`, `reschedule_line_id`, `ticket_no`, "
                     "`passenger_name`, `pax_type`, `airline_category`, `sector`, `office_id`, "
-                    "`supplier_ledger_id`, `fop`, `ssr_items`, `seat`, `meal`, `baggage`, `other_ssr`, "
+                    "`supplier_ledger_id`, `fop`, `ssr_items`, `ssr_ticket_numbers`, `seat`, `meal`, `baggage`, `other_ssr`, "
                     "`markup`, `service_fee`, `supp_markup`, `supp_service_fee`, `total_billed`) "
-                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
                     [
                         result_id, l.get("original_ticket_line_id"), l.get("reschedule_line_id"),
                         l.get("ticket_no"), l.get("passenger_name"), l.get("pax_type"),
                         l.get("airline_category"), l.get("sector"), l.get("office_id"),
-                        supp_id, l.get("fop"), ssr_items_val,
+                        supp_id, l.get("fop"), ssr_items_val, ssr_ticket_numbers_val,
                         _p_dec(l, "seat"), _p_dec(l, "meal"), _p_dec(l, "baggage"), _p_dec(l, "other_ssr"),
                         _p_dec(l, "markup"), _p_dec(l, "service_fee"), _p_dec(l, "supp_markup"), _p_dec(l, "supp_service_fee"),
                         _p_dec(l, "total_billed"),

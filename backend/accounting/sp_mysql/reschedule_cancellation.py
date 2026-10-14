@@ -816,11 +816,11 @@ def _ct_get_lines(p):
                cl.supp_comm_on, cl.supp_comm_type, cl.supp_comm_value, cl.supp_tds_per,
                cl.supp_markup, cl.supp_addl_markup, cl.supp_service_fee, cl.supp_addl_service_fee, cl.supp_gst_pct,
                cl.supplier_penalty, cl.cancellation_penalty, cl.agent_penalty,
-               cl.cust_markup_reversal, cl.cust_addl_markup_reversal, cl.cust_ssr_markup_reversal,
-               cl.supp_markup_reversal, cl.supp_addl_markup_reversal,
-               cl.tds_amount_override, cl.supp_tds_amount_override,
-               cl.total_billed, cl.status, cl.office_id, cl.fop, cl.card_number,
-               cl.supplier_ledger_id, supp.name AS supplier_name
+                cl.cust_markup_reversal, cl.cust_addl_markup_reversal, cl.cust_ssr_markup_reversal,
+                cl.supp_markup_reversal, cl.supp_addl_markup_reversal, cl.supp_ssr_markup_reversal,
+                cl.tds_amount_override, cl.supp_tds_amount_override,
+                cl.total_billed, cl.status, cl.office_id, cl.fop, cl.card_number,
+                cl.supplier_ledger_id, supp.name AS supplier_name
         FROM `Cancellation_Al_TicketLines` cl
         LEFT JOIN `Ledgers` supp ON supp.id = cl.supplier_ledger_id
         WHERE cl.cancellation_ticket_id = %s
@@ -833,7 +833,7 @@ def _ct_get_lines(p):
 _CX_PENALTY_COLS = [
     "supplier_penalty", "cancellation_penalty", "agent_penalty",
     "cust_markup_reversal", "cust_addl_markup_reversal", "cust_ssr_markup_reversal",
-    "supp_markup_reversal", "supp_addl_markup_reversal",
+    "supp_markup_reversal", "supp_addl_markup_reversal", "supp_ssr_markup_reversal",
     "tds_amount_override", "supp_tds_amount_override",
 ]
 
@@ -865,6 +865,7 @@ _CT_LINE_SCHEMA = [
     ("cust_ssr_markup_reversal", "dec", 14, 2),
     ("supp_markup_reversal", "dec", 14, 2),
     ("supp_addl_markup_reversal", "dec", 14, 2),
+    ("supp_ssr_markup_reversal", "dec", 14, 2),
     ("tds_amount_override", "dec", 14, 2),
     ("supp_tds_amount_override", "dec", 14, 2),
     ("supplier_name", "str", 150),
@@ -900,6 +901,7 @@ _CT_UPDATE_SCHEMA = [
     ("cust_ssr_markup_reversal", "dec", 14, 2),
     ("supp_markup_reversal", "dec", 14, 2),
     ("supp_addl_markup_reversal", "dec", 14, 2),
+    ("supp_ssr_markup_reversal", "dec", 14, 2),
     ("tds_amount_override", "dec", 14, 2),
     ("supp_tds_amount_override", "dec", 14, 2),
 ]

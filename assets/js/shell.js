@@ -1204,6 +1204,7 @@
           Store.setCompanyId(select.value);
           const activeOpt = select.selectedOptions[0];
           syncFlagUI();
+          if (window.VoyagerUtil) window.VoyagerUtil.loadDecimalPlaces(select.value);
           if (currentOnCompanyChange) {
             currentOnCompanyChange(select.value, activeOpt ? activeOpt.dataset.country : "IN");
           }
@@ -1242,6 +1243,9 @@
 
     if (!isShellInitialized && select) applyCompanyLogo(select.value);
     isShellInitialized = true;
+    // Company Master's "No. of Decimals" for every page - amount boxes
+    // (.dom-amount, see util.js) format to it as soon as they're left.
+    if (window.VoyagerUtil && select) await window.VoyagerUtil.loadDecimalPlaces(select.value);
     const active = select && select.selectedOptions[0];
     return {
       id: select ? select.value : "1",

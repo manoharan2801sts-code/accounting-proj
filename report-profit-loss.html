@@ -108,9 +108,10 @@
     .pl-drill-total td { position: sticky; bottom: 0; }
     .pl-drill .pl-table td.pl-amt, .pl-drill .pl-table th.pl-amt-head { width: 160px; }
     .pl-drill-total td { font-weight: 800; border-top: 1px solid var(--color-border); background: #F8FAFC; }
-    .pl-back-row { flex-shrink: 0; padding: 0.85rem 1rem; border-top: 1px solid var(--color-border); background: #FAFBFD; }
-    .pl-back-link { display: inline-flex; align-items: center; gap: 0.4rem; font-size: 13px; font-weight: 600; color: var(--color-primary); text-decoration: none; cursor: pointer; }
-    .pl-back-link:hover { text-decoration: underline; }
+    .rpt-breadcrumb { flex-shrink: 0; font-size: 0.8rem; color: var(--color-text-muted); display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; }
+    .rpt-breadcrumb a { color: var(--color-primary); text-decoration: none; }
+    .rpt-breadcrumb a:hover { text-decoration: underline; }
+    .rpt-breadcrumb .rpt-breadcrumb-current { color: var(--color-primary); font-weight: 700; text-decoration: underline; text-decoration-color: var(--color-primary); text-underline-offset: 3px; }
   </style>
 </head>
 <body>
@@ -121,6 +122,7 @@
            Export CSV pushed to the far right via the margin-left:auto
            spacer) - same structure as report-dsr-airline-booking.html's
            own filter-card, minus Advanced Filter (not needed here). -->
+      <div class="rpt-breadcrumb" id="rpt-breadcrumb"></div>
       <div class="filter-card">
         <span class="pl-toolbar-label">From</span>
         <input type="date" class="form-control-custom pl-toolbar-date" id="filter-from" />
@@ -177,12 +179,6 @@
             <tfoot id="pl-drill-total"></tfoot>
           </table>
         </div>
-        <div class="pl-back-row">
-          <a href="#" class="pl-back-link" id="pl-back-link">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
-            <span id="pl-back-label">Back</span>
-          </a>
-        </div>
       </div>
     </main>
   </div>
@@ -190,7 +186,7 @@
   <script src="assets/js/mock-data.js"></script>
   <script src="assets/js/api.js?v=4"></script>
   <script src="assets/js/hardcode.js?v=2"></script>
-  <script src="assets/js/shell.js?v=28"></script>
+  <script src="assets/js/shell.js?v=29"></script>
   <script>
     // Not gated on DOMContentLoaded - this page's <script> can be injected
     // by the app's SPA navigation (shell.js's navigateTo) into a document
@@ -323,6 +319,25 @@
       document.getElementById("pl-right-body").innerHTML = right;
       document.getElementById("pl-left-total").innerHTML = totalRow(p.total_debit);
       document.getElementById("pl-right-total").innerHTML = totalRow(p.total_credit);
+      renderBreadcrumb(null);
+    }
+
+    // Reports > Profit and Loss > every ancestor group > the group being
+    // viewed. Every segment above the current one is clickable and jumps
+    // straight back to that level (data-group-id="" = the main account).
+    const esc = (s) => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    function renderBreadcrumb(data) {
+      const crumbs = [{ group_id: null, label: "Profit and Loss" }].concat(data && data.context ? (data.path || []) : []);
+      const current = data && data.context ? data.context.name : null;
+      const parts = [`<span>Reports</span>`];
+      crumbs.forEach((c, i) => {
+        const isLast = !current && i === crumbs.length - 1;
+        parts.push(`<span>&rsaquo;</span>`, isLast
+          ? `<span class="rpt-breadcrumb-current">${esc(c.label)}</span>`
+          : `<a href="#" data-group-id="${c.group_id || ""}">${esc(c.label)}</a>`);
+      });
+      if (current) parts.push(`<span>&rsaquo;</span>`, `<span class="rpt-breadcrumb-current">${esc(current)}</span>`);
+      document.getElementById("rpt-breadcrumb").innerHTML = parts.join(" ");
     }
 
     // Zoom-in view: one group's sub-groups (click to go deeper) and ledgers
@@ -341,7 +356,7 @@
         : `<tr class="pl-empty-row"><td colspan="3">Nothing posted under this group in this period.</td></tr>`;
       document.getElementById("pl-drill-total").innerHTML =
         `<tr class="pl-drill-total"><td>Grand Total</td>${cell(data.total_debit)}${cell(data.total_credit)}</tr>`;
-      document.getElementById("pl-back-label").textContent = `Back to ${data.back ? data.back.label : "Profit and Loss"}`;
+      renderBreadcrumb(data);
     }
 
     // One click handler for both views (rows are re-rendered every load).
@@ -353,9 +368,11 @@
       if (row.dataset.ledgerId) openLedger(row.dataset.ledgerId);
       else if (row.dataset.groupId) zoomInto(row.dataset.groupId);
     }
-    document.getElementById("pl-back-link").addEventListener("click", (e) => {
+    document.getElementById("rpt-breadcrumb").addEventListener("click", (e) => {
+      const a = e.target.closest("a[data-group-id]");
+      if (!a) return;
       e.preventDefault();
-      zoomInto(lastData && lastData.back ? lastData.back.group_id : null, true);
+      zoomInto(a.dataset.groupId || null, true);
     });
     // Browser Back/Forward between zoom levels.
     window.addEventListener("popstate", () => {

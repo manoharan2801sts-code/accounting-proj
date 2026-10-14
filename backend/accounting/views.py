@@ -168,6 +168,7 @@ def ledger_delete(request, ledger_id):
         msg = str(err)
         status = 404 if msg == "Ledger not found." else 409
         return JsonResponse({"error": msg}, status=status)
+    _field_gst_pct_cache.clear()
     return JsonResponse({"message": "Ledger deleted."}, status=200)
 
 
@@ -252,6 +253,9 @@ def ledger_update(request, ledger_id):
         msg = str(err)
         status = 404 if msg == "Ledger not found." else (409 if "already" in msg else 400)
         return JsonResponse({"error": msg}, status=status)
+    # A ledger's GST % feeds every ticket's GST Amount via Master Mapping -
+    # drop the cached rates so the JV/reports pick up the new % at once.
+    _field_gst_pct_cache.clear()
     return JsonResponse({"id": int(ledger_id), "message": "Ledger updated."})
 
 
@@ -620,7 +624,8 @@ def _invoice_ref_map(company_id):
     ):
         for h in model.objects.filter(company_id=company_id).values("invoice_number", ref, "airline_pnr"):
             add(h["invoice_number"], h[ref], h["airline_pnr"], None)
-        for l in line_model.objects.filter(**{f"{fk}__company_id": company_id}).values(f"{fk}__invoice_number", "ticket_no"):
+        # In entry order (line id), so each invoice's tickets[0] is its lead passenger.
+        for l in line_model.objects.filter(**{f"{fk}__company_id": company_id}).order_by("id").values(f"{fk}__invoice_number", "ticket_no"):
             add(l[f"{fk}__invoice_number"], None, None, l["ticket_no"])
     return out
 
@@ -1078,6 +1083,12 @@ def day_book_report(request):
 
     txns = []
 
+    # Ticket No column shows only the lead passenger's ticket - the first
+    # passenger entered (lowest line id), not every ticket on the invoice.
+    def lead_ticket_no(line_objs):
+        with_no = [l for l in line_objs if l.ticket_no]
+        return min(with_no, key=lambda l: l.id).ticket_no if with_no else "-"
+
     manual_vouchers = Voucher.objects.filter(company_id=company_id)
     if from_date:
         manual_vouchers = manual_vouchers.filter(voucher_date__gte=from_date)
@@ -1102,13 +1113,19 @@ def day_book_report(request):
         first_name = first.get("ledger_name")
         debit_amt = float(first.get("debit") or 0)
         credit_amt = float(first.get("credit") or 0)
+        refs = _voucher_ref_fields(lines, voucher_ref_map)
+        refs["ticket_no"] = refs["ticket_no"].split(", ")[0]  # lead passenger only
         txns.append({
             "date": v.voucher_date.isoformat() if v.voucher_date else None,
-            "particulars": v.narration or first_name or "-",
+            # The ledger itself (e.g. the customer on a Receipt), never the
+            # narration - same as Booking/Reschedule/Cancellation rows, which
+            # show the customer ledger whose amount the row carries.
+            "particulars": first_name or "-",
             "voucher_type": v.voucher_type,
-            **_voucher_ref_fields(lines, voucher_ref_map),
+            **refs,
             "voucher_no": v.voucher_no or "-",
-            "invoice_number": v.voucher_no or "-",  # Day Book's Vch No column (the invoice number; a manual voucher's own number)
+            # Vch No column: just the number, without the type prefix ("RV-3" -> "3").
+            "invoice_number": re.sub(r"^[^0-9]*", "", v.voucher_no or "") or v.voucher_no or "-",
             "debit": debit_amt, "credit": credit_amt,
             "ticket_id": None, "reschedule_ticket_id": None, "voucher_id": v.id,
         })
@@ -1151,7 +1168,7 @@ def day_book_report(request):
             "particulars": t.customer.name if t and t.customer else "-",
             "voucher_type": v.voucher_type,
             "s_pnr": (t.booking_reference if t else "") or "-", "air_pnr": (t.airline_pnr if t else "") or "-",
-            "ticket_no": ", ".join(ticket_nos) or "-",
+            "ticket_no": lead_ticket_no(lines),
             "voucher_no": v.voucher_no or "-",
             "invoice_number": (t.invoice_number if t else None) or "-",  # Day Book's Vch No column (the invoice number; a manual voucher's own number)
             # Shown under Debit ONLY (2026-10-08) - a ticket is always a
@@ -1196,7 +1213,7 @@ def day_book_report(request):
             "particulars": rt.customer.name if rt and rt.customer else "-",
             "voucher_type": v.voucher_type,
             "s_pnr": (rt.booking_reference if rt else "") or "-", "air_pnr": (rt.airline_pnr if rt else "") or "-",
-            "ticket_no": ", ".join(ticket_nos) or "-",
+            "ticket_no": lead_ticket_no(lines),
             "voucher_no": v.voucher_no or "-",
             "invoice_number": (rt.invoice_number if rt else None) or "-",  # Day Book's Vch No column (the invoice number; a manual voucher's own number)
             # Same Debit-only convention as the Booking rows above.
@@ -1217,7 +1234,7 @@ def day_book_report(request):
             "particulars": ct.customer.name if ct.customer else "-",
             "voucher_type": "Credit Note",
             "s_pnr": ct.cancellation_reference or "-", "air_pnr": ct.airline_pnr or "-",
-            "ticket_no": ", ".join(sorted({l.ticket_no for l in lines if l.ticket_no})) or "-",
+            "ticket_no": lead_ticket_no(lines),
             "voucher_no": v.voucher_no or "-",
             "invoice_number": ct.invoice_number or "-",  # Day Book's Vch No column (the invoice number; a manual voucher's own number)
             "debit": 0.0, "credit": customer_amount,
@@ -1233,7 +1250,7 @@ def day_book_report(request):
             "particulars": st.customer.name if st.customer else "-",
             "voucher_type": st.invoice_type or "SSR Updation",
             "s_pnr": st.ssr_reference or "-", "air_pnr": st.airline_pnr or "-",
-            "ticket_no": ", ".join(sorted({l["ticket_no"] for l in lines if l.get("ticket_no")})) or "-",
+            "ticket_no": lead_ticket_no(list(st.lines.all())),
             "voucher_no": v.voucher_no or "-",
             "invoice_number": st.invoice_number or "-",  # Day Book's Vch No column (the invoice number; a manual voucher's own number)
             "debit": (customer_row or {}).get("debit") or 0.0, "credit": 0.0,
@@ -1331,11 +1348,12 @@ def trial_balance_report(request):
       straight under it) - what report-trial-balance.html shows when
       you click into a group. "context" describes that group itself
       (its own name + rolled-up total, shown as the page's highlighted
-      header row) and "back" says where the Back link at the bottom
-      should go: another group_id one level up, or null for the plain
-      top-level Trial Balance if this group's own parent is just an
-      internal root wrapper (Assets/Liabilities/Income/Expenses) that
-      the UI never shows as its own page.
+      header row), "path" lists every ancestor group between the top
+      level and this one (outermost first) for the page's breadcrumb,
+      and "back" is the one-level-up target: another group_id, or null
+      for the plain top-level Trial Balance if this group's own parent
+      is just an internal root wrapper (Assets/Liabilities/Income/
+      Expenses) that the UI never shows as its own page.
 
     Every row's own total is rolled up from every Ledger under it
     however deeply nested (see group_rollup) even though only ONE level
@@ -1410,6 +1428,7 @@ def trial_balance_report(request):
 
     context = None
     back = None
+    path = []
     if group_id:
         group = groups_by_id.get(int(group_id))
         if not group:
@@ -1422,6 +1441,13 @@ def trial_balance_report(request):
         else:
             parent = groups_by_id.get(group["parent_id"])
             back = {"group_id": parent["id"] if parent else None, "label": parent["name"] if parent else "Trial Balance"}
+        # Breadcrumb trail - every ancestor between the top level and this
+        # group (outermost first), skipping the hidden root wrappers.
+        path = []
+        ancestor = groups_by_id.get(group["parent_id"])
+        while ancestor and ancestor["id"] not in root_group_ids:
+            path.insert(0, {"group_id": ancestor["id"], "label": ancestor["name"]})
+            ancestor = groups_by_id.get(ancestor["parent_id"])
         rows, total_debit, total_credit = build_rows(group["id"])
     else:
         # Top level - every "primary" group (parented directly by a root
@@ -1449,7 +1475,7 @@ def trial_balance_report(request):
 
     return JsonResponse({
         "from_date": from_date, "to_date": to_date,
-        "context": context, "back": back,
+        "context": context, "back": back, "path": path,
         "rows": rows,
         "total_debit": total_debit, "total_credit": total_credit,
     })
@@ -1683,11 +1709,21 @@ def profit_loss_report(request):
             back = {"group_id": None, "label": "Profit and Loss"}
         else:
             back = {"group_id": parent.id, "label": parent.name}
+        # Breadcrumb trail - ancestors up to (and including) the P&L group
+        # this one sits under, outermost first; same stop rule as "back".
+        path = []
+        node = group
+        while True:
+            up = groups_by_id.get(node.parent_id)
+            if node.name in pl_group_names or up is None or up.parent_id is None:
+                break
+            path.insert(0, {"group_id": up.id, "label": up.name})
+            node = up
         g_debit, g_credit = _trial_balance_dr_cr(movement(group.id))
         return JsonResponse({
             "from_date": from_date, "to_date": to_date,
             "context": {"id": group.id, "name": group.name, "debit": g_debit, "credit": g_credit},
-            "back": back, "rows": rows,
+            "back": back, "path": path, "rows": rows,
             "total_debit": round(total_debit, 2), "total_credit": round(total_credit, 2),
         })
 
@@ -3772,7 +3808,7 @@ CANCEL_LINE_FIELDS = TICKET_LINE_FIELDS
 CANCEL_JV_LINE_FIELDS = [
     "supplier_penalty", "cancellation_penalty", "agent_penalty",
     "cust_markup_reversal", "cust_addl_markup_reversal", "cust_ssr_markup_reversal",
-    "supp_markup_reversal", "supp_addl_markup_reversal",
+    "supp_markup_reversal", "supp_addl_markup_reversal", "supp_ssr_markup_reversal",
 ]
 
 # Locked Customer/Supplier TDS amounts carried from the booking/reschedule
@@ -3849,6 +3885,9 @@ CANCEL_JV_LINE_MAP = [
     ("Credit", "Expenditure To Supplier", "Supplier Addl Markup A/c", "supp_addl_markup_reversal"),        # 18
     ("Debit", "Earnings From Customer", "Consolidator Markup A/c", "supp_markup_reversal"),                # 19
     ("Debit", "Earnings From Customer", "Consolidator Addl Markup A/c", "supp_addl_markup_reversal"),      # 20
+    # Supplier SSR Markup reversal - same pair as rows 17-20.
+    ("Credit", "Expenditure To Supplier", "Supplier SSR Markup A/c", "supp_ssr_markup_reversal"),          # 20a
+    ("Debit", "Earnings From Customer", "Consolidator SSR Markup A/c", "supp_ssr_markup_reversal"),        # 20b
     ("Credit", "Expenditure To Customer", "Discount A/c", "discount"),                                     # 21
     ("Debit", "GST and TDS", "Discount TDS A/c", "discount_tds"),                                          # 22
     ("Credit", "Earnings From Customer", "Markup A/c", "markup"),                                          # 23
@@ -3901,9 +3940,10 @@ def _cancellation_line_amounts(l):
         "cust_ssr_markup_reversal": r2(l.cust_ssr_markup_reversal),
         "supp_markup_reversal": r2(l.supp_markup_reversal),
         "supp_addl_markup_reversal": r2(l.supp_addl_markup_reversal),
+        "supp_ssr_markup_reversal": r2(l.supp_ssr_markup_reversal),
     }
     cust_reversal = a["cust_markup_reversal"] + a["cust_addl_markup_reversal"] + a["cust_ssr_markup_reversal"]
-    supp_reversal = a["supp_markup_reversal"] + a["supp_addl_markup_reversal"]
+    supp_reversal = a["supp_markup_reversal"] + a["supp_addl_markup_reversal"] + a["supp_ssr_markup_reversal"]
     # Row 1 - Customer (Credit)
     a["customer_amount"] = (
         a["supplier_cost"] - a["supplier_penalty"] - a["discount"] + a["discount_tds"]
@@ -4373,6 +4413,10 @@ def cancellation_fare_totals(request):
     excluded from this auto-fetch (2026-10-06 decision) - always
     returned as 0 regardless of its own chain value, never summed.
 
+    Seat/Meal/Baggage/Other SSR also include every SSR Updation sold on this
+    passenger within that same chain (on the booking, or on any reschedule
+    up to the one being cancelled) - its Return SSR figures cover them too.
+
     Customer Discount and Supplier Commission (amount + TDS) get the
     same cumulative-chain treatment, reusing the exact fields
     _resolve_parent_chain_line already computes for this (disc_value/
@@ -4410,6 +4454,27 @@ def cancellation_fare_totals(request):
         if reschedule_ids else {}
     )
 
+    # SSR Updation charges sold on these passengers - added into Return
+    # Seat/Meal/Baggage/Other SSR below (see ssr_for_chain).
+    ssr_rows = sp_client.ssr_lines_for_original_lines(company_id, original_ids)
+
+    def ssr_for_chain(oid, based_on):
+        """Seat/Meal/Baggage/Other SSR of every SSR Updation on this passenger
+        that belongs to the chain being cancelled: sold on the original booking
+        itself, or on the reschedule being cancelled or any reschedule before
+        it. An SSR sold on some other (later) reschedule isn't part of it."""
+        chain_ids = set()
+        node = based_on
+        while node is not None:
+            chain_ids.add(node.id)
+            node = node.based_on_reschedule_line
+        out = {"seat": 0.0, "meal": 0.0, "baggage": 0.0, "other_ssr": 0.0}
+        for r in ssr_rows:
+            if r["original_ticket_line_id"] == oid and (r["reschedule_line_id"] is None or r["reschedule_line_id"] in chain_ids):
+                for k in out:
+                    out[k] += float(r[k] or 0)
+        return out
+
     totals = []
     for line_in in lines_in:
         oid = line_in.get("original_ticket_line_id")
@@ -4420,6 +4485,9 @@ def cancellation_fare_totals(request):
             continue
         based_on = rescheds.get(rid) if rid else None
         chain = _resolve_parent_chain_line(original_line, based_on)
+        ssr = ssr_for_chain(original_line.id, based_on)
+        for k, v in ssr.items():
+            chain[k] = round(chain[k] + v, 2)
         totals.append({
             "original_ticket_line_id": oid,
             "basic_fare": chain["basic_fare"], "yq": chain["yq"], "yr": chain["yr"], "k3_tax": chain["k3_tax"],
@@ -4432,6 +4500,7 @@ def cancellation_fare_totals(request):
             "supp_tds_per": chain["supp_tds_per"], "supp_tds_amount": chain["supp_tds_amount"],
             "markup": chain["markup"], "addl_markup": chain["addl_markup"], "ssr_markup": chain["ssr_markup"],
             "supp_markup": chain["supp_markup"], "supp_addl_markup": chain["supp_addl_markup"],
+            "supp_ssr_markup": chain["supp_ssr_markup"],
             "chain_payment_gateway": _chain_used_payment_gateway(original_line, based_on),
         })
 
@@ -6075,6 +6144,8 @@ def _ssr_line_amounts(company_id, line):
     Mapping - "SSR Service Fee A/c" (customer) and "Supplier SSR Service Fee
     A/c" (supplier); _jv_prep must have run first (it seeds that cache).
     sales = what the customer pays, purchase = what the supplier is owed.
+    Same convention as a Booking's compute_total(): the customer also pays
+    the supplier-side SSR Markup / Service Fee / GST on top of their own.
     """
     v = {k: float(line.get(k) or 0) for k in SSR_AMOUNT_FIELDS}
     ssr = v["seat"] + v["meal"] + v["baggage"] + v["other_ssr"]
@@ -6082,7 +6153,7 @@ def _ssr_line_amounts(company_id, line):
     supp_gst = v["supp_service_fee"] * _field_gst_pct_cache.get((company_id, "Supplier SSR Service Fee A/c"), 0.0) / 100
     return {
         **v, "ssr": ssr, "gst": gst, "supp_gst": supp_gst,
-        "sales": ssr + v["markup"] + v["service_fee"] + gst,
+        "sales": ssr + v["markup"] + v["service_fee"] + gst + v["supp_markup"] + v["supp_service_fee"] + supp_gst,
         "purchase": ssr + v["supp_markup"] + v["supp_service_fee"] + supp_gst,
     }
 
@@ -6094,12 +6165,15 @@ def _compute_ssr_jv_lines(company_id, customer, lines, mapping_cache, company_st
       Cr Supplier (per supplier)           purchase total
       Cr SSR Markup A/c                    customer SSR Markup
       Cr SSR Service Fee A/c               customer SSR Service Fee
-      Cr Output CGST+SGST / Output IGST    customer GST (customer State vs Company State)
+      Cr Consolidator SSR Markup A/c       supplier SSR Markup (billed on to the customer)
+      Cr Consolidator SSR Service Fee A/c  supplier SSR Service Fee (billed on to the customer)
+      Cr Output CGST+SGST / Output IGST    customer GST + supplier GST (customer State vs Company State)
       Dr Supplier SSR Markup A/c           supplier SSR Markup
       Dr Supplier SSR Service Fee A/c      supplier SSR Service Fee
       Dr Input CGST+SGST / Input IGST      supplier GST (supplier State vs Company State)
-    The SSR charges pass straight from customer to supplier, so Debit always
-    equals Credit. Zero rows are left out.
+    Same structure as the Booking JV's SSR lines. The SSR charges pass
+    straight from customer to supplier, so Debit always equals Credit. Zero
+    rows are left out.
 
     customer: {"id", "name", "state_name"}. lines: dicts with the SSR amount
     fields plus supplier_ledger_id / supplier_name.
@@ -6112,7 +6186,7 @@ def _compute_ssr_jv_lines(company_id, customer, lines, mapping_cache, company_st
         return {"role": field_name, "ledger_id": ledger_id, "ledger_name": ledger_name,
                 "debit": amount if dr_cr == "Debit" else 0, "credit": amount if dr_cr == "Credit" else 0}
 
-    totals = {k: 0.0 for k in ("sales", "markup", "service_fee", "gst", "supp_markup", "supp_service_fee")}
+    totals = {k: 0.0 for k in ("sales", "markup", "service_fee", "gst", "supp_markup", "supp_service_fee", "supp_gst")}
     suppliers, gst_by_supplier = {}, {}
     for l in lines:
         a = _ssr_line_amounts(company_id, l)
@@ -6129,9 +6203,12 @@ def _compute_ssr_jv_lines(company_id, customer, lines, mapping_cache, company_st
         accounts.append({"role": "supplier", "ledger_id": sid, "ledger_name": g["name"], "debit": 0, "credit": round(g["amount"], 2)})
     accounts.append(mapped_row("Credit", "Earnings From Customer", "SSR Markup A/c", totals["markup"]))
     accounts.append(mapped_row("Credit", "Earnings From Customer", "SSR Service Fee A/c", totals["service_fee"]))
+    accounts.append(mapped_row("Credit", "Earnings From Customer", "Consolidator SSR Markup A/c", totals["supp_markup"]))
+    accounts.append(mapped_row("Credit", "Earnings From Customer", "Consolidator SSR Service Fee A/c", totals["supp_service_fee"]))
 
+    # One combined Output GST (customer + supplier), same as the Booking JV.
     customer_state = (customer.get("state_name") or "").strip().lower()
-    gst = round(totals["gst"], 2)
+    gst = round(totals["gst"] + totals["supp_gst"], 2)
     if company_state and customer_state and company_state == customer_state:
         half = round(gst / 2, 2)
         accounts.append(mapped_row("Credit", "GST and TDS", "Output CGST A/c", half))
@@ -6170,6 +6247,9 @@ def _ssr_build(company_id, body):
         items = {k: str(v).strip() for k, v in (l.get("ssr_items") or {}).items() if str(v or "").strip()}
         if not items:
             return None, None, None, f"SSR line {i} ({l.get('passenger_name') or ''}): enter at least one SSR detail."
+        # SSR Ticket Number is optional, kept only for SSR types that have a detail.
+        ticket_numbers = {k: str(v).strip() for k, v in (l.get("ssr_ticket_numbers") or {}).items()
+                          if k in items and str(v or "").strip()}
         if not l.get("original_ticket_line_id"):
             return None, None, None, f"SSR line {i} is not linked to a booking passenger - pick it again with New."
         supplier_name = (l.get("supplier_name") or "").strip()
@@ -6187,6 +6267,7 @@ def _ssr_build(company_id, body):
             "reschedule_line_id": int(l["reschedule_line_id"]) if l.get("reschedule_line_id") else None,
             "supplier_name": supplier_name or None, "supplier_ledger_id": supplier_id,
             "ssr_items": json.dumps(items, ensure_ascii=False),
+            "ssr_ticket_numbers": json.dumps(ticket_numbers, ensure_ascii=False),
         })
         line["total_billed"] = round(_ssr_line_amounts(company_id, line)["sales"], 2)
         lines.append(line)
@@ -6201,6 +6282,8 @@ def _ssr_build(company_id, body):
         "roe": _safe_decimal(body.get("roe"), default=1), "ssr_reference": (body.get("ssr_reference") or "").strip(),
         "ssr_ref_date": _parse_date(body.get("ssr_ref_date")), "airline_pnr": body.get("airline_pnr"),
         "gds_pnr": body.get("gds_pnr"), "payment_mode": body.get("payment_mode"),
+        # Gateway Ref only applies to Payment Gateway - never stored otherwise.
+        "payment_gateway_ref": (body.get("payment_gateway_ref") or None) if body.get("payment_mode") == "Payment Gateway" else None,
     }
     return header, lines, customer, None
 
@@ -6279,13 +6362,15 @@ def ssr_jv_preview_draft(request):
 
 
 def _ssr_line_dict(l):
-    try:
-        items = json.loads(l.get("ssr_items") or "{}")
-    except (ValueError, TypeError):
-        items = {}
+    def parse(key):
+        try:
+            return json.loads(l.get(key) or "{}")
+        except (ValueError, TypeError):
+            return {}
     out = {k: l.get(k) for k in ("id", "original_ticket_line_id", "reschedule_line_id", "supplier_ledger_id", "supplier_name") + SSR_LINE_TEXT_FIELDS}
     out.update({k: float(l.get(k) or 0) for k in SSR_AMOUNT_FIELDS + ("total_billed",)})
-    out["ssr_items"] = items
+    out["ssr_items"] = parse("ssr_items")
+    out["ssr_ticket_numbers"] = parse("ssr_ticket_numbers")
     return out
 
 
@@ -6303,7 +6388,7 @@ def ssr_ticket_detail(request, ssr_id):
     iso = lambda d: d.isoformat() if d else None
     data = {k: header.get(k) for k in ("id", "original_ticket_id", "source_reschedule_ticket_id", "invoice_number", "invoice_type",
                                         "booking_mode", "booking_status", "customer_name", "travel_type", "user_name", "currency",
-                                        "ssr_reference", "airline_pnr", "gds_pnr", "payment_mode", "voucher_id", "voucher_no",
+                                        "ssr_reference", "airline_pnr", "gds_pnr", "payment_mode", "payment_gateway_ref", "voucher_id", "voucher_no",
                                         "original_invoice_number", "source_reschedule_invoice_number")}
     data.update({"invoice_date": iso(header.get("invoice_date")), "ssr_ref_date": iso(header.get("ssr_ref_date")),
                  "roe": float(header.get("roe") or 1), "lines": [_ssr_line_dict(l) for l in lines]})

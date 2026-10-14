@@ -35,6 +35,9 @@
   .ssr-pick-table th { position: sticky; top: 0; background: #3B6DB5; color: #FFFFFF; font-weight: 700; text-align: left; padding: 4px 8px; height: 26px; }
   .ssr-pick-table td { padding: 4px 8px; border-bottom: 1px solid #EEF1F5; }
   #ssr-modal .dom-modal-form-grid .dom-input-readonly { justify-content: flex-start !important; text-align: left; }
+  /* SSR Details: SSR type | SSR Ticket Number | SSR detail text. */
+  #m-ssr-items { grid-template-columns: 82px 1fr 1fr; }
+  #m-ssr-items .m-ssr-head { font-size: 10.5px; font-weight: 700; color: #64748B; }
   .ssr-result-row { cursor: pointer; border-bottom: 1px solid #E2E8F0; }
   .ssr-result-row:hover td { background: var(--color-primary); color: #FFFFFF; }
 </style>
@@ -114,7 +117,8 @@
             </div>
             <div class="dom-field">
               <label class="dom-label">SSR Reference<span class="dom-req">*</span></label>
-              <input class="dom-input" id="ssr_reference" maxlength="25" />
+              <!-- Filled from the picked ticket's Booking Reference - never typed. -->
+              <input class="dom-input" id="ssr_reference" maxlength="25" disabled />
             </div>
             <div class="dom-field">
               <label class="dom-label">SSR Ref Date<span class="dom-req">*</span></label>
@@ -131,6 +135,9 @@
             <div class="dom-field">
               <label class="dom-label">Payment Mode</label>
               <select class="dom-select" id="payment_mode" data-options="paymentModes" style="flex:0 0 130px;"><option value="">Select...</option></select>
+              <!-- Same as the ticket screen: always shown, only enabled for Payment Gateway. -->
+              <label class="dom-label" style="min-width:70px;">Gateway Ref</label>
+              <select class="dom-select" id="payment_gateway_ref" disabled><option value="">Select...</option></select>
             </div>
           </div>
 
@@ -212,13 +219,13 @@
     </div>
     <div class="dom-modal-body dom-modal-body-scroll" style="display:block; padding:12px; max-height:76vh;">
       <div class="ssr-filter-grid">
-        <div class="ssr-filter"><label>Invoice Number</label><input class="dom-input" type="text" id="nl-invoice" placeholder="e.g. TA/TAX/00001/26-27" autocomplete="off" /></div>
-        <div class="ssr-filter"><label>S PNR / Booking Ref</label><input class="dom-input" type="text" id="nl-spnr" placeholder="Booking Reference" autocomplete="off" /></div>
-        <div class="ssr-filter"><label>Airline PNR</label><input class="dom-input" type="text" id="nl-airline-pnr" placeholder="Airline PNR" autocomplete="off" /></div>
-        <div class="ssr-filter"><label>GDS PNR</label><input class="dom-input" type="text" id="nl-gds-pnr" placeholder="GDS PNR" autocomplete="off" /></div>
-        <div class="ssr-filter"><label>Ticket No</label><input class="dom-input" type="text" id="nl-ticket-no" placeholder="Ticket No" autocomplete="off" /></div>
+        <div class="ssr-filter"><label>Invoice Number</label><input class="dom-upper dom-input" type="text" id="nl-invoice" placeholder="e.g. TA/TAX/00001/26-27" autocomplete="off" /></div>
+        <div class="ssr-filter"><label>S PNR / Booking Ref</label><input class="dom-upper dom-input" type="text" id="nl-spnr" placeholder="Booking Reference" autocomplete="off" /></div>
+        <div class="ssr-filter"><label>Airline PNR</label><input class="dom-upper dom-input" type="text" id="nl-airline-pnr" placeholder="Airline PNR" autocomplete="off" /></div>
+        <div class="ssr-filter"><label>GDS PNR</label><input class="dom-upper dom-input" type="text" id="nl-gds-pnr" placeholder="GDS PNR" autocomplete="off" /></div>
+        <div class="ssr-filter"><label>Ticket No</label><input class="dom-upper dom-input" type="text" id="nl-ticket-no" placeholder="Ticket No" autocomplete="off" /></div>
         <div class="ssr-filter"><label>Customer Name</label><input class="dom-input" type="text" id="nl-customer" placeholder="e.g. Sundaram Traders" autocomplete="off" /></div>
-        <div class="ssr-filter"><label>Airline Code</label><input class="dom-input" type="text" id="nl-airline-code" placeholder="e.g. 6E" autocomplete="off" /></div>
+        <div class="ssr-filter"><label>Airline Code</label><input class="dom-upper dom-input" type="text" id="nl-airline-code" placeholder="e.g. 6E" autocomplete="off" /></div>
         <div aria-hidden="true"></div>
         <div class="ssr-filter"><label>Date Type</label>
           <div class="dom-date-type-toggle" id="nl-date-type" data-value="travel_date">
@@ -283,13 +290,13 @@
     </div>
     <div class="dom-modal-body dom-modal-body-scroll" style="display:block; padding:12px; max-height:76vh;">
       <div class="ssr-filter-grid">
-        <div class="ssr-filter"><label>Invoice Number</label><input class="dom-input" type="text" id="fd-invoice" placeholder="e.g. TA/TAX/00001/26-27" autocomplete="off" /></div>
-        <div class="ssr-filter"><label>S PNR / Booking Ref</label><input class="dom-input" type="text" id="fd-spnr" placeholder="Booking Reference" autocomplete="off" /></div>
-        <div class="ssr-filter"><label>Airline PNR</label><input class="dom-input" type="text" id="fd-airline-pnr" placeholder="Airline PNR" autocomplete="off" /></div>
-        <div class="ssr-filter"><label>GDS PNR</label><input class="dom-input" type="text" id="fd-gds-pnr" placeholder="GDS PNR" autocomplete="off" /></div>
-        <div class="ssr-filter"><label>Ticket No</label><input class="dom-input" type="text" id="fd-ticket-no" placeholder="Ticket No" autocomplete="off" /></div>
+        <div class="ssr-filter"><label>Invoice Number</label><input class="dom-upper dom-input" type="text" id="fd-invoice" placeholder="e.g. TA/TAX/00001/26-27" autocomplete="off" /></div>
+        <div class="ssr-filter"><label>S PNR / Booking Ref</label><input class="dom-upper dom-input" type="text" id="fd-spnr" placeholder="Booking Reference" autocomplete="off" /></div>
+        <div class="ssr-filter"><label>Airline PNR</label><input class="dom-upper dom-input" type="text" id="fd-airline-pnr" placeholder="Airline PNR" autocomplete="off" /></div>
+        <div class="ssr-filter"><label>GDS PNR</label><input class="dom-upper dom-input" type="text" id="fd-gds-pnr" placeholder="GDS PNR" autocomplete="off" /></div>
+        <div class="ssr-filter"><label>Ticket No</label><input class="dom-upper dom-input" type="text" id="fd-ticket-no" placeholder="Ticket No" autocomplete="off" /></div>
         <div class="ssr-filter"><label>Customer Name</label><input class="dom-input" type="text" id="fd-customer" placeholder="e.g. Sundaram Traders" autocomplete="off" /></div>
-        <div class="ssr-filter"><label>Airline Code</label><input class="dom-input" type="text" id="fd-airline-code" placeholder="e.g. 6E" autocomplete="off" /></div>
+        <div class="ssr-filter"><label>Airline Code</label><input class="dom-upper dom-input" type="text" id="fd-airline-code" placeholder="e.g. 6E" autocomplete="off" /></div>
         <div aria-hidden="true"></div>
         <div class="ssr-filter"><label>Date Type</label>
           <div class="dom-date-type-toggle" id="fd-date-type" data-value="travel_date">
@@ -338,8 +345,8 @@
           <label>FOP</label><div class="dom-input-readonly" id="m-fop">—</div>
         </div>
         <div class="dom-modal-section-title" style="margin-top:10px;">SSR Details</div>
-        <!-- One label + textbox per SSR type (dropdowns.xml "ssrTypes"),
-             filled in by page-ssr-entry.js. -->
+        <!-- One row per SSR type (dropdowns.xml "ssrTypes"): label + SSR
+             Ticket Number + SSR detail textbox, filled in by page-ssr-entry.js. -->
         <div class="dom-modal-form-grid" id="m-ssr-items"></div>
       </div>
 
@@ -413,8 +420,8 @@
 <script src="assets/js/hardcode.js?v=2"></script>
 <script src="assets/js/mock-data.js"></script>
 <script src="assets/js/api.js?v=4"></script>
-<script src="assets/js/util.js?v=3"></script>
-<script src="assets/js/shell.js?v=28"></script>
-<script src="assets/js/invoice-templates.js?v=14"></script>
-<script src="assets/js/page-ssr-entry.js?v=18"></script>
+<script src="assets/js/util.js?v=5"></script>
+<script src="assets/js/shell.js?v=29"></script>
+<script src="assets/js/invoice-templates.js?v=15"></script>
+<script src="assets/js/page-ssr-entry.js?v=23"></script>
 </body></html>
