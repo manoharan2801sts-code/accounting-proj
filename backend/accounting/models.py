@@ -156,6 +156,12 @@ class Ledger(models.Model):
     agent_id = models.CharField(max_length=30, null=True, blank=True)
     maintain_balance_bill_wise = models.CharField(max_length=5, null=True, blank=True)  # "Yes" / "No"
     place_of_supply = models.CharField(max_length=60, null=True, blank=True)
+    credit_days = models.IntegerField(null=True, blank=True, default=0)
+    credit_limit = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True, default=0)
+    customer_type = models.CharField(
+        max_length=20, null=True, blank=True,
+        choices=[("RETAIL", "Retail"), ("CORPORATE", "Corporate"), ("AGENT", "Agent")]
+    )
 
     # Debtor — India
     city = models.CharField(max_length=60, null=True, blank=True)
