@@ -354,6 +354,7 @@ def _fill_computed(r):
     g_ssr = r.pop("_gst_ssrsvc")
     g_suppsvc = r.pop("_gst_suppsvc")
     g_suppaddl = r.pop("_gst_suppaddlsvc")
+    g_suppssr = r.pop("_gst_suppssrsvc", None)
     with localcontext() as ctx:
         ctx.prec = 80
         disc = _comm(r, r["disc_type"], r["disc_on"], r["disc_value"])
@@ -370,7 +371,6 @@ def _fill_computed(r):
         r["computed_supp_tds"] = _scale(_dmul(_scale(supp, 6), _ddiv100(r["supp_tds_per"])), 6)
         # 8.10.26 build: each Supplier fee times its OWN mapped ledger's GST%
         # (Master Mapping), no longer the flat supp_gst_pct.
-        g_suppssr = _D(r.get("_gst_suppssrsvc")) if r.get("_gst_suppssrsvc") is not None else None
         supp_ssr_sf = r.get("supp_ssr_service_fee") or z
         r["computed_supp_gst"] = _scale(_dsum(
             _ddiv100(_dmul(r["supp_service_fee"], g_suppsvc if g_suppsvc is not None else z)),
