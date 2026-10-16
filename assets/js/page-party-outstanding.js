@@ -10,6 +10,9 @@
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const n2 = (v) => Math.abs(Number(v) || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  // Adjusted column: shown as a deduction from Billed, with a minus sign
+  // (an adjustment that adds back to the bill shows without one).
+  const neg = (v) => (Number(v) > 0 ? `-${n2(v)}` : n2(v));
   // Receivable balance is a Debit, payable a Credit; the other side means an
   // advance / excess (e.g. a cancellation refund bigger than the bill).
   const drcr = (v) => {
@@ -77,8 +80,21 @@
     const isCredit = RECEIVABLE ? b.outstanding < 0 : b.outstanding > 0;
     return `Unadjusted ${isCredit ? "Credits" : "Debits"}`;
   }
+  // A bill's own Adjusted figure - left blank in Detailed View when its
+  // adjustment lines are listed right under it (no repeated sub-total).
+  const billAdjusted = (b, detailed) => (detailed && b.adjustments.length ? "" : neg(b.adjusted));
   const adjAmount = (a) => (RECEIVABLE ? a.credit - a.debit : a.debit - a.credit);
   const clickAttrs = (doc, cls) => `class="${cls}${doc ? " po-click" : ""}"${docAttr(doc)} title="${doc ? "Double-click to open" : ""}"`;
+
+  // Which parties to show: the one picked in the Customer / Supplier box, or
+  // everyone when "All Customers" / "All Suppliers" is ticked. null = none
+  // picked yet (the report waits for a choice instead of loading everyone).
+  function selectedParties() {
+    if ($("po-all").checked) return data.parties;
+    const name = $("po-party").value.trim().toLowerCase();
+    if (!name) return null;
+    return data.parties.filter((p) => p.name.toLowerCase() === name);
+  }
 
   function render() {
     const tbody = $("po-tbody");
@@ -86,6 +102,14 @@
     const view = currentView();
     applyViewLayout(view);
     const ncols = VIEWS[view].head.length + 3;
+    const parties = selectedParties();
+    if (!parties) {
+      tbody.innerHTML = `<tr><td colspan="${ncols}" class="po-empty">Choose a ${PARTY_LABEL} (or tick All ${PARTY_LABEL}s) and click Apply.</td></tr>`;
+      $("po-total-label").textContent = "Grand Total";
+      ["po-total-billed", "po-total-adjusted"].forEach((id) => { $(id).textContent = n2(0); });
+      $("po-total-outstanding").innerHTML = drcr(0);
+      return;
+    }
     const detailed = $("po-detailed").checked;
     const showSettled = $("po-settled").checked;
     const q = $("po-search").value.trim().toLowerCase();
@@ -93,31 +117,31 @@
     let rows = "", count = 0, tBilled = 0, tAdjusted = 0, tOutstanding = 0;
 
     if (view === "ledger") {
-      data.parties.forEach((p) => {
+      parties.forEach((p) => {
         const shown = p.bills.filter((b) => (showSettled || Math.abs(b.outstanding) >= 0.005) && matches(p, b));
         if (!shown.length) return;
         const sum = (k) => shown.reduce((s, b) => s + b[k], 0);
         const billed = sum("billed"), adjusted = sum("adjusted"), outstanding = sum("outstanding");
         tBilled += billed; tAdjusted += adjusted; tOutstanding += outstanding; count += 1;
         rows += `<tr class="po-party"><td>${esc(p.name)}</td><td></td><td></td><td></td>
-          <td class="amt">${n2(billed)}</td><td class="amt">${n2(adjusted)}</td><td class="amt">${drcr(outstanding)}</td></tr>`;
+          <td class="amt">${n2(billed)}</td><td class="amt">${neg(adjusted)}</td><td class="amt">${drcr(outstanding)}</td></tr>`;
         if (!detailed) return;
         shown.forEach((b) => {
           const onAccount = b.invoice_number === ON_ACCOUNT;
           rows += `<tr ${clickAttrs(b.doc, "po-bill")}>
             <td class="po-indent">${esc(billLabel(b))}</td><td>${ddmmyyyy(b.date)}</td><td>${esc(b.type)}</td><td>${esc(b.ref)}</td>
-            <td class="amt">${n2(b.billed)}</td><td class="amt">${n2(b.adjusted)}</td><td class="amt">${drcr(b.outstanding)}</td></tr>`;
+            <td class="amt">${n2(b.billed)}</td><td class="amt">${billAdjusted(b, detailed)}</td><td class="amt">${drcr(b.outstanding)}</td></tr>`;
           b.adjustments.forEach((a) => {
             rows += `<tr ${clickAttrs(a.doc, "po-adj")}>
               <td class="po-indent2">&#8627; ${onAccount ? "On Account" : "Adjusted"} - ${esc(a.type)}</td><td>${ddmmyyyy(a.date)}</td><td></td><td></td>
-              <td></td><td class="amt">${n2(adjAmount(a))}</td><td></td></tr>`;
+              <td></td><td class="amt">${neg(adjAmount(a))}</td><td></td></tr>`;
           });
         });
       });
     } else {
       // Bill Wise - flat list, oldest first; On Account (Unadjusted) rows last.
       const all = [];
-      data.parties.forEach((p) => p.bills.forEach((b) => {
+      parties.forEach((p) => p.bills.forEach((b) => {
         if ((showSettled || Math.abs(b.outstanding) >= 0.005) && matches(p, b)) all.push({ p, b });
       }));
       all.sort((x, y) => (x.b.invoice_number === ON_ACCOUNT) - (y.b.invoice_number === ON_ACCOUNT)
@@ -128,12 +152,12 @@
         const onAccount = b.invoice_number === ON_ACCOUNT;
         rows += `<tr ${clickAttrs(b.doc, "po-bill po-bill-flat")}>
           <td>${ddmmyyyy(b.date)}</td><td>${esc(billLabel(b))}</td><td>${esc(p.name)}</td><td>${esc(b.type)}</td><td>${esc(b.ref)}</td>
-          <td class="amt">${n2(b.billed)}</td><td class="amt">${n2(b.adjusted)}</td><td class="amt">${drcr(b.outstanding)}</td></tr>`;
+          <td class="amt">${n2(b.billed)}</td><td class="amt">${billAdjusted(b, detailed)}</td><td class="amt">${drcr(b.outstanding)}</td></tr>`;
         if (!detailed) return;
         b.adjustments.forEach((a) => {
           rows += `<tr ${clickAttrs(a.doc, "po-adj")}>
             <td>${ddmmyyyy(a.date)}</td><td class="po-indent" colspan="4">&#8627; ${onAccount ? "On Account" : "Adjusted"} - ${esc(a.type)}</td>
-            <td></td><td class="amt">${n2(adjAmount(a))}</td><td></td></tr>`;
+            <td></td><td class="amt">${neg(adjAmount(a))}</td><td></td></tr>`;
         });
       });
     }
@@ -142,20 +166,27 @@
     const word = view === "bill" ? "bill" : PARTY_LABEL.toLowerCase();
     $("po-total-label").textContent = `Grand Total${count ? ` (${count} ${word}${count === 1 ? "" : "s"})` : ""}`;
     $("po-total-billed").textContent = n2(tBilled);
-    $("po-total-adjusted").textContent = n2(tAdjusted);
+    $("po-total-adjusted").textContent = neg(tAdjusted);
     $("po-total-outstanding").innerHTML = drcr(tOutstanding);
   }
 
+  let loadSeq = 0; // only the latest load's result is used (loads can overlap)
   async function load() {
     const tbody = $("po-tbody");
+    const seq = ++loadSeq;
     tbody.innerHTML = `<tr><td colspan="8" class="po-empty">Loading...</td></tr>`;
     try {
       const qs = new URLSearchParams({ company_id: activeCompanyId, as_of: $("po-as-of").value || "" });
       const res = await fetch(`http://localhost:8000/api/${SIDE}/?${qs}`);
-      data = await res.json();
+      const result = await res.json();
+      if (seq !== loadSeq) return; // a newer load (e.g. the filter's Show) took over
+      data = result;
       if (!res.ok) throw new Error(data.error || `Server returned ${res.status}`);
+      // Customer / Supplier box suggestions = every party in the report.
+      $("po-party-list").innerHTML = data.parties.map((p) => `<option value="${esc(p.name)}">`).join("");
       render();
     } catch (err) {
+      if (seq !== loadSeq) return;
       console.error(err);
       data = null;
       tbody.innerHTML = `<tr><td colspan="8" class="po-empty">Could not load data. Is the Django backend running on localhost:8000?</td></tr>`;
@@ -171,7 +202,76 @@
     link.click();
   }
 
+  // ---------- Customer / Supplier filter ----------
   $("po-as-of").value = new Date().toISOString().slice(0, 10);
+  document.querySelector(".po-party-label").textContent = PARTY_LABEL;
+  $("po-all-label").textContent = `All ${PARTY_LABEL}s`;
+  $("po-party").placeholder = `Type ${PARTY_LABEL.toLowerCase()} name...`;
+  const syncPartyBox = () => { $("po-party").disabled = $("po-all").checked; };
+  $("po-all").addEventListener("change", () => { syncPartyBox(); render(); });
+  $("po-party").addEventListener("keydown", (e) => { if (e.key === "Enter") load(); });
+
+  // Opening the report fresh asks for the Customer / Supplier and As On date
+  // first (instead of loading everyone). "All Customers" there loads all.
+  function openFilterPopup() {
+    let modal = $("po-filter-modal");
+    // Lives on <body>, so it outlasts an in-app move between Receivables
+    // and Payables - rebuild it when it was made for the other side.
+    if (modal && modal.dataset.side !== SIDE) { modal.remove(); modal = null; }
+    if (!modal) {
+      modal = document.createElement("div");
+      modal.className = "dom-modal-backdrop";
+      modal.id = "po-filter-modal";
+      modal.dataset.side = SIDE;
+      modal.innerHTML = `
+        <div class="dom-modal-window">
+          <div class="dom-modal-titlebar"><div>${RECEIVABLE ? "Receivables" : "Payables"} - Filter</div>
+            <button type="button" class="dom-titlebar-btn btn-close" data-pf="close">&times;</button></div>
+          <div class="po-filter-body">
+            <label class="po-fl" for="pf-party">${PARTY_LABEL}</label>
+            <input type="text" class="form-control-custom" id="pf-party" list="po-party-list" autocomplete="off" placeholder="Type ${PARTY_LABEL.toLowerCase()} name..." />
+            <label class="po-fl" for="pf-as-of">As On</label>
+            <input type="date" class="form-control-custom" id="pf-as-of" />
+            <label class="po-filter-all"><input type="checkbox" id="pf-all" /> All ${PARTY_LABEL}s</label>
+            <div class="po-filter-hint" id="pf-hint"></div>
+          </div>
+          <div class="voyager-alert-actions">
+            <button type="button" class="dom-nav-btn" data-pf="close">Cancel</button>
+            <button type="button" class="dom-nav-btn btn-primary" data-pf="show">Show</button>
+          </div>
+        </div>`;
+      document.body.appendChild(modal);
+      const close = () => modal.classList.remove("open");
+      const show = () => {
+        const all = $("pf-all").checked;
+        const name = $("pf-party").value.trim();
+        if (!all && !name) { $("pf-hint").textContent = `Choose a ${PARTY_LABEL.toLowerCase()}, or tick All ${PARTY_LABEL}s.`; return; }
+        $("po-party").value = all ? "" : name;
+        $("po-all").checked = all;
+        $("po-as-of").value = $("pf-as-of").value || $("po-as-of").value;
+        $("po-as-of").dispatchEvent(new Event("change"));
+        syncPartyBox();
+        close();
+        load();
+      };
+      modal.querySelectorAll('[data-pf="close"]').forEach((b) => b.addEventListener("click", close));
+      modal.querySelector('[data-pf="show"]').addEventListener("click", show);
+      $("pf-all").addEventListener("change", () => { $("pf-party").disabled = $("pf-all").checked; $("pf-hint").textContent = ""; });
+      $("pf-party").addEventListener("input", () => { $("pf-hint").textContent = ""; });
+      modal.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") { e.preventDefault(); show(); }
+        if (e.key === "Escape") close();
+      });
+    }
+    $("pf-party").value = $("po-party").value;
+    $("pf-all").checked = $("po-all").checked;
+    $("pf-party").disabled = $("pf-all").checked;
+    $("pf-as-of").value = $("po-as-of").value;
+    $("pf-hint").textContent = "";
+    modal.classList.add("open");
+    setTimeout(() => $("pf-party").focus(), 0);
+  }
+
   $("po-apply").addEventListener("click", load);
   $("po-detailed").addEventListener("change", render);
   $("po-view-ledger").addEventListener("change", render);
@@ -193,8 +293,22 @@
     } catch (err) {
       console.error("Shell init failed", err);
     }
-    VoyagerShell.reportState.applyInputs(rs);
-    await load();
-    VoyagerShell.reportState.restoreAfterLoad(rs);
+    if (rs) {
+      // Back to this report -> same filter / options as it was left.
+      VoyagerShell.reportState.applyInputs(rs);
+      syncPartyBox();
+      await load();
+      VoyagerShell.reportState.restoreAfterLoad(rs);
+      return;
+    }
+    // Fresh open: Detailed View off, Show Settled Bills off, nothing loaded
+    // until a Customer / Supplier (or All) is chosen in the filter popup.
+    $("po-detailed").checked = false;
+    $("po-settled").checked = false;
+    $("po-all").checked = false;
+    $("po-party").value = "";
+    syncPartyBox();
+    load(); // in the background - fills the popup's name suggestions
+    openFilterPopup();
   })();
 })();

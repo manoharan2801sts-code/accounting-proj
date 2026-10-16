@@ -23,7 +23,8 @@
     min-height: 0;
     overflow-y: auto;
   }
-  .coa-row { display:flex; align-items:center; padding:0.42rem 0.85rem; font-size:0.82rem; border-bottom:1px solid var(--color-border-subtle); color:var(--color-text-body); transition:background var(--t-fast); }
+  /* Compact rows, same density as the report grids (about 26px). */
+  .coa-row { display:flex; align-items:center; min-height:26px; padding:0.18rem 0.85rem; font-size:12.5px; line-height:1.35; border-bottom:1px solid var(--color-border-subtle); color:var(--color-text-body); transition:background var(--t-fast); }
   .coa-row:last-child { border-bottom:none; }
   /* Alternating row bands + solid-blue hover, same look as the report
      grids (report-dsr-airline-booking.html etc.) - group rows keep their
@@ -42,8 +43,19 @@
   .coa-name a { color:var(--color-text-dark); text-decoration:none !important; }
   .coa-name a:hover { color:var(--color-primary); text-decoration:none !important; }
   .coa-actions { width:100px; text-align:right; display:flex; gap:0.3rem; justify-content:flex-end; }
-  .coa-actions a, .coa-actions button { border:1px solid var(--color-border); background:var(--color-white); color:var(--color-text-body); border-radius:var(--radius-xs); padding:0.2rem 0.45rem; font-size:0.72rem; cursor:pointer; text-decoration:none !important; transition:all var(--t-fast); }
+  .coa-actions a, .coa-actions button { border:1px solid var(--color-border); background:var(--color-white); color:var(--color-text-body); border-radius:var(--radius-xs); padding:0.05rem 0.4rem; font-size:0.7rem; line-height:1.4; cursor:pointer; text-decoration:none !important; transition:all var(--t-fast); }
   .coa-actions a:hover, .coa-actions button:hover { border-color:var(--color-primary); color:var(--color-primary); background:var(--color-bg-tint); }
+  /* Tight spacing like the report pages - small top padding, no extra
+     margin under the title. */
+  .app-main.coa-main { padding-top: 12px; }
+  .coa-main > h1 { margin: 0; }
+  .coa-main > .coa-toolbar-row { margin-top: 0.45rem !important; }
+  .coa-main > .card-glass { margin-top: 0.5rem !important; }
+  /* Compact toolbar - same size as the report pages' controls (26px). */
+  .coa-toolbar-row .global-search { max-width: 300px; }
+  .coa-toolbar-row .global-search input { height: 26px; padding: 0 0.6rem 0 1.85rem; font-size: 12px; border-radius: 2px; }
+  .coa-toolbar-row .global-search .icon { left: 0.55rem; }
+  .coa-toolbar-row .dom-nav-btn { text-decoration: none; display: inline-flex; align-items: center; }
 </style>
 </head><body>
 <header class="app-topnav" id="shell-topnav"></header>
@@ -51,12 +63,12 @@
   <aside class="app-sidebar" id="shell-sidebar"></aside>
   <main class="app-main coa-main">
     <h1 style="font-size:0.92rem;">Chart of Accounts</h1>
-    <div class="coa-toolbar-row" style="display:flex; justify-content:space-between; align-items:center; gap:1rem; margin-top:0.8rem; flex-wrap:wrap;">
-      <div class="global-search" style="max-width:340px; flex:1;">
-        <span class="icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg></span>
+    <div class="coa-toolbar-row" style="display:flex; justify-content:space-between; align-items:center; gap:1rem; margin-top:0.6rem; flex-wrap:wrap;">
+      <div class="global-search" style="flex:1;">
+        <span class="icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg></span>
         <input type="text" id="coa-search" placeholder="Search by ledger name, code, or group…" />
       </div>
-      <a href="ledger-entry.html" class="btn-brand" style="padding:0.5rem 1rem; font-size:0.85rem;">+ New Ledger</a>
+      <a href="ledger-entry.html" class="dom-nav-btn btn-primary">+ New Ledger</a>
     </div>
     <div class="card-glass" style="margin-top:0.7rem;">
       <div class="coa-row group" id="coa-header-row"><div class="coa-name">Account</div><div class="coa-type">Type</div><div class="coa-balance">Balance</div><div style="width:110px; text-align:right;">Actions</div></div>
@@ -71,6 +83,6 @@
 <script src="assets/js/util.js?v=5"></script>
 <script src="assets/js/entry-common.js"></script>
 <script src="assets/js/drilldown.js"></script>
-<script src="assets/js/shell.js?v=29"></script>
+<script src="assets/js/shell.js?v=31"></script>
 <script src="assets/js/page-accounts.js"></script>
 </body></html>

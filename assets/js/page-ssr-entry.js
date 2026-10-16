@@ -45,10 +45,19 @@
   };
   let mapped = new Set();
   let gstPct = {};
-  try {
-    const res = await fetch(`${API}master-mapping/?company_id=${activeCompanyId}&product_type=Airline`);
-    (res.ok ? await res.json() : []).forEach((r) => { mapped.add(r.field_name); gstPct[r.field_name] = Number(r.ledger_gst_percentage) || 0; });
-  } catch (_) { mapped = new Set(); gstPct = {}; }
+  // Ledger Mapping in force on the SSR's Invoice Date (effective dates) -
+  // reloaded when the date changes, same as the server's JV / totals.
+  async function loadMapping() {
+    const asOf = $("invoice_date").value;
+    try {
+      const res = await fetch(`${API}master-mapping/?company_id=${activeCompanyId}&product_type=Airline` + (asOf ? `&as_of=${asOf}` : ""));
+      const next = new Set(), pct = {};
+      (res.ok ? await res.json() : []).forEach((r) => { next.add(r.field_name); pct[r.field_name] = Number(r.ledger_gst_percentage) || 0; });
+      mapped = next; gstPct = pct;
+    } catch (_) { mapped = new Set(); gstPct = {}; }
+  }
+  await loadMapping();
+  $("invoice_date").addEventListener("change", async () => { await loadMapping(); render(); });
   const custGstPct = () => gstPct[FIELD.service_fee] || 0;
   const suppGstPct = () => gstPct[FIELD.supp_service_fee] || 0;
 
@@ -73,8 +82,19 @@
     const res = await fetch(`${API}voucher-type/?company_id=${activeCompanyId}`);
     voucherTypes = res.ok ? await res.json() : [];
   } catch (_) { voucherTypes = []; }
+  // Invoice Type = Voucher Type master entries under General only (same as
+  // Booking / Reschedule) - Journal / Payment / Receipt ... types belong to
+  // the Voucher screen, Credit Note types to Cancellation.
   $("invoice_type").innerHTML = `<option value="">Select...</option>` +
-    voucherTypes.filter((v) => v.is_active).map((v) => `<option value="${esc(v.name)}">${esc(v.name)}</option>`).join("");
+    voucherTypes.filter((v) => v.is_active && v.voucher_category === "General")
+      .map((v) => `<option value="${esc(v.name)}">${esc(v.name)}</option>`).join("");
+  // A saved SSR's own type stays visible even if it's not in that list.
+  const setInvoiceType = (name) => {
+    if (name && !Array.from($("invoice_type").options).some((o) => o.value === name)) {
+      $("invoice_type").insertAdjacentHTML("beforeend", `<option value="${esc(name)}">${esc(name)}</option>`);
+    }
+    $("invoice_type").value = name || "";
+  };
   $("invoice_type").addEventListener("change", async () => {
     const vt = voucherTypes.find((v) => v.name === $("invoice_type").value);
     const input = $("invoice_number");
@@ -140,7 +160,11 @@
     $("pc-gst").textContent = f2(pc.gst); $("pc-total").textContent = f2(purchaseTotal);
     $("sc-ssr").textContent = f2(ssr); $("sc-markup").textContent = f2(sc.markup); $("sc-sfee").textContent = f2(sc.sfee);
     $("sc-gst").textContent = f2(sc.gst); $("sc-total").textContent = f2(salesTotal);
-    $("earnings_total").textContent = f2(salesTotal - purchaseTotal);
+    // Earnings = Customer Markup + Addl Markup + SSR Markup + Customer Service
+    // Fee + Addl Service Fee + SSR Service Fee + Supplier Commission -
+    // Customer Discount. An SSR line carries just the customer SSR Markup and
+    // SSR Service Fee (no addl fields, commission or discount - those are 0).
+    $("earnings_total").textContent = f2(sum((l) => n(l.markup)) + sum((l) => n(l.service_fee)));
   }
 
   const open = (id) => $(id).classList.add("open");
@@ -328,6 +352,12 @@
         : (data.passengers || []);
       renderPicker();
       close("ssr-lookup-modal");
+      // One passenger with one sector - nothing to choose (renderPicker has
+      // already ticked both), so add the SSR line straight away.
+      if (document.querySelectorAll(".sp-pax").length === 1 && document.querySelectorAll(".sp-sector").length === 1) {
+        $("sp-add-btn").click();
+        return;
+      }
       open("ssr-pax-modal");
     } catch (err) {
       voyagerAlert(err.message || "Could not search for this ticket. Is the Django backend running?", { icon: "error" });
@@ -516,7 +546,7 @@
       const d = await res.json();
       if (!res.ok) throw new Error(d.error || "SSR Updation not found.");
       $("page-title").textContent = `View SSR Updation - ${d.invoice_number}`;
-      $("invoice_type").value = d.invoice_type || "";
+      setInvoiceType(d.invoice_type || "");
       $("invoice_number").value = d.invoice_number || "";
       setDate("invoice_date", d.invoice_date);
       $("user_name").value = d.user_name || "";
@@ -619,6 +649,8 @@
         paxType: (l.pax_type || "").toUpperCase(), productType: "SSR", gdsPnr: $("gds_pnr").textContent.replace("—", ""),
         airline: "", ticketNo: l.ticket_no || "", cls: "", flight: ssrSummary(l), travelDate: "",
         fare: 0, tax: 0, discount: 0,
+        // Template 3 (Performa) passenger table: SSR split.
+        yq: 0, baggage: n(l.baggage), seat: n(l.seat), meal: n(l.meal), otherSsr: n(l.other_ssr),
         // Tax Invoice (classic) columns + GST summary, same rule as the Booking /
         // Reschedule print: customer + supplier SSR Markup, customer + supplier
         // SSR Service Fee, customer GST + supplier GST (split IGST or CGST / SGST).
@@ -650,7 +682,7 @@
       },
       invoiceNoLabel: "Invoice No", invoiceNo: $("invoice_number").value,
       invoiceDateLabel: "Invoice Date", invoiceDate: ($("invoice_date").value || "").split("-").reverse().join("/"),
-      refLabel: "SSR Reference", refValue: $("ssr_reference").value,
+      refLabel: "SSR Reference", refValue: $("ssr_reference").value, airlinePnr: $("airline_pnr").textContent.replace("—", ""),
       customer: { name: cust.name || $("customer").textContent, code: cust.code || "", address: cust.address || "", state: custState, gst_no: cust.gst_no || "", pan: "" },
       placeOfSupply: custState,
       infoRows: [["Original Invoice", $("original_invoice").textContent], ["Airline PNR", $("airline_pnr").textContent],

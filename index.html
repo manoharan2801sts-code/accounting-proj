@@ -11,6 +11,14 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
 <link href="assets/css/design-system.css" rel="stylesheet" />
 <link href="assets/css/app.css?v=7" rel="stylesheet" />
+<style>
+  /* Version line with dashed rules either side, then "Powered By" + logo. */
+  .login-card-footer { margin-top: 1.4rem; padding-top: 0.9rem; border-top: 1px solid var(--color-border-subtle); text-align: center; }
+  .login-version { display: flex; align-items: center; gap: 0.75rem; font-size: 12px; font-weight: 600; color: var(--color-text-muted); }
+  .login-version::before, .login-version::after { content: ""; flex: 1; border-top: 1px dashed var(--color-primary-light, #93B4E0); }
+  .login-powered { display: flex; align-items: center; justify-content: center; gap: 0.45rem; margin-top: 0.55rem; font-size: 12px; color: var(--color-text-muted); }
+  .login-powered img { height: 22px; width: auto; display: block; }
+</style>
 </head>
 <body>
 
@@ -94,6 +102,15 @@
           <button type="submit" class="btn-brand" style="width:100%;">Verify &amp; sign in</button>
         </form>
         <button class="btn-outline-brand" style="width:100%; margin-top:0.7rem;" id="back-to-login">Back</button>
+      </div>
+
+      <!-- Version + Powered By (bottom of the card, both steps) -->
+      <div class="login-card-footer">
+        <div class="login-version"><span>Version : V1.001</span></div>
+        <div class="login-powered">
+          <span>Powered By</span>
+          <img src="assets/img/tesepr-logo.svg?v=2" alt="TeSePr" />
+        </div>
       </div>
 
     </div>

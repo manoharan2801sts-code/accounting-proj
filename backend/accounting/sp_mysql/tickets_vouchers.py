@@ -818,7 +818,7 @@ def _insert_ticket_jv(cid, branch_name, invoice_date, narration, ticket_id, tota
 # dbo.sp_Voucher
 # ---------------------------------------------------------------------------
 
-_VOUCHER_COLS = "id, voucher_no, branch_name, voucher_type, voucher_date, narration, total_debit, total_credit, lines_json"
+_VOUCHER_COLS = "id, voucher_no, branch_name, voucher_type, voucher_type_name, voucher_date, narration, total_debit, total_credit, lines_json"
 
 
 def _text(rows):
@@ -857,7 +857,13 @@ def _voucher_prefix(voucher_type):
 def voucher_next_number(p):
     cid = _p_int(p.get("CompanyId"))
     vtype = _p_str(p.get("VoucherType"), 50) or "Journal"
+    vtype_name = _p_str(p.get("VoucherTypeName"), 100)
     prefix = _voucher_prefix(vtype)
+    if vtype_name:
+        m_row = query_one("SELECT `id` FROM `VoucherType` WHERE `company_id` = %s AND `name` = %s LIMIT 1", [cid, vtype_name])
+        if m_row and m_row.get("id"):
+            prefix = f"{prefix}{m_row['id']}"
+
     rows = query(
         "SELECT `voucher_no` FROM `Vouchers` WHERE company_id = %s AND category = 'MANUAL' AND `voucher_no` LIKE %s",
         [cid, f"{prefix}-%"],
@@ -894,6 +900,8 @@ def voucher_save(p):
     voucher_date = _p_date(p.get("VoucherDate"))
     narration = _p_str(p.get("Narration"), 250)
     lines_json = _p_str(p.get("LinesJson"))
+    voucher_type_name = _p_str(p.get("VoucherTypeName"), 100)
+    manual_no = _p_str(p.get("ManualNo"), 30)
 
     required = "company_id, voucher_date, and at least 2 lines are required."
     if cid is None or voucher_date is None:
@@ -951,39 +959,73 @@ def voucher_save(p):
         with transaction.atomic():
             vtype = voucher_type if voucher_type is not None else "Journal"
             prefix = _voucher_prefix(vtype)
+            master_type_id = None
+            number_method = "Automatic"
+            if voucher_type_name:
+                m_row = query_one("SELECT `id`, `number_method` FROM `VoucherType` WHERE `company_id` = %s AND `name` = %s LIMIT 1", [cid, voucher_type_name])
+                if m_row:
+                    master_type_id = m_row.get("id")
+                    number_method = m_row.get("number_method") or "Automatic"
+
+            if master_type_id:
+                prefix = f"{prefix}{master_type_id}"
+
+            m_no = manual_no.strip() if manual_no and manual_no.strip() else None
+            use_manual_no = (number_method in ("Manual", "Automatic & Manual Override") and m_no is not None)
+
+            if number_method == "Manual" and m_no is None and vid is None:
+                return _err("Voucher No. is required (this voucher type is numbered manually).")
+
+            if use_manual_no and "-" in m_no:
+                return _err('Voucher No. cannot contain "-".')
+
+            manual_full_no = f"{prefix}-{m_no}" if use_manual_no else None
+            if use_manual_no:
+                if query_one(
+                    "SELECT 1 AS x FROM `Vouchers` WHERE `company_id` = %s AND `voucher_no` = %s AND (%s IS NULL OR `id` <> %s) LIMIT 1",
+                    [cid, manual_full_no, vid, vid]
+                ):
+                    return _err(f'Voucher No. {m_no} already exists for this voucher type.')
+
             if vid is not None:
                 execute("""
                     UPDATE `Vouchers`
-                    SET branch_name = %s, voucher_type = %s, voucher_date = %s,
+                    SET branch_name = %s, voucher_type = %s, voucher_type_name = %s, voucher_date = %s,
                         narration = %s, total_debit = %s, total_credit = %s, lines_json = %s
                     WHERE id = %s
-                """, [branch_name, vtype, voucher_date, narration, total_debit, total_credit, resolved_json, vid])
+                """, [branch_name, vtype, voucher_type_name, voucher_date, narration, total_debit, total_credit, resolved_json, vid])
+                if use_manual_no:
+                    execute("UPDATE `Vouchers` SET `voucher_no` = %s WHERE `id` = %s", [manual_full_no, vid])
                 result_id = vid
             else:
-                rows = query(
-                    "SELECT `voucher_no` FROM `Vouchers` WHERE company_id = %s AND category = 'MANUAL' AND `voucher_no` LIKE %s",
-                    [cid, f"{prefix}-%"],
-                )
-                max_num = 0
-                pattern = re.compile(rf"^{re.escape(prefix)}-(\d+)$")
-                for r in rows:
-                    vno = r.get("voucher_no") or ""
-                    m = pattern.match(vno)
-                    if m:
-                        try:
-                            num = int(m.group(1))
-                            if num > max_num:
-                                max_num = num
-                        except ValueError:
-                            pass
-                vch_no = f"{prefix}-{max_num + 1}"
+                if use_manual_no:
+                    vch_no = manual_full_no
+                else:
+                    rows = query(
+                        "SELECT `voucher_no` FROM `Vouchers` WHERE company_id = %s AND category = 'MANUAL' AND `voucher_no` LIKE %s",
+                        [cid, f"{prefix}-%"],
+                    )
+                    max_num = 0
+                    pattern = re.compile(rf"^{re.escape(prefix)}-(\d+)$")
+                    for r in rows:
+                        vno = r.get("voucher_no") or ""
+                        m = pattern.match(vno)
+                        if m:
+                            try:
+                                num = int(m.group(1))
+                                if num > max_num:
+                                    max_num = num
+                            except ValueError:
+                                pass
+                    vch_no = f"{prefix}-{max_num + 1}"
+
                 now = _now()
                 _, result_id = execute("""
                     INSERT INTO `Vouchers`
-                        (company_id, branch_name, voucher_type, voucher_date, narration, category, voucher_no,
+                        (company_id, branch_name, voucher_type, voucher_type_name, voucher_date, narration, category, voucher_no,
                          total_debit, total_credit, lines_json, created_at, updated_at)
-                    VALUES (%s, %s, %s, %s, %s, 'MANUAL', %s, %s, %s, %s, %s, %s)
-                """, [cid, branch_name, vtype, voucher_date, narration, vch_no,
+                    VALUES (%s, %s, %s, %s, %s, %s, 'MANUAL', %s, %s, %s, %s, %s, %s)
+                """, [cid, branch_name, vtype, voucher_type_name, voucher_date, narration, vch_no,
                       total_debit, total_credit, resolved_json, now, now])
                 result_id = int(result_id)
         rows = _text(query(f"SELECT {_VOUCHER_COLS}, 'Success' AS status FROM `Vouchers` WHERE id = %s", [result_id]))

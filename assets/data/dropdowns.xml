@@ -186,6 +186,7 @@
     <option>Journal</option>
     <option>Payment</option>
     <option>Receipt</option>
+    <option>Contra</option>
     <option>Debit Note</option>
     <option>Credit Note</option>
   </list>

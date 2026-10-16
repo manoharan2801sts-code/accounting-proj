@@ -192,6 +192,7 @@ def voucher_type_save(p):
     voucher_category = _str(p.get("VoucherCategory"), 20)
     is_active = _bit(p.get("IsActive"))
     number_method = _str(p.get("NumberMethod"), 30)
+    numbering_behaviour = _str(p.get("NumberingBehaviour"), 30)
     allow_additional_numbering = _bit(p.get("AllowAdditionalNumbering"))
     allow_effective_dates = _bit(p.get("AllowEffectiveDates"))
     allow_narration = _bit(p.get("AllowNarration"))
@@ -222,43 +223,81 @@ def voucher_type_save(p):
     voucher_category = "General" if voucher_category is None else voucher_category
     is_active = True if is_active is None else is_active
     number_method = "Automatic" if number_method is None else number_method
+    if number_method == "Automatic":
+        numbering_behaviour = numbering_behaviour if numbering_behaviour else "Keep Original Numbers"
+    else:
+        numbering_behaviour = None
+
+    if numbering_behaviour is not None and numbering_behaviour not in ("Restart Numbers", "Keep Original Numbers"):
+        return _err("Numbering must be Restart Numbers or Keep Original Numbers.")
+
     allow_additional_numbering = False if allow_additional_numbering is None else allow_additional_numbering
     allow_effective_dates = False if allow_effective_dates is None else allow_effective_dates
     allow_narration = True if allow_narration is None else allow_narration
     an_prefill = False if an_prefill is None else an_prefill
     an_restart_period = "None" if an_restart_period is None else an_restart_period
 
+    renumbered = 0
     try:
         with transaction.atomic():
             was_created = False
             if vt_id is not None:
-                # `updated_at = updated_at` keeps MySQL's ON UPDATE
-                # CURRENT_TIMESTAMP from firing: the T-SQL UPDATE leaves
-                # updated_at untouched.
+                old_row = query_one("SELECT `name` FROM `VoucherType` WHERE `id` = %s AND `company_id` = %s", [vt_id, company_id])
+                old_name = old_row["name"] if old_row else None
+
                 execute(
                     "UPDATE `VoucherType` SET `name` = %s, `alias_name` = %s, `voucher_category` = %s,"
-                    " `is_active` = %s, `number_method` = %s, `allow_additional_numbering` = %s,"
-                    " `allow_effective_dates` = %s, `allow_narration` = %s,"
+                    " `is_active` = %s, `number_method` = %s, `numbering_behaviour` = %s,"
+                    " `allow_additional_numbering` = %s, `allow_effective_dates` = %s, `allow_narration` = %s,"
                     " `an_width_of_invoice_number` = %s, `an_prefill_with_zero` = %s,"
                     " `an_restart_applicable_from` = %s, `an_restart_starting_number` = %s,"
                     " `an_restart_period` = %s, `an_prefix_details` = %s, `an_suffix_details` = %s,"
                     " `updated_at` = `updated_at`"
                     " WHERE `id` = %s AND `company_id` = %s",
-                    [name, alias_name, voucher_category, is_active, number_method,
+                    [name, alias_name, voucher_category, is_active, number_method, numbering_behaviour,
                      allow_additional_numbering, allow_effective_dates, allow_narration,
                      an_width, an_prefill, an_restart_from, an_restart_start, an_restart_period,
                      an_prefix, an_suffix, vt_id, company_id],
                 )
                 result_id = vt_id
+
+                if old_name and old_name != name:
+                    execute(
+                        "UPDATE `Vouchers` SET `voucher_type_name` = %s, `updated_at` = UTC_TIMESTAMP(6) "
+                        "WHERE `company_id` = %s AND `category` = 'MANUAL' AND `voucher_type_name` = %s",
+                        [name, company_id, old_name],
+                    )
+
+                if number_method == "Automatic" and numbering_behaviour == "Restart Numbers":
+                    cat_map = {"Payment": "PV", "Receipt": "RV", "Contra": "CV", "Debit Note": "DN", "Credit Note": "CN"}
+                    vouchers = query(
+                        "SELECT `id`, `voucher_type`, `voucher_no` FROM `Vouchers` "
+                        "WHERE `company_id` = %s AND `category` = 'MANUAL' AND `voucher_type_name` = %s "
+                        "ORDER BY `voucher_date`, `id`",
+                        [company_id, name],
+                    )
+                    prefix_tag = cat_map.get(voucher_category, "JV") + str(result_id)
+                    to_renumber = []
+                    for idx, v in enumerate(vouchers, 1):
+                        new_no = f"{prefix_tag}-{idx}"
+                        if v["voucher_no"] != new_no:
+                            to_renumber.append((v["id"], new_no))
+
+                    renumbered = len(to_renumber)
+                    for vid, new_no in to_renumber:
+                        execute("UPDATE `Vouchers` SET `voucher_no` = %s WHERE `id` = %s", [f"TMPRN-{vid}", vid])
+                    for vid, new_no in to_renumber:
+                        execute("UPDATE `Vouchers` SET `voucher_no` = %s, `updated_at` = UTC_TIMESTAMP(6) WHERE `id` = %s", [new_no, vid])
+
             else:
                 _, result_id = execute(
                     "INSERT INTO `VoucherType` (`company_id`, `name`, `alias_name`, `voucher_category`,"
-                    " `is_active`, `number_method`, `allow_additional_numbering`, `allow_effective_dates`,"
+                    " `is_active`, `number_method`, `numbering_behaviour`, `allow_additional_numbering`, `allow_effective_dates`,"
                     " `allow_narration`, `an_width_of_invoice_number`, `an_prefill_with_zero`,"
                     " `an_restart_applicable_from`, `an_restart_starting_number`, `an_restart_period`,"
                     " `an_prefix_details`, `an_suffix_details`)"
-                    " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
-                    [company_id, name, alias_name, voucher_category, is_active, number_method,
+                    " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                    [company_id, name, alias_name, voucher_category, is_active, number_method, numbering_behaviour,
                      allow_additional_numbering, allow_effective_dates, allow_narration,
                      an_width, an_prefill, an_restart_from, an_restart_start, an_restart_period,
                      an_prefix, an_suffix],
@@ -270,6 +309,7 @@ def voucher_type_save(p):
     for r in rows:
         bits(r, *_VT_BITS)
         r["was_created"] = was_created
+        r["renumbered"] = renumbered
         r["status"] = "Success"
     return rows
 
@@ -713,6 +753,24 @@ def _mm_rows(rows):
     return rows
 
 
+@sp("dbo.sp_MasterMapping", "HISTORY_LIST")
+def master_mapping_history_list(p):
+    company_id = _int(p.get("CompanyId"))
+    product_type = _str(p.get("ProductType"), 20)
+    field_name = _str(p.get("FieldName"), 60)
+    return _mm_rows(query(
+        "SELECT h.`product_type`, h.`masters_category`, h.`field_name`, h.`ledger_id`, h.`ledger_name`,"
+        " IFNULL(l.`gst_percentage`, 0) AS `ledger_gst_percentage`, h.`effective_from`"
+        " FROM `MasterMappingHistory` h"
+        " LEFT JOIN `Ledgers` l ON l.`id` = h.`ledger_id`"
+        " WHERE h.`company_id` = %s"
+        f" AND (%s IS NULL OR {_ci('h.`product_type`')})"
+        f" AND (%s IS NULL OR {_ci('h.`field_name`')})"
+        " ORDER BY h.`product_type`, h.`field_name`, h.`effective_from`",
+        [company_id, product_type, product_type, field_name, field_name],
+    ))
+
+
 @sp("dbo.sp_MasterMapping", "LIST")
 def master_mapping_list(p):
     company_id = _int(p.get("CompanyId"))
@@ -752,12 +810,39 @@ def master_mapping_save_row(p):
     key_params = [company_id, product_type, field_name]
     try:
         with transaction.atomic():
+            # Upsert into MasterMappingHistory
+            if query_one(
+                f"SELECT 1 AS x FROM `MasterMappingHistory` WHERE `company_id` = %s AND {_ci('`product_type`')} AND {_ci('`field_name`')} AND `effective_from` = %s",
+                [company_id, product_type, field_name, effective_from]
+            ):
+                execute(
+                    "UPDATE `MasterMappingHistory` SET `masters_category` = %s, `ledger_id` = %s, `ledger_name` = %s, `updated_at` = UTC_TIMESTAMP(6) "
+                    f"WHERE `company_id` = %s AND {_ci('`product_type`')} AND {_ci('`field_name`')} AND `effective_from` = %s",
+                    [masters_category, ledger_id, ledger_name, company_id, product_type, field_name, effective_from],
+                )
+            else:
+                execute(
+                    "INSERT INTO `MasterMappingHistory` (`company_id`, `product_type`, `masters_category`, `field_name`, `ledger_id`, `ledger_name`, `effective_from`, `created_at`, `updated_at`) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))",
+                    [company_id, product_type, masters_category, field_name, ledger_id, ledger_name, effective_from],
+                )
+
+            # Get latest effective mapping
+            latest = query_one(
+                f"SELECT `ledger_id`, `ledger_name`, `effective_from`, `masters_category` FROM `MasterMappingHistory` WHERE `company_id` = %s AND {_ci('`product_type`')} AND {_ci('`field_name`')} ORDER BY `effective_from` DESC LIMIT 1",
+                [company_id, product_type, field_name]
+            )
+            live_cat = latest["masters_category"] if latest else masters_category
+            live_lid = latest["ledger_id"] if latest else ledger_id
+            live_lname = latest["ledger_name"] if latest else ledger_name
+            live_eff = latest["effective_from"] if latest else effective_from
+
             if query_one(f"SELECT 1 AS x FROM `MasterMapping` WHERE {key_where}", key_params):
                 execute(
                     "UPDATE `MasterMapping` SET `masters_category` = %s, `masters_category_id` = %s,"
                     " `ledger_id` = %s, `ledger_name` = %s, `effective_from` = %s,"
                     f" `updated_at` = UTC_TIMESTAMP(6) WHERE {key_where}",
-                    [masters_category, cat_id, ledger_id, ledger_name, effective_from] + key_params,
+                    [live_cat, cat_id, live_lid, live_lname, live_eff] + key_params,
                 )
                 found = query(f"SELECT `id` FROM `MasterMapping` WHERE {key_where} ORDER BY `id`", key_params)
                 result_id = found[-1]["id"] if found else None
@@ -767,8 +852,8 @@ def master_mapping_save_row(p):
                     " `masters_category_id`, `field_name`, `ledger_id`, `ledger_name`, `effective_from`,"
                     " `created_at`, `updated_at`)"
                     " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))",
-                    [company_id, product_type, masters_category, cat_id, field_name, ledger_id,
-                     ledger_name, effective_from],
+                    [company_id, product_type, live_cat, cat_id, field_name, live_lid,
+                     live_lname, live_eff],
                 )
         rows = query(
             _MM_SELECT + ", 'Success' AS `status`"

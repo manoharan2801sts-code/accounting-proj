@@ -183,6 +183,10 @@
     modal.querySelector("#voyager-confirm-message").textContent = message;
     modal.querySelector("#voyager-confirm-title").textContent = (opts && opts.title) || "Please Confirm";
     modal.querySelector("#voyager-confirm-ok").textContent = (opts && opts.confirmLabel) || "Delete";
+    // Red (delete-style) button by default; opts.confirmStyle "primary" = blue,
+    // for a normal "are you sure" that doesn't remove anything.
+    modal.querySelector("#voyager-confirm-ok").className =
+      `dom-nav-btn ${opts && opts.confirmStyle === "primary" ? "btn-primary" : "btn-danger"}`;
     modal.querySelector("#voyager-confirm-icon").innerHTML = CONFIRM_ICONS[(opts && opts.icon) || "warning"];
     modal.classList.add("open");
     // preventScroll - see voyagerAlert's identical comment above.
@@ -318,7 +322,7 @@
       editTriggers: [[".grp-name", "click"]],
     },
     "accounts.html": {
-      add: ['a.btn-brand[href="ledger-entry.html"]'],
+      add: ['a[href="ledger-entry.html"].btn-brand, a[href="ledger-entry.html"].dom-nav-btn'],
       delete: [".delete-ledger-btn"],
     },
     "ledger-entry.html": {

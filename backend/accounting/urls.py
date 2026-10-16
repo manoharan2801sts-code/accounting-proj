@@ -7,6 +7,7 @@ urlpatterns = [
     path("ledgers/create/", views.ledger_create, name="ledger-create"),
     path("ledgers/name-available/", views.ledger_name_available, name="ledger-name-available"),
     path("ledgers/agent-id-available/", views.ledger_agent_id_available, name="ledger-agent-id-available"),
+    path("ledgers/default-bank/", views.ledger_default_bank, name="ledger-default-bank"),
     path("ledgers/<int:ledger_id>/", views.ledger_detail, name="ledger-detail"),
     path("ledgers/<int:ledger_id>/update/", views.ledger_update, name="ledger-update"),
     path("ledgers/<int:ledger_id>/delete/", views.ledger_delete, name="ledger-delete"),

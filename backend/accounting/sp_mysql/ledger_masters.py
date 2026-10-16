@@ -295,13 +295,14 @@ _LEDGER_FIELDS = [
     ("hsn_code", "HsnCode", "str", 15, None),
     ("tcs_applicable", "TcsApplicable", "bit", None, None),
     ("tcs_percentage", "TcsPercentage", "dec", 5, 2),
+    ("is_default_bank", "IsDefaultBank", "bit", None, None),
 ]
 
 # SAVE's ISNULL(@X, <default>) for the NOT NULL tax columns.
 _LEDGER_SAVE_DEFAULTS = {
     "gst_applicable": False, "gst_percentage": decimal.Decimal("0"),
     "tds_applicable": False, "tds_percentage": decimal.Decimal("0"),
-    "tcs_applicable": False, "tcs_percentage": decimal.Decimal("0"),
+    "tcs_applicable": False, "tcs_percentage": decimal.Decimal("0"), "is_default_bank": False,
 }
 
 
@@ -325,7 +326,7 @@ def ledger_list(params):
         "SELECT `id`, `company_id`, `name`, `group_id` AS `parent_id`, `account_type`, `ledger_category`, "
         "`opening_balance`, "
         "CASE WHEN LOWER(RTRIM(`opening_balance_type`)) = 'debit' THEN `opening_balance` ELSE -`opening_balance` END AS `balance`, "
-        "`opening_balance_type`, `agent_id`, `office_id`, `supplier_code` "
+        "`opening_balance_type`, `agent_id`, `office_id`, `supplier_code`, `is_default_bank` "
         "FROM `Ledgers` WHERE `company_id` = %s ORDER BY `id`",
         [_p_int(params, "CompanyId")],
     )
@@ -374,11 +375,11 @@ def ledger_get_by_id(params):
         "`tax_category`, `tax_type`, "
         "`gst_applicable`, `gst_tax_type`, `gst_percentage`, "
         "`tds_applicable`, `tds_percentage`, `hsn_code`, "
-        "`tcs_applicable`, `tcs_percentage` "
+        "`tcs_applicable`, `tcs_percentage`, `is_default_bank` "
         "FROM `Ledgers` WHERE `id` = %s AND `company_id` = %s",
         [_p_int(params, "Id"), _p_int(params, "CompanyId")],
     )
-    return [bits(r, "gst_applicable", "tds_applicable", "tcs_applicable") for r in rows]
+    return [bits(r, "gst_applicable", "tds_applicable", "tcs_applicable", "is_default_bank") for r in rows]
 
 
 @sp("dbo.sp_Ledger", "GET_BY_NAME")
@@ -469,6 +470,12 @@ def ledger_save(params):
             )
     except DatabaseError as err:
         return _err(_db_error_message(err))
+
+    if fields.get("is_default_bank"):
+        execute(
+            "UPDATE `Ledgers` SET `is_default_bank` = 0, `updated_at` = %s WHERE `company_id` = %s AND `id` <> %s AND `is_default_bank` = 1",
+            [now, company_id, new_id],
+        )
 
     return query(
         "SELECT `id`, `name`, `group_id` AS `parent_id`, 'Success' AS `status` FROM `Ledgers` WHERE `id` = %s",
@@ -595,6 +602,8 @@ def company_master_list(params):
 def company_master_set_invoice_template(params):
     company_id = _p_int(params, "Id")
     template = _p_str(params, "InvoiceTemplate", 20) or "classic"
+    if template not in ("classic", "payment", "proforma"):
+        return _err("Invalid template (must be classic, payment or proforma).")
     if not query_one("SELECT 1 AS `x` FROM `CompanyMaster` WHERE `id` = %s", [company_id]):
         return _err("Company not found.")
     execute(

@@ -83,11 +83,42 @@
     });
   });
 
+  // ---------- Numbering (Automatic numbering only) ----------
+  // "Numbering" (Restart Numbers / Keep Original Numbers) only applies to
+  // Automatic numbering: the field shows only then, and choosing Automatic
+  // in Voucher Number Method opens a popup asking for it.
+  const numberingField = document.getElementById("vt-numbering-field");
+  const numberingModal = document.getElementById("numbering-modal");
+  function syncNumberingField() {
+    numberingField.style.display = document.getElementById("vt-number-method").value === "Automatic" ? "" : "none";
+  }
+  function openNumberingModal() {
+    document.getElementById("numbering-modal-select").value = document.getElementById("vt-numbering").value || "Keep Original Numbers";
+    numberingModal.classList.add("open");
+    setTimeout(() => document.getElementById("numbering-modal-select").focus(), 0);
+  }
+  const closeNumberingModal = () => numberingModal.classList.remove("open");
+  document.getElementById("vt-number-method").addEventListener("change", (e) => {
+    syncNumberingField();
+    if (e.target.value === "Automatic") openNumberingModal();
+  });
+  document.getElementById("numbering-ok-btn").addEventListener("click", () => {
+    document.getElementById("vt-numbering").value = document.getElementById("numbering-modal-select").value;
+    closeNumberingModal();
+  });
+  ["numbering-cancel-btn", "numbering-close-x-btn"].forEach((id) => document.getElementById(id).addEventListener("click", closeNumberingModal));
+  numberingModal.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); document.getElementById("numbering-ok-btn").click(); }
+    if (e.key === "Escape") closeNumberingModal();
+  });
+
   function clearForm() {
     document.getElementById("vt-name").value = "";
     document.getElementById("vt-alias").value = "";
     document.getElementById("vt-type").value = "General";
     document.getElementById("vt-number-method").value = "Automatic";
+    document.getElementById("vt-numbering").value = "Keep Original Numbers";
+    syncNumberingField();
     setToggleValue("vt-active", true);
     setToggleValue("vt-addl-numbering", false);
     setToggleValue("vt-effective-dates", false);
@@ -112,6 +143,8 @@
     document.getElementById("vt-alias").value = vt.alias_name || "";
     document.getElementById("vt-type").value = vt.voucher_category || "General";
     document.getElementById("vt-number-method").value = vt.number_method || "Automatic";
+    document.getElementById("vt-numbering").value = vt.numbering_behaviour || "Keep Original Numbers";
+    syncNumberingField();
     setToggleValue("vt-active", vt.is_active);
     setToggleValue("vt-addl-numbering", vt.allow_additional_numbering);
     setToggleValue("vt-effective-dates", vt.allow_effective_dates);
@@ -198,6 +231,9 @@
       voucher_category: document.getElementById("vt-type").value,
       is_active: getToggleValue("vt-active"),
       number_method: document.getElementById("vt-number-method").value,
+      // Automatic only (the server also clears it for the other methods).
+      numbering_behaviour: document.getElementById("vt-number-method").value === "Automatic"
+        ? document.getElementById("vt-numbering").value : null,
       allow_additional_numbering: getToggleValue("vt-addl-numbering"),
       allow_effective_dates: getToggleValue("vt-effective-dates"),
       allow_narration: getToggleValue("vt-narration"),
@@ -225,7 +261,9 @@
         return;
       }
       const verb = editingId ? "updated" : "saved";
-      await window.voyagerAlert(`Voucher Type "${data.name}" ${verb} successfully.`, { icon: "success" });
+      // Restart Numbers renumbers this type's old vouchers - say how many.
+      const renumbered = data.renumbered ? ` ${data.renumbered} existing voucher${data.renumbered === 1 ? " was" : "s were"} renumbered in date order.` : "";
+      await window.voyagerAlert(`Voucher Type "${data.name}" ${verb} successfully.${renumbered}`, { icon: "success" });
       clearForm();
     } catch (err) {
       console.error("Voucher Type save failed", err);

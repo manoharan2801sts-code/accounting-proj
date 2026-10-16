@@ -170,6 +170,14 @@
             <select id="vt-number-method" data-options="numberMethods">
             </select>
           </div>
+          <!-- Automatic numbering only - shown/hidden by page-voucher-type.js -->
+          <div class="vt-field" id="vt-numbering-field">
+            <label>Numbering</label>
+            <select id="vt-numbering">
+              <option value="Restart Numbers">Restart Numbers</option>
+              <option value="Keep Original Numbers" selected>Keep Original Numbers</option>
+            </select>
+          </div>
           <div class="vt-field">
             <label>Additional Numbering Details</label>
             <div class="vt-toggle-row">
@@ -218,6 +226,30 @@
     <div class="dom-modal-footer">
       <div></div>
       <button type="button" class="dom-nav-btn" id="vt-list-cancel-btn">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Asked when Voucher Number Method is changed to Automatic. -->
+<div class="dom-modal-backdrop spa-extra-content" id="numbering-modal">
+  <div class="dom-modal-window" style="max-width: 380px; width: 95%;">
+    <div class="dom-modal-titlebar">
+      <div>Numbering</div>
+      <button type="button" class="dom-titlebar-btn btn-close" id="numbering-close-x-btn" title="Close">&times;</button>
+    </div>
+    <div class="dom-modal-body" style="display:block; padding:14px;">
+      <div class="vt-field">
+        <label>Numbering</label>
+        <select id="numbering-modal-select">
+          <option value="Restart Numbers">Restart Numbers</option>
+          <option value="Keep Original Numbers">Keep Original Numbers</option>
+        </select>
+      </div>
+    </div>
+    <div class="dom-modal-footer">
+      <div></div>
+      <button type="button" class="dom-nav-btn" id="numbering-cancel-btn">Cancel</button>
+      <button type="button" class="dom-nav-btn btn-primary" id="numbering-ok-btn">OK</button>
     </div>
   </div>
 </div>
@@ -281,6 +313,6 @@
 <script src="assets/js/hardcode.js?v=2"></script>
 <script src="assets/js/mock-data.js"></script>
 <script src="assets/js/api.js?v=4"></script>
-<script src="assets/js/shell.js?v=29"></script>
-<script src="assets/js/page-voucher-type.js"></script>
+<script src="assets/js/shell.js?v=31"></script>
+<script src="assets/js/page-voucher-type.js?v=3"></script>
 </body></html>

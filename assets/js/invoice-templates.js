@@ -16,6 +16,7 @@
   const TEMPLATES = [
     { key: "classic", name: "Template 1", description: "The original layout - company header, Billed To, item table and HSN/SAC tax summary." },
     { key: "payment", name: "Template 2", description: "Proforma-style layout - company & GST block, Trip ID, passenger and fare tables, Total Due summary, HSN/SAC GST table." },
+    { key: "proforma", name: "Template 3", description: "Performa layout - From / To blocks, flight details, passenger fare table (YQ / taxes / SSR split), Gross to Net Amount summary." },
   ];
 
   const esc = (s) => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -67,6 +68,13 @@
       const isNum = col.align === "r";
       return `<td${isNum ? ' class="r"' : (col.align === "c" ? ' style="text-align:center;"' : "")}>${isNum ? n2(v) : esc(v)}</td>`;
     }).join("")}</tr>`).join("");
+    // Tax table: a tax's Rate / Amount pair is shown only when it has an
+    // amount (intra-state -> CGST + SGST, inter-state -> IGST).
+    const taxCols = [
+      { label: "IGST", rate: d.intraState ? "" : rate(d.gstRate), amount: d.igst },
+      { label: "CGST", rate: d.intraState ? rate(d.gstRate / 2) : "", amount: d.cgst },
+      { label: "SGST/UTGST", rate: d.intraState ? rate(d.gstRate / 2) : "", amount: d.sgst },
+    ].filter((t) => (Number(t.amount) || 0) !== 0);
     return `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${esc(d.invoiceNo || d.docTitle)}</title>
       <style>
         @page { size: A4; margin: 12mm; }
@@ -130,15 +138,13 @@
         <div class="words" style="border-top:1px solid #000;">Total Amount (In Words): ${esc(d.amountWords)}</div>
         <table class="tax">
           <thead>
-            <tr><th rowspan="2">HSN/SAC</th><th>Taxable</th><th colspan="2">IGST</th><th colspan="2">CGST</th><th colspan="2">SGST/UTGST</th><th rowspan="2">Total<br/>Tax Amount</th></tr>
-            <tr><th>Value</th><th>Rate</th><th>Amount</th><th>Rate</th><th>Amount</th><th>Rate</th><th>Amount</th></tr>
+            <tr><th rowspan="2">HSN/SAC</th><th>Taxable</th>${taxCols.map((t) => `<th colspan="2">${t.label}</th>`).join("")}<th rowspan="2">Total<br/>Tax Amount</th></tr>
+            <tr><th>Value</th>${taxCols.map(() => "<th>Rate</th><th>Amount</th>").join("")}</tr>
           </thead>
           <tbody>
             <tr><td>${esc(c.hsn)}</td><td class="r">${n2(d.taxable)}</td>
-              <td class="r">${d.intraState ? "" : rate(d.gstRate)}</td><td class="r">${n2(d.igst)}</td>
-              <td class="r">${d.intraState ? rate(d.gstRate / 2) : ""}</td><td class="r">${n2(d.cgst)}</td>
-              <td class="r">${d.intraState ? rate(d.gstRate / 2) : ""}</td><td class="r">${n2(d.sgst)}</td><td class="r">${n2(d.totalTax)}</td></tr>
-            <tr><td class="r"><b>Total</b></td><td class="r">${n2(d.taxable)}</td><td></td><td class="r">${n2(d.igst)}</td><td></td><td class="r">${n2(d.cgst)}</td><td></td><td class="r">${n2(d.sgst)}</td><td class="r">${n2(d.totalTax)}</td></tr>
+              ${taxCols.map((t) => `<td class="r">${t.rate}</td><td class="r">${n2(t.amount)}</td>`).join("")}<td class="r">${n2(d.totalTax)}</td></tr>
+            <tr><td class="r"><b>Total</b></td><td class="r">${n2(d.taxable)}</td>${taxCols.map((t) => `<td></td><td class="r">${n2(t.amount)}</td>`).join("")}<td class="r">${n2(d.totalTax)}</td></tr>
           </tbody>
         </table>
         <div class="words">Tax Amount (In Words): ${esc(d.taxWords)}</div>
@@ -163,9 +169,14 @@
     const num = (v) => Number(v) || 0;
     const kv = (rows) => rows.filter(([, v]) => v).map(([k, v]) => `<tr><td class="k">${esc(k)}</td><td class="v">${esc(v)}</td></tr>`).join("");
     const multi = (v) => String(v || "").split(",").map((x) => esc(x.trim())).filter(Boolean).join("<br/>");
-    const paxRows = d.lines.map((l) => `<tr><td>${esc(l.pax)}</td><td class="c">${esc(l.paxType)}</td><td class="c">${esc(l.productType)}</td>
-      <td class="c">${esc(l.gdsPnr)}</td><td class="c nw">${esc(l.airlineName || l.airline)}</td><td class="c nw">${esc(l.ticketNo)}</td>
-      <td class="c">${multi(l.cls)}</td><td class="c nw">${multi(l.sector)}</td><td class="c">${multi(l.flight)}</td><td class="c">${multi(l.travelDate)}</td></tr>`).join("");
+    // Trip table - one row for the whole invoice: each column lists its
+    // distinct values across the passengers (passenger names / types / ticket
+    // numbers sit in the fare table below).
+    const uniq = (f) => multi([...new Set(d.lines.flatMap((l) => String(f(l) || "").split(",")).map((x) => x.trim()).filter(Boolean))].join(","));
+    const airlinePnr = d.airlinePnr || ((d.infoRows || []).find(([k]) => /airline pnr/i.test(k)) || [])[1] || "";
+    const tripRow = `<tr><td class="c">${uniq((l) => l.productType)}</td><td class="c">${uniq((l) => l.gdsPnr)}</td><td class="c">${multi(airlinePnr)}</td>
+      <td class="c nw">${uniq((l) => l.airlineName || l.airline)}</td><td class="c">${uniq((l) => l.cls)}</td><td class="c nw">${uniq((l) => l.sector)}</td>
+      <td class="c">${uniq((l) => l.flight)}</td><td class="c">${uniq((l) => l.travelDate)}</td></tr>`;
 
     // Fare table. Total (per line) = the billed amount before GST and TDS -
     // both are added back in the summary below, like the reference invoice.
@@ -175,10 +186,9 @@
       : l.fullCgst != null ? num(l.fullIgst) + num(l.fullCgst) + num(l.fullSgst)
       : num(l.fareGst ?? l.gst));
     const lineTds = (l) => num(l.custTds);
-    // A line's own Template 2 figures (t2Tax / t2Markup / t2ServiceFee - set
-    // for a Reschedule print) override the common ones.
+    // A line's own Template 2 figures (t2Tax / t2ServiceFee - set for a
+    // Reschedule print) override the common ones. (No Markup column.)
     const tax = (l) => num(l.t2Tax ?? l.tax);
-    const mgmt = (l) => num(l.t2Markup ?? l.markup);
     const svc = (l) => num(l.t2ServiceFee ?? l.fareServiceFee ?? l.serviceFee);
     // Credit Note: Total = Fare + Tax + SSR - Discount - Service Fee (the
     // cancellation screen's own columns), and the summary takes the GST OFF
@@ -188,9 +198,10 @@
     const cn = !!d.creditNote;
     const lineTotal = (l) => (cn ? num(l.fare) + tax(l) + num(l.ssr) - num(l.discount) - svc(l)
       : num(l.amount) - lineGst(l) - lineTds(l));
-    const fareRows = d.lines.map((l) => `<tr><td class="c">${esc(l.ticketNo || l.pax)}</td><td class="r">${n2(l.fare)}</td><td class="r">${n2(tax(l))}</td>
-      <td class="r">${n2(l.ssr)}</td><td class="r">${n2(l.discount)}</td><td class="r">${n2(0)}</td><td class="r">${n2(l.pgCharges)}</td>
-      <td class="r">${n2(mgmt(l))}</td><td class="r">${n2(svc(l))}</td><td class="r">${n2(lineTotal(l))}</td></tr>`).join("");
+    const fareRows = d.lines.map((l) => `<tr><td>${esc(l.pax)}</td><td class="c">${esc(l.paxType)}</td><td class="c nw">${esc(l.ticketNo)}</td>
+      <td class="r">${n2(l.fare)}</td><td class="r">${n2(tax(l))}</td>
+      <td class="r">${n2(l.ssr)}</td><td class="r">${n2(l.discount)}</td><td class="r">${n2(l.pgCharges)}</td>
+      <td class="r">${n2(svc(l))}</td><td class="r">${n2(lineTotal(l))}</td></tr>`).join("");
     const sum = (f) => d.lines.reduce((s, l) => s + f(l), 0);
     const total = sum(lineTotal), gstAmt = sum(lineGst), tdsAmt = sum(lineTds);
     const half = Math.round((gstAmt / 2) * 100) / 100;
@@ -208,8 +219,19 @@
     const stateCode = /^\d{2}/.test(cu.gst_no || "") ? cu.gst_no.slice(0, 2) : (d.intraState && /^\d{2}/.test(c.gst_no || "") ? c.gst_no.slice(0, 2) : "");
     const pos = d.placeOfSupply ? `${String(d.placeOfSupply).toUpperCase()}${stateCode ? ` (${stateCode})` : ""}` : "-";
     const cg = d.intraState ? rate(d.gstRate / 2) : rate(0), ig = d.intraState ? rate(0) : rate(d.gstRate);
-    const gstRow = (label, taxable, cgst, sgst, igst) => `<tr><td>${label}</td><td>${esc(c.hsn)}</td><td class="r">${n2(taxable)}</td><td class="r">${cg}</td><td class="r">${n2(cgst)}</td>
-      <td class="r">${cg}</td><td class="r">${n2(sgst)}</td><td class="r">${ig}</td><td class="r">${n2(igst)}</td><td class="r">${n2(num(cgst) + num(sgst) + num(igst))}</td></tr>`;
+    // GST table: a tax's % / Amt. column pair is shown only when that tax has
+    // an amount on this invoice - e.g. an intra-state bill shows CGST + SGST
+    // and drops the all-zero IGST pair (inter-state: the reverse).
+    const showCgst = num(d.cgst) !== 0, showSgst = num(d.sgst) !== 0, showIgst = num(d.igst) !== 0;
+    const gstPair = (show, pct, amt) => (show ? `<td class="r">${pct}</td><td class="r">${n2(amt)}</td>` : "");
+    const gstRow = (label, taxable, cgst, sgst, igst) => `<tr><td>${label}</td><td>${esc(c.hsn)}</td><td class="r">${n2(taxable)}</td>
+      ${gstPair(showCgst, cg, cgst)}${gstPair(showSgst, cg, sgst)}${gstPair(showIgst, ig, igst)}<td class="r">${n2(num(cgst) + num(sgst) + num(igst))}</td></tr>`;
+    const gstHead = `<th>Description</th><th>HSN /SAC</th><th>TaxableValue</th>`
+      + (showCgst ? `<th>CGST%</th><th>CGST Amt.</th>` : "")
+      + (showSgst ? `<th>SGST/UGST %</th><th>SGST/UGST Amt.</th>` : "")
+      + (showIgst ? `<th>IGST %</th><th>IGST Amt.</th>` : "")
+      + `<th>Total GST Amount</th>`;
+    const gstTotalPair = (show, amt) => (show ? `<td></td><td class="r">${n2(amt)}</td>` : "");
 
     return `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${esc(d.invoiceNo || d.docTitle)}</title>
       <style>
@@ -264,13 +286,13 @@
         <div class="rule"></div>
         <div class="top">
           <div class="co">${esc(c.name)}<br/>${esc(c.address || "").replace(/\n/g, "<br/>")}${c.state ? `<br/>${esc(c.state)}${c.pincode ? ` - ${esc(c.pincode)}` : ""}` : ""}</div>
-          <table class="kv">${kv([["GST Reg. No.", c.gst_no], ["PAN No.", c.pan_number], ["User ID", d.userName], ["CIN No.", c.cin_number]])}</table>
+          <table class="kv">${kv([["GST Reg. No.", c.gst_no], ["PAN No.", c.pan_number], ["User Name", d.userName], ["CIN No.", c.cin_number]])}</table>
         </div>
         <div class="doc-title">${esc(d.docTitleCase)}</div>
         <div class="rule"></div>
         <div class="top">
           <div class="cust">${esc([cu.code, cu.name].filter(Boolean).join(" - "))}<br/>${(cu.address || "").split("\n").map(esc).join(" ")}</div>
-          <table class="kv">${kv([[d.invoiceNoLabel, d.invoiceNo], [d.invoiceDateLabel, d.invoiceDate], [d.refLabel === "Booking ID" ? "Trip ID" : d.refLabel, d.refValue]])}</table>
+          <table class="kv">${kv([[d.invoiceNoLabel, d.invoiceNo], [d.invoiceDateLabel, d.invoiceDate], [d.refLabel === "Booking ID" ? "SPNR" : d.refLabel, d.refValue]])}</table>
         </div>
         <table class="meta">
           <tr><td class="k">PAN No :</td><td>${esc(cu.pan || "-")}</td></tr>
@@ -281,15 +303,15 @@
           <tr><td class="k">IRN No :</td><td>-</td></tr>
         </table>
         <table class="grid pax">
-          <thead><tr><th class="l">Passenger Name</th><th>Passenger Type</th><th>Product Type</th><th>GDS PNR</th><th>Airline</th><th>Ticket No</th><th>Class</th><th>Sector</th><th>Flight No</th><th>Travel Date</th></tr></thead>
-          <tbody>${paxRows}</tbody>
+          <thead><tr><th>Product</th><th>GDS PNR</th><th>Airline PNR</th><th>Airline</th><th>Class</th><th>Sector</th><th>Flight No</th><th>Travel Date</th></tr></thead>
+          <tbody>${tripRow}</tbody>
         </table>
         <table class="grid fare">
-          <thead><tr><th class="l">Ticket No</th><th>Fare</th><th>Tax</th><th>SSR</th><th>Discount</th><th>Surcharge</th><th>PG Charges</th><th>Markup</th><th>Service Fee</th><th>Total</th></tr></thead>
+          <thead><tr><th class="l">Pax Name</th><th>Pax Type</th><th>Ticket No</th><th>Basic Fare</th><th>Other Taxes</th><th>SSR</th><th>Discount</th><th>PG Charges</th><th>Service Fee</th><th>Total</th></tr></thead>
           <tbody>${fareRows}
-            <tr class="tot"><td class="c">Total</td><td class="r">${n2(sum((l) => num(l.fare)))}</td><td class="r">${n2(sum(tax))}</td><td class="r">${n2(sum((l) => num(l.ssr)))}</td>
-              <td class="r">${n2(sum((l) => num(l.discount)))}</td><td class="r">${n2(0)}</td><td class="r">${n2(sum((l) => num(l.pgCharges)))}</td>
-              <td class="r">${n2(sum(mgmt))}</td><td class="r">${n2(sum(svc))}</td><td class="r">${n2(total)}</td></tr>
+            <tr class="tot"><td class="c" colspan="3">Total</td><td class="r">${n2(sum((l) => num(l.fare)))}</td><td class="r">${n2(sum(tax))}</td><td class="r">${n2(sum((l) => num(l.ssr)))}</td>
+              <td class="r">${n2(sum((l) => num(l.discount)))}</td><td class="r">${n2(sum((l) => num(l.pgCharges)))}</td>
+              <td class="r">${n2(sum(svc))}</td><td class="r">${n2(total)}</td></tr>
           </tbody>
         </table>
         <div class="sum-wrap"><table class="sum">
@@ -304,11 +326,11 @@
         </table></div>
         <div class="words">Amount (in Words) : ${esc(words)}${taxLine ? `<br/>Tax:${esc(taxLine)}` : ""}</div>
         <table class="gst">
-          <thead><tr><th>Description</th><th>HSN /SAC</th><th>TaxableValue</th><th>CGST%</th><th>CGST Amt.</th><th>SGST/UGST %</th><th>SGST/UGST Amt.</th><th>IGST %</th><th>IGST Amt.</th><th>Total GST Amount</th></tr></thead>
+          <thead><tr>${gstHead}</tr></thead>
           <tbody>
             ${gstRow("Service Fee", d.taxable, d.cgst, d.sgst, d.igst)}
             ${gstRow("Surcharge Amount", 0, 0, 0, 0)}
-            <tr class="tot"><td colspan="2" class="r">Total</td><td class="r">${n2(d.taxable)}</td><td></td><td class="r">${n2(d.cgst)}</td><td></td><td class="r">${n2(d.sgst)}</td><td></td><td class="r">${n2(d.igst)}</td><td class="r">${n2(d.totalTax)}</td></tr>
+            <tr class="tot"><td colspan="2" class="r">Total</td><td class="r">${n2(d.taxable)}</td>${gstTotalPair(showCgst, d.cgst)}${gstTotalPair(showSgst, d.sgst)}${gstTotalPair(showIgst, d.igst)}<td class="r">${n2(d.totalTax)}</td></tr>
           </tbody>
         </table>
         <table class="notes">
@@ -320,8 +342,152 @@
       </body></html>`;
   }
 
+  // --------------------------------------------------------------- proforma
+  // Template 3 - laid out like the "Performa Invoice" reference: Invoice Date
+  // / Invoice No bar, From (company) / To (customer) blocks, a flight table
+  // (Airlines / S PNR / Airlines PNR / GDS PNR / Flight Details / Sector /
+  // Travel Date), a passenger table (Base Fare / YQ Tax / Other Taxes /
+  // Baggage / Seat / Meal / Other SSR / Total) and a Gross -> Net Amount
+  // summary with the amount in words, seal and bulleted Terms & Conditions.
+  // Net Amount is always the invoice's real billed total (sum of each line's
+  // amount); the summary rows are built to add up to it.
+  function proforma(d) {
+    const c = d.company;
+    const cu = d.customer;
+    const num = (v) => Number(v) || 0;
+    const na = (v) => esc(v && String(v).trim() ? v : "N/A");
+    const uniq = (vals) => [...new Set(vals.flatMap((v) => String(v || "").split(",")).map((v) => v.trim()).filter(Boolean))];
+    const PAX = { ADULT: "ADT", CHILD: "CHD", INFANT: "INF" };
+    const yq = (l) => num(l.yq ?? (l.taxParts || {}).YQ);
+    const otherTax = (l) => num(l.tax) - yq(l);
+    const rowTotal = (l) => num(l.fare) + yq(l) + otherTax(l) + num(l.baggage) + num(l.seat) + num(l.meal) + num(l.otherSsr);
+    const sum = (f) => d.lines.reduce((s, l) => s + f(l), 0);
+    const r2 = (v) => Math.round(v * 100) / 100;
+
+    // Summary - Gross = the passenger table's Total; GST = customer + supplier
+    // GST (same figure every template prints); Service Fee = customer +
+    // supplier Service Fee / Addl / SSR Service Fee.
+    const lineGst = (l) => (l.bkCgst != null ? num(l.bkIgst) + num(l.bkCgst) + num(l.bkSgst)
+      : l.fullCgst != null ? num(l.fullIgst) + num(l.fullCgst) + num(l.fullSgst)
+      : num(l.fareGst ?? l.gst));
+    const svc = (l) => num(l.t2ServiceFee ?? l.fareServiceFee ?? l.serviceFee);
+    const gross = r2(sum(rowTotal));
+    const commission = r2(sum((l) => num(l.discount)));
+    const serviceFee = r2(sum(svc));
+    const gstAmt = r2(sum(lineGst));
+    const tdsAmt = r2(sum((l) => num(l.custTds)));
+    const net = r2(sum((l) => num(l.amount)));
+    const cgst = d.intraState ? r2(gstAmt / 2) : 0;
+    const sgst = d.intraState ? r2(gstAmt - cgst) : 0;
+    const igst = d.intraState ? 0 : gstAmt;
+    const half = (Number(d.gstRate) || 0) / 2;
+    const summary = [["", "Gross:", gross, true]];
+    if (d.creditNote) {
+      // Credit Note: what's refunded = Gross - Commission + TDS - the
+      // cancellation charges (markups, service fees, GST, penalties, net of
+      // any markup reversal) kept back.
+      summary.push(["Less", "Discount", commission], ["Add", "TDS Deducted", tdsAmt]);
+      const charges = r2(gross - commission + tdsAmt - net);
+      if (charges) summary.push([charges > 0 ? "Less" : "Add", "Cancellation Charges", Math.abs(charges)]);
+    } else {
+      summary.push(["Less", "Discount", commission]);
+      // Markups / penalties have no row of their own in the reference - one
+      // line, only when there are any, so the summary adds up to Net Amount.
+      const other = r2(net - (gross - commission + serviceFee + gstAmt + tdsAmt));
+      if (other) summary.push([other > 0 ? "Add" : "Less", "Markup & Other Charges", Math.abs(other)]);
+      summary.push(["Add", "Service Fee", serviceFee],
+        ["Add", `CGST @${half.toFixed(2)}%`, cgst], ["Add", `SGST @${half.toFixed(2)}%`, sgst],
+        ["Add", `IGST @${(d.intraState ? 0 : Number(d.gstRate) || 0).toFixed(2)}%`, igst],
+        ["Add", "TDS Deducted", tdsAmt]);
+    }
+    const words = amountInWords(Math.abs(net), d.currency).replace(/^[A-Z]{3} /, "").replace(/ and (.+) paise Only\.$/, " Rupees and $1 Paise only.").replace(/ Only\.$/, " Rupees only.");
+
+    const airlinePnr = d.airlinePnr || ((d.infoRows || []).find(([k]) => /airline pnr/i.test(k)) || [])[1] || "";
+    const flightRow = [uniq(d.lines.map((l) => l.airlineName || l.airline)).join(", "), d.refValue, airlinePnr,
+      uniq(d.lines.map((l) => l.gdsPnr)).join(", "), uniq(d.lines.map((l) => l.flight)).join(", "),
+      uniq(d.lines.map((l) => l.sector)).join(", "), uniq(d.lines.map((l) => l.travelDate)).join(", ")];
+    const paxRows = d.lines.map((l, i) => `<tr><td>${i + 1}</td><td>${esc(l.ticketNo)}</td><td>${esc(l.pax)}</td>
+      <td>${esc(PAX[String(l.paxType || "").toUpperCase()] || l.paxType || "")}</td><td>${n2(l.fare)}</td><td>${n2(yq(l))}</td><td>${n2(otherTax(l))}</td>
+      <td>${n2(l.baggage)}</td><td>${n2(l.seat)}</td><td>${n2(l.meal)}</td><td>${n2(l.otherSsr)}</td><td>${n2(rowTotal(l))}</td></tr>`).join("");
+    const party = (title, p) => `
+      <td class="party">
+        <div class="ph">${title},</div><div class="pn">${esc(p.name)}</div>
+        <table class="pk">
+          <tr><td class="k">Regd Office:</td><td>${p.address}</td></tr>
+          <tr><td class="k">Email:</td><td>${na(p.email)}</td></tr>
+          <tr><td class="k">Phone:</td><td>${na(p.phone)}</td></tr>
+          <tr><td class="k">PAN:</td><td>${na(p.pan)}</td></tr>
+          <tr><td class="k">GST State:</td><td>${na(p.state)}</td></tr>
+          <tr><td class="k">GSTIN:</td><td>${na(p.gst_no)}</td></tr>
+        </table>
+      </td>`;
+    const terms = String(c.terms || "").split("\n").map((t) => t.trim()).filter(Boolean);
+
+    return `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${esc(d.invoiceNo || d.docTitle)}</title>
+      <style>
+        @page { size: A4; margin: 10mm; }
+        * { box-sizing: border-box; }
+        body { font-family: Roboto, Arial, Helvetica, sans-serif; font-size: 10px; color: #111; margin: 0; }
+        table { border-collapse: collapse; width: 100%; }
+        .page { border: 1px solid #D5D5D5; padding: 18px 16px 22px; }
+        h1 { text-align: center; font-size: 17px; font-weight: 700; text-decoration: underline; margin: 4px 0 18px; letter-spacing: 0.02em; }
+        .bar td { background: #F2F2F2; font-weight: 700; font-size: 11px; padding: 6px 8px; border: 1px solid #D5D5D5; }
+        .bar td.r { text-align: right; }
+        .parties { border: 1px solid #D5D5D5; border-top: none; }
+        .party { width: 50%; vertical-align: top; padding: 0; }
+        .party + .party { border-left: 1px solid #D5D5D5; }
+        .ph { padding: 6px 8px 2px; font-weight: 700; }
+        .pn { padding: 2px 8px 6px; font-weight: 700; font-size: 10.5px; }
+        .pk td { padding: 3px 8px; border-top: 1px dashed #D5D5D5; vertical-align: top; line-height: 1.4; }
+        .pk td.k { width: 80px; font-weight: 700; white-space: nowrap; border-right: 1px dashed #D5D5D5; }
+        .grid { margin-top: 16px; }
+        .grid th { background: #F2F2F2; font-weight: 700; padding: 6px 4px; border: 1px solid #D5D5D5; text-align: center; }
+        .grid td { padding: 5px 4px; border: 1px solid #D5D5D5; text-align: center; }
+        .bottom { display: flex; gap: 20px; margin-top: 18px; align-items: flex-start; }
+        .sum { width: 50%; margin-left: auto; }
+        .sum td { border: 1px solid #D5D5D5; padding: 5px 8px; }
+        .sum td.lbl { width: 22%; }
+        /* Value column = the passenger table's Total column (same width,
+           same alignment) so the amounts line up in one straight column. */
+        .sum td.v, .grid th.tot { width: 90px; }
+        .sum td.v { text-align: center; }
+        .sum tr.b td { font-weight: 700; }
+        .side { flex: 1; text-align: center; padding-top: 30px; }
+        .bottom > .side { order: -1; }
+        .seal { max-height: 95px; max-width: 150px; object-fit: contain; display: block; margin: 0 auto 10px; }
+        .terms h3 { font-size: 11px; text-decoration: underline; margin: 16px 0 6px; }
+        .terms ul { margin: 0; padding-left: 18px; line-height: 1.7; }
+      </style></head><body>
+      <div class="page">
+        <h1>${d.creditNote ? "CREDIT NOTE" : "PERFORMA INVOICE"}</h1>
+        <table class="bar"><tr><td>${esc(d.invoiceDateLabel)}: ${esc(d.invoiceDate)}</td><td class="r">${esc(d.invoiceNoLabel)}: ${esc(d.invoiceNo)}</td></tr></table>
+        <table class="parties"><tr>
+          ${party("From", { name: c.name, address: companyLine(c) || "N/A", email: c.email, phone: c.phone, pan: c.pan_number, state: c.state, gst_no: c.gst_no })}
+          ${party("To", { name: cu.name, address: esc(cu.address || "").replace(/\n/g, "<br/>") || "N/A", email: cu.email, phone: cu.phone, pan: cu.pan, state: cu.state, gst_no: cu.gst_no })}
+        </tr></table>
+        <table class="grid">
+          <thead><tr><th>Airlines</th><th>S PNR</th><th>Airlines PNR</th><th>GDS PNR</th><th>Flight Details</th><th>Sector</th><th>Travel Date</th></tr></thead>
+          <tbody><tr>${flightRow.map((v) => `<td>${na(v)}</td>`).join("")}</tr></tbody>
+        </table>
+        <table class="grid">
+          <thead><tr><th>Sr.No</th><th>Ticket No.</th><th>Pax Name</th><th>Pax Type</th><th>Base Fare</th><th>YQ Tax</th><th>Other Taxes</th><th>Baggage Charges</th><th>Seat Charges</th><th>Meal Charges</th><th>Other SSR</th><th class="tot">Total</th></tr></thead>
+          <tbody>${paxRows}</tbody>
+        </table>
+        <div class="bottom">
+          <table class="sum">
+            ${summary.map(([a, b, v, bold]) => `<tr${bold ? ' class="b"' : ""}><td class="lbl">${a}</td><td>${esc(b)}</td><td class="v">${n2(v)}</td></tr>`).join("")}
+            <tr class="b"><td class="lbl"></td><td>Net Amount (${esc(d.currency)})</td><td class="v">${n2(net)}</td></tr>
+            <tr><td class="lbl">Amount (in Words)</td><td colspan="2" class="b" style="font-weight:700;">${esc(words)}</td></tr>
+          </table>
+          <div class="side">${sealHtml(d, "seal")}This is Computer Generated Invoice, No Signature Required</div>
+        </div>
+        ${terms.length ? `<div class="terms"><h3>Terms &amp; Conditions:</h3><ul>${terms.map((t) => `<li>${esc(t)}</li>`).join("")}</ul></div>` : ""}
+      </div>
+      </body></html>`;
+  }
+
   function render(key, d) {
-    return (key === "payment" ? payment : classic)(d);
+    return (key === "payment" ? payment : key === "proforma" ? proforma : classic)(d);
   }
 
   // Printed through a hidden iframe (no popup window to get blocked). The
@@ -361,7 +527,7 @@
         ticketNo: "0652417529001", cls: "Y", sector: "MAA-DXB", flight: "6E 1453", travelDate: "15/11/2026",
         basic: 12915, other: 9631, ssr: 450, serviceFee, igst: 0, cgst: 27, sgst: 27, amount: 23350,
         fare: 12915, tax: 9631, discount: 0, markup: 0, gst, custTds: 0, pgCharges: 0, airlineName: "IndiGo",
-        taxParts: { YQ: 5200, YR: 431, K3: 2400, OT: 1600 } },
+        taxParts: { YQ: 5200, YR: 431, K3: 2400, OT: 1600 }, yq: 5200, baggage: 0, seat: 450, meal: 0, otherSsr: 0 },
     ];
     lines[0].amount = lines[0].fare + lines[0].tax + lines[0].ssr + serviceFee + gst;
     lines[0].other = lines[0].amount - lines[0].basic - lines[0].ssr - serviceFee - gst;

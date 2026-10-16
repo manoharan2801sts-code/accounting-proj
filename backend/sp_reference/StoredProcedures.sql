@@ -179,6 +179,7 @@ CREATE OR ALTER PROCEDURE dbo.sp_Ledger
     @HsnCode                    NVARCHAR(15)   = NULL,
     @TcsApplicable              BIT            = NULL,
     @TcsPercentage              DECIMAL(5,2)   = NULL,
+    @IsDefaultBank              BIT            = NULL,
     @ExcludeId                  INT            = NULL,
     @AgentIdProvided            BIT            = 0
 AS
@@ -190,7 +191,7 @@ BEGIN
         SELECT id, company_id, name, group_id AS parent_id, account_type, ledger_category,
                opening_balance,
                CASE WHEN opening_balance_type = 'Debit' THEN opening_balance ELSE -opening_balance END AS balance,
-               opening_balance_type, agent_id, office_id, supplier_code
+               opening_balance_type, agent_id, office_id, supplier_code, is_default_bank
         FROM dbo.Ledgers
         WHERE company_id = @CompanyId
         ORDER BY id;
@@ -237,7 +238,7 @@ BEGIN
                tax_category, tax_type,
                gst_applicable, gst_tax_type, gst_percentage,
                tds_applicable, tds_percentage, hsn_code,
-               tcs_applicable, tcs_percentage
+               tcs_applicable, tcs_percentage, is_default_bank
         FROM dbo.Ledgers
         WHERE id = @Id AND company_id = @CompanyId;
         RETURN;
@@ -316,7 +317,7 @@ BEGIN
                  tax_category, tax_type,
                  gst_applicable, gst_tax_type, gst_percentage,
                  tds_applicable, tds_percentage, hsn_code,
-                 tcs_applicable, tcs_percentage,
+                 tcs_applicable, tcs_percentage, is_default_bank,
                  is_system, created_at, updated_at)
             VALUES
                 (@CompanyId, @Name, @ParentId, @GroupAccountType, ISNULL(@LedgerCategory, 'OTHER'),
@@ -329,10 +330,14 @@ BEGIN
                  @TaxCategory, @TaxType,
                  ISNULL(@GstApplicable, 0), @GstTaxType, ISNULL(@GstPercentage, 0),
                  ISNULL(@TdsApplicable, 0), ISNULL(@TdsPercentage, 0), @HsnCode,
-                 ISNULL(@TcsApplicable, 0), ISNULL(@TcsPercentage, 0),
+                 ISNULL(@TcsApplicable, 0), ISNULL(@TcsPercentage, 0), ISNULL(@IsDefaultBank, 0),
                  0, SYSUTCDATETIME(), SYSUTCDATETIME());
 
             DECLARE @NewId INT = SCOPE_IDENTITY();
+            -- Only one Default Bank per company - this one replaces any other.
+            IF @IsDefaultBank = 1
+                UPDATE dbo.Ledgers SET is_default_bank = 0, updated_at = SYSUTCDATETIME()
+                WHERE company_id = @CompanyId AND id <> @NewId AND is_default_bank = 1;
             COMMIT TRAN;
 
             SELECT id, name, group_id AS parent_id, 'Success' AS status
@@ -422,8 +427,14 @@ BEGIN
                 hsn_code = ISNULL(@HsnCode, hsn_code),
                 tcs_applicable = ISNULL(@TcsApplicable, tcs_applicable),
                 tcs_percentage = ISNULL(@TcsPercentage, tcs_percentage),
+                is_default_bank = ISNULL(@IsDefaultBank, is_default_bank),
                 updated_at = SYSUTCDATETIME()
             WHERE id = @Id AND company_id = @CompanyId;
+
+            -- Only one Default Bank per company - this one replaces any other.
+            IF @IsDefaultBank = 1
+                UPDATE dbo.Ledgers SET is_default_bank = 0, updated_at = SYSUTCDATETIME()
+                WHERE company_id = @CompanyId AND id <> @Id AND is_default_bank = 1;
 
             COMMIT TRAN;
             SELECT @Id AS id, 'Success' AS status;
@@ -498,7 +509,7 @@ CREATE OR ALTER PROCEDURE dbo.sp_CompanyMaster
     @SealBase64             NVARCHAR(MAX)   = NULL,
     -- LIST only: which images to return - NULL = none (fast), 'logo', 'all'.
     @Images                 NVARCHAR(10)    = NULL,
-    -- SET_INVOICE_TEMPLATE only: 'classic' or 'payment'.
+    -- SET_INVOICE_TEMPLATE only: 'classic', 'payment' or 'proforma'.
     @InvoiceTemplate        NVARCHAR(20)    = NULL,
     @TermsConditions        NVARCHAR(MAX)   = NULL,
     @BankAccountHolder      NVARCHAR(100)   = NULL,
@@ -530,7 +541,7 @@ BEGIN
     -- Tax Invoice / Credit Note this company prints.
     IF @Action = 'SET_INVOICE_TEMPLATE'
     BEGIN
-        IF @InvoiceTemplate NOT IN ('classic', 'payment')
+        IF @InvoiceTemplate NOT IN ('classic', 'payment', 'proforma')
         BEGIN
             SELECT NULL AS id, 'Error' AS status, 'Unknown invoice template.' AS error;
             RETURN;
@@ -680,6 +691,7 @@ CREATE OR ALTER PROCEDURE dbo.sp_VoucherType
     @VoucherCategory             NVARCHAR(20)   = NULL,
     @IsActive                    BIT            = NULL,
     @NumberMethod                NVARCHAR(30)   = NULL,
+    @NumberingBehaviour          NVARCHAR(30)   = NULL,   -- Automatic only: Restart Numbers / Keep Original Numbers
     @AllowAdditionalNumbering    BIT            = NULL,
     @AllowEffectiveDates         BIT            = NULL,
     @AllowNarration              BIT            = NULL,
@@ -739,6 +751,14 @@ BEGIN
         SET @VoucherCategory = ISNULL(@VoucherCategory, 'General');
         SET @IsActive = ISNULL(@IsActive, 1);
         SET @NumberMethod = ISNULL(@NumberMethod, 'Automatic');
+        -- "Numbering" applies to Automatic only (default Keep Original Numbers).
+        SET @NumberingBehaviour = CASE WHEN @NumberMethod = 'Automatic'
+                                       THEN ISNULL(NULLIF(@NumberingBehaviour, ''), 'Keep Original Numbers') END;
+        IF @NumberingBehaviour IS NOT NULL AND @NumberingBehaviour NOT IN ('Restart Numbers', 'Keep Original Numbers')
+        BEGIN
+            SELECT NULL AS id, 'Error' AS status, 'Numbering must be Restart Numbers or Keep Original Numbers.' AS error;
+            RETURN;
+        END
         SET @AllowAdditionalNumbering = ISNULL(@AllowAdditionalNumbering, 0);
         SET @AllowEffectiveDates = ISNULL(@AllowEffectiveDates, 0);
         SET @AllowNarration = ISNULL(@AllowNarration, 1);
@@ -750,12 +770,15 @@ BEGIN
 
             DECLARE @ResultId INT;
             DECLARE @WasCreated BIT = 0;
+            DECLARE @Renumbered INT = 0;
+            -- The name its vouchers were saved under (before a rename).
+            DECLARE @OldName NVARCHAR(100) = (SELECT name FROM dbo.VoucherType WHERE id = @Id AND company_id = @CompanyId);
 
             IF @Id IS NOT NULL
             BEGIN
                 UPDATE dbo.VoucherType
                 SET name = @Name, alias_name = @AliasName, voucher_category = @VoucherCategory,
-                    is_active = @IsActive, number_method = @NumberMethod,
+                    is_active = @IsActive, number_method = @NumberMethod, numbering_behaviour = @NumberingBehaviour,
                     allow_additional_numbering = @AllowAdditionalNumbering,
                     allow_effective_dates = @AllowEffectiveDates, allow_narration = @AllowNarration,
                     an_width_of_invoice_number = @AnWidthOfInvoiceNumber,
@@ -766,16 +789,51 @@ BEGIN
                     an_prefix_details = @AnPrefixDetails, an_suffix_details = @AnSuffixDetails
                 WHERE id = @Id AND company_id = @CompanyId;
                 SET @ResultId = @Id;
+
+                -- Renamed -> the Voucher-screen vouchers saved under the old name
+                -- follow it (they stay linked to this type and its own series).
+                IF @OldName IS NOT NULL AND @OldName <> @Name
+                    UPDATE dbo.Vouchers SET voucher_type_name = @Name, updated_at = SYSUTCDATETIME()
+                    WHERE company_id = @CompanyId AND category = 'MANUAL' AND voucher_type_name = @OldName;
+
+                -- Automatic + "Restart Numbers": renumber this type's existing
+                -- Voucher-screen vouchers 1, 2, 3 ... in voucher-date order (ties
+                -- by entry order), each in its own series (category prefix + this
+                -- type's id, e.g. RV17-1). "Keep Original Numbers" / Manual /
+                -- Override leave old numbers alone. Ticket invoice numbers are
+                -- never touched. Two passes so the (company, voucher_no) unique
+                -- key never sees a duplicate mid-update.
+                IF @NumberMethod = 'Automatic' AND @NumberingBehaviour = 'Restart Numbers'
+                BEGIN
+                    DECLARE @ToRenumber TABLE (id INT PRIMARY KEY, new_no NVARCHAR(30));
+                    INSERT INTO @ToRenumber (id, new_no)
+                    SELECT v.id,
+                           CASE v.voucher_type WHEN 'Payment' THEN 'PV' WHEN 'Receipt' THEN 'RV' WHEN 'Contra' THEN 'CV'
+                                               WHEN 'Debit Note' THEN 'DN' WHEN 'Credit Note' THEN 'CN' ELSE 'JV' END
+                           + CAST(@ResultId AS NVARCHAR(10)) + '-'
+                           + CAST(ROW_NUMBER() OVER (PARTITION BY v.voucher_type ORDER BY v.voucher_date, v.id) AS NVARCHAR(10))
+                    FROM dbo.Vouchers v
+                    WHERE v.company_id = @CompanyId AND v.category = 'MANUAL' AND v.voucher_type_name = @Name;
+
+                    UPDATE v SET voucher_no = 'TMPRN-' + CAST(v.id AS NVARCHAR(10))
+                    FROM dbo.Vouchers v INNER JOIN @ToRenumber r ON r.id = v.id
+                    WHERE v.voucher_no <> r.new_no;
+                    SET @Renumbered = @@ROWCOUNT;
+
+                    UPDATE v SET voucher_no = r.new_no, updated_at = SYSUTCDATETIME()
+                    FROM dbo.Vouchers v INNER JOIN @ToRenumber r ON r.id = v.id
+                    WHERE v.voucher_no LIKE 'TMPRN-%';
+                END
             END
             ELSE
             BEGIN
                 INSERT INTO dbo.VoucherType
-                    (company_id, name, alias_name, voucher_category, is_active, number_method,
+                    (company_id, name, alias_name, voucher_category, is_active, number_method, numbering_behaviour,
                      allow_additional_numbering, allow_effective_dates, allow_narration,
                      an_width_of_invoice_number, an_prefill_with_zero, an_restart_applicable_from,
                      an_restart_starting_number, an_restart_period, an_prefix_details, an_suffix_details)
                 VALUES
-                    (@CompanyId, @Name, @AliasName, @VoucherCategory, @IsActive, @NumberMethod,
+                    (@CompanyId, @Name, @AliasName, @VoucherCategory, @IsActive, @NumberMethod, @NumberingBehaviour,
                      @AllowAdditionalNumbering, @AllowEffectiveDates, @AllowNarration,
                      @AnWidthOfInvoiceNumber, @AnPrefillWithZero, @AnRestartApplicableFrom,
                      @AnRestartStartingNumber, @AnRestartPeriod, @AnPrefixDetails, @AnSuffixDetails);
@@ -784,7 +842,7 @@ BEGIN
             END
 
             COMMIT TRAN;
-            SELECT *, @WasCreated AS was_created, 'Success' AS status FROM dbo.VoucherType WHERE id = @ResultId;
+            SELECT *, @WasCreated AS was_created, @Renumbered AS renumbered, 'Success' AS status FROM dbo.VoucherType WHERE id = @ResultId;
         END TRY
         BEGIN CATCH
             IF @@TRANCOUNT > 0 ROLLBACK TRAN;
@@ -1323,6 +1381,22 @@ BEGIN
         RETURN;
     END
 
+    IF @Action = 'HISTORY_LIST'
+    BEGIN
+        -- Every dated mapping (oldest first per field) + its ledger's GST % -
+        -- what a document resolves its ledger from, by its own date
+        -- (models.resolve_mapping: latest effective_from <= document date).
+        SELECT h.product_type, h.masters_category, h.field_name, h.ledger_id, h.ledger_name,
+               ISNULL(l.gst_percentage, 0) AS ledger_gst_percentage, h.effective_from
+        FROM dbo.MasterMappingHistory h
+        LEFT JOIN dbo.Ledgers l ON l.id = h.ledger_id
+        WHERE h.company_id = @CompanyId
+          AND (@ProductType IS NULL OR h.product_type = @ProductType)
+          AND (@FieldName IS NULL OR h.field_name = @FieldName)
+        ORDER BY h.product_type, h.field_name, h.effective_from;
+        RETURN;
+    END
+
     IF @Action = 'SAVE_ROW'
     BEGIN
         IF @CompanyId IS NULL OR @ProductType IS NULL OR @MastersCategory IS NULL
@@ -1344,12 +1418,33 @@ BEGIN
         BEGIN TRY
             BEGIN TRAN;
 
+            -- Effective-date history: this date's mapping (a second save on the
+            -- same date corrects it; a new date adds a row - older dates stay,
+            -- so earlier documents keep posting to their own ledger).
+            IF EXISTS (SELECT 1 FROM dbo.MasterMappingHistory WHERE company_id = @CompanyId AND product_type = @ProductType
+                       AND field_name = @FieldName AND effective_from = @EffectiveFrom)
+                UPDATE dbo.MasterMappingHistory
+                SET masters_category = @MastersCategory, ledger_id = @LedgerId, ledger_name = @LedgerName, updated_at = SYSUTCDATETIME()
+                WHERE company_id = @CompanyId AND product_type = @ProductType AND field_name = @FieldName AND effective_from = @EffectiveFrom;
+            ELSE
+                INSERT INTO dbo.MasterMappingHistory
+                    (company_id, product_type, masters_category, field_name, ledger_id, ledger_name, effective_from, created_at, updated_at)
+                VALUES (@CompanyId, @ProductType, @MastersCategory, @FieldName, @LedgerId, @LedgerName, @EffectiveFrom, SYSUTCDATETIME(), SYSUTCDATETIME());
+
+            -- The live MasterMapping row always holds the LATEST-effective
+            -- mapping (a back-dated entry only adds history).
+            DECLARE @LiveLedgerId INT, @LiveLedgerName NVARCHAR(200), @LiveEffective DATE, @LiveCategory NVARCHAR(40);
+            SELECT TOP 1 @LiveLedgerId = ledger_id, @LiveLedgerName = ledger_name, @LiveEffective = effective_from, @LiveCategory = masters_category
+            FROM dbo.MasterMappingHistory
+            WHERE company_id = @CompanyId AND product_type = @ProductType AND field_name = @FieldName
+            ORDER BY effective_from DESC;
+
             DECLARE @ResultId INT;
             IF EXISTS (SELECT 1 FROM dbo.MasterMapping WHERE company_id = @CompanyId AND product_type = @ProductType AND field_name = @FieldName)
             BEGIN
                 UPDATE dbo.MasterMapping
-                SET masters_category = @MastersCategory, masters_category_id = ISNULL(@MastersCategoryId, 0),
-                    ledger_id = @LedgerId, ledger_name = @LedgerName, effective_from = @EffectiveFrom,
+                SET masters_category = @LiveCategory, masters_category_id = ISNULL(@MastersCategoryId, 0),
+                    ledger_id = @LiveLedgerId, ledger_name = @LiveLedgerName, effective_from = @LiveEffective,
                     updated_at = SYSUTCDATETIME()
                 WHERE company_id = @CompanyId AND product_type = @ProductType AND field_name = @FieldName;
                 SELECT @ResultId = id FROM dbo.MasterMapping WHERE company_id = @CompanyId AND product_type = @ProductType AND field_name = @FieldName;
@@ -1359,7 +1454,7 @@ BEGIN
                 INSERT INTO dbo.MasterMapping
                     (company_id, product_type, masters_category, masters_category_id, field_name, ledger_id, ledger_name, effective_from, created_at, updated_at)
                 VALUES
-                    (@CompanyId, @ProductType, @MastersCategory, ISNULL(@MastersCategoryId, 0), @FieldName, @LedgerId, @LedgerName, @EffectiveFrom, SYSUTCDATETIME(), SYSUTCDATETIME());
+                    (@CompanyId, @ProductType, @LiveCategory, ISNULL(@MastersCategoryId, 0), @FieldName, @LiveLedgerId, @LiveLedgerName, @LiveEffective, SYSUTCDATETIME(), SYSUTCDATETIME());
                 SET @ResultId = SCOPE_IDENTITY();
             END
 
@@ -1389,6 +1484,10 @@ BEGIN
 
         BEGIN TRY
             BEGIN TRAN;
+            -- Its effective-date history goes with it (like PG Master's).
+            DELETE h FROM dbo.MasterMappingHistory h
+            INNER JOIN dbo.MasterMapping m ON m.company_id = h.company_id AND m.product_type = h.product_type AND m.field_name = h.field_name
+            WHERE m.id = @Id AND m.company_id = @CompanyId;
             DELETE FROM dbo.MasterMapping WHERE id = @Id AND company_id = @CompanyId;
             COMMIT TRAN;
             SELECT @Id AS id, 'Success' AS status;
@@ -2521,6 +2620,8 @@ CREATE OR ALTER PROCEDURE dbo.sp_Voucher
     @CompanyId     INT            = NULL,
     @BranchName    NVARCHAR(100)  = NULL,
     @VoucherType   NVARCHAR(20)   = NULL,
+    @VoucherTypeName NVARCHAR(100) = NULL,   -- Voucher Type master entry picked (NULL = a standard type)
+    @ManualNo      NVARCHAR(30)   = NULL,   -- number typed on the screen (Manual / Automatic & Manual Override types)
     @VoucherDate   DATE           = NULL,
     @Narration     NVARCHAR(250)  = NULL,
     @LinesJson     NVARCHAR(MAX)  = NULL
@@ -2531,9 +2632,25 @@ BEGIN
     -- Automatic voucher numbering - one series per voucher type:
     -- Journal JV-n, Payment PV-n, Receipt RV-n, Contra CV-n, Debit Note DN-n,
     -- Credit Note CN-n (highest existing number of that series + 1).
-    DECLARE @Prefix NVARCHAR(5) = CASE ISNULL(@VoucherType, 'Journal')
+    DECLARE @Prefix NVARCHAR(20) = CASE ISNULL(@VoucherType, 'Journal')
                     WHEN 'Payment' THEN 'PV' WHEN 'Receipt' THEN 'RV' WHEN 'Contra' THEN 'CV'
                     WHEN 'Debit Note' THEN 'DN' WHEN 'Credit Note' THEN 'CN' ELSE 'JV' END;
+    -- A Voucher Type master entry (e.g. "Test Receipt") has its OWN series,
+    -- starting at 1: the category prefix + the entry's id (RV12-1, RV12-2 ...),
+    -- separate from the standard series (RV-1, RV-2 ...). Screens show only
+    -- the number after the last "-".
+    DECLARE @MasterTypeId INT = NULL;
+    IF @VoucherTypeName IS NOT NULL
+        SELECT TOP 1 @MasterTypeId = id FROM dbo.VoucherType WHERE company_id = @CompanyId AND name = @VoucherTypeName;
+    IF @MasterTypeId IS NOT NULL
+        SET @Prefix = @Prefix + CAST(@MasterTypeId AS NVARCHAR(10));
+    -- That master entry's Voucher Number Method (standard types: Automatic) -
+    -- same rules as the ticket screens: Automatic = always the next number;
+    -- Manual = the number typed (required); Automatic & Manual Override = the
+    -- number typed (pre-filled with the next one, editable).
+    DECLARE @NumberMethod NVARCHAR(30) = ISNULL((SELECT number_method FROM dbo.VoucherType WHERE id = @MasterTypeId), 'Automatic');
+    SET @ManualNo = NULLIF(LTRIM(RTRIM(@ManualNo)), '');
+    DECLARE @UseManualNo BIT = CASE WHEN @NumberMethod IN ('Manual', 'Automatic & Manual Override') AND @ManualNo IS NOT NULL THEN 1 ELSE 0 END;
 
     IF @Action = 'NEXT_NUMBER'
     BEGIN
@@ -2545,7 +2662,7 @@ BEGIN
 
     IF @Action = 'LIST'
     BEGIN
-        SELECT id, voucher_no, branch_name, voucher_type, voucher_date, narration,
+        SELECT id, voucher_no, branch_name, voucher_type, voucher_type_name, voucher_date, narration,
                total_debit, total_credit, lines_json
         FROM dbo.Vouchers
         WHERE company_id = @CompanyId
@@ -2555,7 +2672,7 @@ BEGIN
 
     IF @Action = 'GET_BY_ID'
     BEGIN
-        SELECT id, voucher_no, branch_name, voucher_type, voucher_date, narration,
+        SELECT id, voucher_no, branch_name, voucher_type, voucher_type_name, voucher_date, narration,
                total_debit, total_credit, lines_json
         FROM dbo.Vouchers
         WHERE id = @Id AND company_id = @CompanyId;
@@ -2577,6 +2694,24 @@ BEGIN
         IF @Id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM dbo.Vouchers WHERE id = @Id AND company_id = @CompanyId)
         BEGIN
             SELECT NULL AS id, 'Error' AS status, 'Voucher not found.' AS error;
+            RETURN;
+        END
+
+        IF @NumberMethod = 'Manual' AND @ManualNo IS NULL AND @Id IS NULL
+        BEGIN
+            SELECT NULL AS id, 'Error' AS status, 'Voucher No. is required (this voucher type is numbered manually).' AS error;
+            RETURN;
+        END
+        IF @UseManualNo = 1 AND CHARINDEX('-', @ManualNo) > 0
+        BEGIN
+            SELECT NULL AS id, 'Error' AS status, 'Voucher No. cannot contain "-".' AS error;
+            RETURN;
+        END
+        -- A typed number is kept inside this type's own series (prefix + "-" + number).
+        DECLARE @ManualFullNo NVARCHAR(40) = CASE WHEN @UseManualNo = 1 THEN @Prefix + '-' + @ManualNo END;
+        IF @UseManualNo = 1 AND EXISTS (SELECT 1 FROM dbo.Vouchers WHERE company_id = @CompanyId AND voucher_no = @ManualFullNo AND (@Id IS NULL OR id <> @Id))
+        BEGIN
+            SELECT NULL AS id, 'Error' AS status, 'Voucher No. ' + @ManualNo + ' already exists for this voucher type.' AS error;
             RETURN;
         END
 
@@ -2639,9 +2774,12 @@ BEGIN
             IF @Id IS NOT NULL
             BEGIN
                 UPDATE dbo.Vouchers
-                SET branch_name = ISNULL(@BranchName, branch_name), voucher_type = ISNULL(@VoucherType, 'Journal'), voucher_date = @VoucherDate,
+                SET branch_name = ISNULL(@BranchName, branch_name), voucher_type = ISNULL(@VoucherType, 'Journal'), voucher_type_name = @VoucherTypeName, voucher_date = @VoucherDate,
                     narration = @Narration, total_debit = @TotalDebit, total_credit = @TotalCredit, lines_json = @ResolvedLinesJson
                 WHERE id = @Id;
+                -- Manual / Override types may change the number on edit too.
+                IF @UseManualNo = 1
+                    UPDATE dbo.Vouchers SET voucher_no = @ManualFullNo WHERE id = @Id;
                 SET @ResultId = @Id;
             END
             ELSE
@@ -2651,17 +2789,18 @@ BEGIN
                 DECLARE @NextNum INT = (SELECT ISNULL(MAX(TRY_CAST(SUBSTRING(voucher_no, LEN(@Prefix) + 2, 20) AS INT)), 0) + 1
                     FROM dbo.Vouchers WHERE company_id = @CompanyId AND category = 'MANUAL' AND voucher_no LIKE @Prefix + '-%');
                 INSERT INTO dbo.Vouchers
-                    (company_id, branch_name, voucher_type, voucher_date, narration, category, voucher_no,
+                    (company_id, branch_name, voucher_type, voucher_type_name, voucher_date, narration, category, voucher_no,
                      total_debit, total_credit, lines_json, created_at, updated_at)
                 VALUES
-                    (@CompanyId, ISNULL(@BranchName, 'Chennai Branch'), ISNULL(@VoucherType, 'Journal'), @VoucherDate, @Narration, 'MANUAL',
-                     @Prefix + '-' + CAST(@NextNum AS NVARCHAR(10)), @TotalDebit, @TotalCredit, @ResolvedLinesJson, SYSUTCDATETIME(), SYSUTCDATETIME());
+                    (@CompanyId, ISNULL(@BranchName, 'Chennai Branch'), ISNULL(@VoucherType, 'Journal'), @VoucherTypeName, @VoucherDate, @Narration, 'MANUAL',
+                     CASE WHEN @UseManualNo = 1 THEN @ManualFullNo ELSE @Prefix + '-' + CAST(@NextNum AS NVARCHAR(10)) END,
+                     @TotalDebit, @TotalCredit, @ResolvedLinesJson, SYSUTCDATETIME(), SYSUTCDATETIME());
                 SET @ResultId = SCOPE_IDENTITY();
             END
 
             COMMIT TRAN;
 
-            SELECT id, voucher_no, branch_name, voucher_type, voucher_date, narration,
+            SELECT id, voucher_no, branch_name, voucher_type, voucher_type_name, voucher_date, narration,
                    total_debit, total_credit, lines_json, 'Success' AS status
             FROM dbo.Vouchers WHERE id = @ResultId;
         END TRY
@@ -2783,7 +2922,7 @@ BEGIN
                cl.supp_markup, cl.supp_addl_markup, cl.supp_service_fee, cl.supp_addl_service_fee, cl.supp_gst_pct,
                cl.supplier_penalty, cl.cancellation_penalty, cl.agent_penalty,
                cl.cust_markup_reversal, cl.cust_addl_markup_reversal, cl.cust_ssr_markup_reversal,
-               cl.supp_markup_reversal, cl.supp_addl_markup_reversal,
+               cl.supp_markup_reversal, cl.supp_addl_markup_reversal, cl.supp_ssr_markup_reversal,
                cl.tds_amount_override, cl.supp_tds_amount_override,
                cl.total_billed, cl.status, cl.office_id, cl.fop, cl.card_number,
                cl.supplier_ledger_id, supp.name AS supplier_name
@@ -2940,7 +3079,7 @@ BEGIN
                  supp_markup, supp_addl_markup, supp_service_fee, supp_addl_service_fee, supp_gst_pct,
                  supplier_penalty, cancellation_penalty, agent_penalty,
                  cust_markup_reversal, cust_addl_markup_reversal, cust_ssr_markup_reversal,
-                 supp_markup_reversal, supp_addl_markup_reversal, total_billed,
+                 supp_markup_reversal, supp_addl_markup_reversal, supp_ssr_markup_reversal, total_billed,
                  tds_amount_override, supp_tds_amount_override,
                  supplier_ledger_id, created_at, updated_at)
             SELECT
@@ -2952,7 +3091,7 @@ BEGIN
                 j.supp_markup, j.supp_addl_markup, j.supp_service_fee, j.supp_addl_service_fee, j.supp_gst_pct,
                 ISNULL(j.supplier_penalty, 0), ISNULL(j.cancellation_penalty, 0), ISNULL(j.agent_penalty, 0),
                 ISNULL(j.cust_markup_reversal, 0), ISNULL(j.cust_addl_markup_reversal, 0), ISNULL(j.cust_ssr_markup_reversal, 0),
-                ISNULL(j.supp_markup_reversal, 0), ISNULL(j.supp_addl_markup_reversal, 0), j.total_billed,
+                ISNULL(j.supp_markup_reversal, 0), ISNULL(j.supp_addl_markup_reversal, 0), ISNULL(j.supp_ssr_markup_reversal, 0), j.total_billed,
                 j.tds_amount_override, j.supp_tds_amount_override,
                 (SELECT id FROM dbo.Ledgers WHERE company_id = @CompanyId AND name = j.supplier_name AND ledger_category = 'CREDITOR'),
                 SYSUTCDATETIME(), SYSUTCDATETIME()
@@ -2984,6 +3123,7 @@ BEGIN
                 cust_ssr_markup_reversal DECIMAL(14,2) '$.cust_ssr_markup_reversal',
                 supp_markup_reversal DECIMAL(14,2) '$.supp_markup_reversal',
                 supp_addl_markup_reversal DECIMAL(14,2) '$.supp_addl_markup_reversal',
+                supp_ssr_markup_reversal DECIMAL(14,2) '$.supp_ssr_markup_reversal',
                 tds_amount_override DECIMAL(14,2) '$.tds_amount_override',
                 supp_tds_amount_override DECIMAL(14,2) '$.supp_tds_amount_override',
                 supplier_name NVARCHAR(150) '$.supplier_name'
@@ -3118,6 +3258,7 @@ BEGIN
                 cust_ssr_markup_reversal = ISNULL(j.cust_ssr_markup_reversal, 0),
                 supp_markup_reversal = ISNULL(j.supp_markup_reversal, 0),
                 supp_addl_markup_reversal = ISNULL(j.supp_addl_markup_reversal, 0),
+                supp_ssr_markup_reversal = ISNULL(j.supp_ssr_markup_reversal, 0),
                 updated_at = SYSUTCDATETIME()
             FROM dbo.Cancellation_Al_TicketLines cl
             INNER JOIN OPENJSON(@LinesJson) WITH (
@@ -3139,7 +3280,8 @@ BEGIN
                 cust_addl_markup_reversal DECIMAL(14,2) '$.cust_addl_markup_reversal',
                 cust_ssr_markup_reversal DECIMAL(14,2) '$.cust_ssr_markup_reversal',
                 supp_markup_reversal DECIMAL(14,2) '$.supp_markup_reversal',
-                supp_addl_markup_reversal DECIMAL(14,2) '$.supp_addl_markup_reversal'
+                supp_addl_markup_reversal DECIMAL(14,2) '$.supp_addl_markup_reversal',
+                supp_ssr_markup_reversal DECIMAL(14,2) '$.supp_ssr_markup_reversal'
             ) j ON j.id = cl.id
             WHERE cl.cancellation_ticket_id = @Id;
 
@@ -3427,7 +3569,7 @@ GO
 -- its own Journal Voucher (category AIRLINE_SSR, ALS-n) in one transaction.
 -- The JV's ledger rows are recomputed live in Python (views._compute_ssr_jv_lines,
 -- driven by Ledger Mapping) - only the totals/narration are stored here.
--- Actions: LIST, GET_HEADER, GET_LINES, SAVE (insert, or update when @Id set).
+-- Actions: LIST, LIST_FOR_ORIGINAL_LINES, GET_HEADER, GET_LINES, SAVE (insert, or update when @Id set).
 -- ============================================================================
 CREATE OR ALTER PROCEDURE dbo.sp_SSRTicket
     @Action                    NVARCHAR(50),
@@ -3449,6 +3591,7 @@ CREATE OR ALTER PROCEDURE dbo.sp_SSRTicket
     @AirlinePnr                NVARCHAR(13)    = NULL,
     @GdsPnr                    NVARCHAR(13)    = NULL,
     @PaymentMode               NVARCHAR(20)    = NULL,
+    @PaymentGatewayRef         NVARCHAR(60)    = NULL,
     @LinesJson                 NVARCHAR(MAX)   = NULL,
     @JvNarration               NVARCHAR(250)   = NULL,
     @JvTotalDebit              DECIMAL(16,2)   = NULL,
@@ -3472,6 +3615,21 @@ BEGIN
         RETURN;
     END
 
+    IF @Action = 'LIST_FOR_ORIGINAL_LINES'
+    BEGIN
+        -- Every SSR line sold on the given booking passengers (@LinesJson =
+        -- JSON array of AL_TicketLines ids) - Cancellation adds these SSR
+        -- charges into its Return SSR figures (views.cancellation_fare_totals).
+        SELECT sl.id, sl.original_ticket_line_id, sl.reschedule_line_id,
+               sl.seat, sl.meal, sl.baggage, sl.other_ssr
+        FROM dbo.SSR_AL_TicketLines sl
+        INNER JOIN dbo.SSR_AL_Tickets st ON st.id = sl.ssr_ticket_id
+        WHERE st.company_id = @CompanyId
+          AND sl.original_ticket_line_id IN (SELECT CAST([value] AS INT) FROM OPENJSON(@LinesJson))
+        ORDER BY sl.id;
+        RETURN;
+    END
+
     IF @Action = 'GET_HEADER'
     BEGIN
         IF NOT EXISTS (SELECT 1 FROM dbo.SSR_AL_Tickets WHERE id = @Id AND company_id = @CompanyId)
@@ -3482,7 +3640,7 @@ BEGIN
         SELECT st.id, st.original_ticket_id, st.source_reschedule_ticket_id, st.invoice_number, st.invoice_date,
                st.invoice_type, st.booking_mode, st.booking_status, cust.name AS customer_name, st.customer_ledger_id,
                cust.state_name AS customer_state, st.travel_type, st.user_name, st.currency, st.roe,
-               st.ssr_reference, st.ssr_ref_date, st.airline_pnr, st.gds_pnr, st.payment_mode, st.branch_name,
+               st.ssr_reference, st.ssr_ref_date, st.airline_pnr, st.gds_pnr, st.payment_mode, st.payment_gateway_ref, st.branch_name,
                ot.invoice_number AS original_invoice_number, rt.invoice_number AS source_reschedule_invoice_number,
                jv.id AS voucher_id, jv.voucher_no, jv.total_debit AS jv_total_debit, jv.total_credit AS jv_total_credit,
                'Success' AS status
@@ -3499,7 +3657,7 @@ BEGIN
     BEGIN
         SELECT sl.id, sl.original_ticket_line_id, sl.reschedule_line_id, sl.ticket_no, sl.passenger_name,
                sl.pax_type, sl.airline_category, sl.sector, sl.office_id, sl.supplier_ledger_id,
-               supp.name AS supplier_name, supp.state_name AS supplier_state, sl.fop, sl.ssr_items,
+               supp.name AS supplier_name, supp.state_name AS supplier_state, sl.fop, sl.ssr_items, sl.ssr_ticket_numbers,
                sl.seat, sl.meal, sl.baggage, sl.other_ssr, sl.markup, sl.service_fee,
                sl.supp_markup, sl.supp_service_fee, sl.total_billed
         FROM dbo.SSR_AL_TicketLines sl
@@ -3579,11 +3737,11 @@ BEGIN
                 INSERT INTO dbo.SSR_AL_Tickets
                     (company_id, branch_name, original_ticket_id, source_reschedule_ticket_id, invoice_number, invoice_date,
                      invoice_type, booking_mode, booking_status, customer_ledger_id, travel_type, user_name, currency, roe,
-                     ssr_reference, ssr_ref_date, airline_pnr, gds_pnr, payment_mode, created_at, updated_at)
+                     ssr_reference, ssr_ref_date, airline_pnr, gds_pnr, payment_mode, payment_gateway_ref, created_at, updated_at)
                 VALUES
                     (@CompanyId, @BranchName, @OriginalTicketId, @SourceRescheduleTicketId, @InvoiceNumber, @InvoiceDate,
                      @InvoiceType, 'Manual', 'SSR Updated', @CustLedgerId, @TravelType, @UserName, ISNULL(@Currency, 'INR'), ISNULL(@Roe, 1),
-                     @SsrReference, @SsrRefDate, @AirlinePnr, @GdsPnr, @PaymentMode, SYSUTCDATETIME(), SYSUTCDATETIME());
+                     @SsrReference, @SsrRefDate, @AirlinePnr, @GdsPnr, @PaymentMode, @PaymentGatewayRef, SYSUTCDATETIME(), SYSUTCDATETIME());
                 SET @ResultId = CAST(SCOPE_IDENTITY() AS INT);
             END
             ELSE
@@ -3592,7 +3750,7 @@ BEGIN
                 UPDATE dbo.SSR_AL_Tickets
                 SET invoice_number = @InvoiceNumber, invoice_date = @InvoiceDate, invoice_type = @InvoiceType,
                     user_name = @UserName, ssr_reference = @SsrReference, ssr_ref_date = @SsrRefDate,
-                    payment_mode = @PaymentMode, updated_at = SYSUTCDATETIME()
+                    payment_mode = @PaymentMode, payment_gateway_ref = @PaymentGatewayRef, updated_at = SYSUTCDATETIME()
                 WHERE id = @Id AND company_id = @CompanyId;
                 -- Lines have no children of their own - replaced wholesale.
                 DELETE FROM dbo.SSR_AL_TicketLines WHERE ssr_ticket_id = @Id;
@@ -3600,12 +3758,12 @@ BEGIN
 
             INSERT INTO dbo.SSR_AL_TicketLines
                 (ssr_ticket_id, original_ticket_line_id, reschedule_line_id, ticket_no, passenger_name, pax_type,
-                 airline_category, sector, office_id, supplier_ledger_id, fop, ssr_items,
+                 airline_category, sector, office_id, supplier_ledger_id, fop, ssr_items, ssr_ticket_numbers,
                  seat, meal, baggage, other_ssr, markup, service_fee, supp_markup, supp_service_fee, total_billed)
             SELECT @ResultId, j.original_ticket_line_id, j.reschedule_line_id, j.ticket_no, j.passenger_name, j.pax_type,
                    j.airline_category, j.sector, j.office_id,
                    (SELECT id FROM dbo.Ledgers WHERE company_id = @CompanyId AND name = j.supplier_name AND ledger_category = 'CREDITOR'),
-                   j.fop, j.ssr_items,
+                   j.fop, j.ssr_items, j.ssr_ticket_numbers,
                    ISNULL(j.seat, 0), ISNULL(j.meal, 0), ISNULL(j.baggage, 0), ISNULL(j.other_ssr, 0),
                    ISNULL(j.markup, 0), ISNULL(j.service_fee, 0), ISNULL(j.supp_markup, 0), ISNULL(j.supp_service_fee, 0),
                    ISNULL(j.total_billed, 0)
@@ -3615,6 +3773,7 @@ BEGIN
                 pax_type NVARCHAR(10) '$.pax_type', airline_category NVARCHAR(5) '$.airline_category',
                 sector NVARCHAR(20) '$.sector', office_id NVARCHAR(30) '$.office_id',
                 supplier_name NVARCHAR(150) '$.supplier_name', fop NVARCHAR(20) '$.fop', ssr_items NVARCHAR(MAX) '$.ssr_items',
+                ssr_ticket_numbers NVARCHAR(MAX) '$.ssr_ticket_numbers',
                 seat DECIMAL(14,2) '$.seat', meal DECIMAL(14,2) '$.meal', baggage DECIMAL(14,2) '$.baggage',
                 other_ssr DECIMAL(14,2) '$.other_ssr', markup DECIMAL(14,2) '$.markup', service_fee DECIMAL(14,2) '$.service_fee',
                 supp_markup DECIMAL(14,2) '$.supp_markup', supp_service_fee DECIMAL(14,2) '$.supp_service_fee',

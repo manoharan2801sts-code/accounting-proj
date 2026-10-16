@@ -36,7 +36,6 @@ def exec_sp(proc_name, params=None):
     if connection.vendor != "microsoft":
         from .sp_mysql import exec_sp as exec_sp_mysql
         return exec_sp_mysql(proc_name, params)
-
     """
     Executes a stored procedure by name and returns its ONE result set
     as a list of plain dicts (column_name -> value) — per this project's
@@ -151,6 +150,7 @@ _LEDGER_FIELD_PARAMS = {
     "gst_applicable": "GstApplicable", "gst_tax_type": "GstTaxType", "gst_percentage": "GstPercentage",
     "tds_applicable": "TdsApplicable", "tds_percentage": "TdsPercentage", "hsn_code": "HsnCode",
     "tcs_applicable": "TcsApplicable", "tcs_percentage": "TcsPercentage",
+    "is_default_bank": "IsDefaultBank",
 }
 
 
@@ -313,7 +313,7 @@ def company_master_delete(company_id):
 
 _VOUCHER_TYPE_FIELD_PARAMS = {
     "name": "Name", "alias_name": "AliasName", "voucher_category": "VoucherCategory",
-    "is_active": "IsActive", "number_method": "NumberMethod",
+    "is_active": "IsActive", "number_method": "NumberMethod", "numbering_behaviour": "NumberingBehaviour",
     "allow_additional_numbering": "AllowAdditionalNumbering",
     "allow_effective_dates": "AllowEffectiveDates", "allow_narration": "AllowNarration",
     "an_width_of_invoice_number": "AnWidthOfInvoiceNumber", "an_prefill_with_zero": "AnPrefillWithZero",
@@ -497,6 +497,13 @@ def master_mapping_list(company_id, product_type=None, masters_category=None):
     })
 
 
+def master_mapping_history(company_id, product_type=None, field_name=None):
+    """Every dated Ledger Mapping (MasterMappingHistory) + its ledger's GST %, oldest first per field."""
+    return exec_sp("dbo.sp_MasterMapping", {
+        "Action": "HISTORY_LIST", "CompanyId": company_id, "ProductType": product_type, "FieldName": field_name,
+    })
+
+
 def master_mapping_save_row(company_id, product_type, masters_category, masters_category_id, field_name,
                              ledger_id, effective_from):
     """Upserts one (company_id, product_type, field_name) row - one call per row in views.master_mapping_save's loop."""
@@ -600,13 +607,15 @@ def voucher_get(voucher_id, company_id):
     return exec_sp_one("dbo.sp_Voucher", {"Action": "GET_BY_ID", "Id": voucher_id, "CompanyId": company_id})
 
 
-def voucher_next_number(company_id, voucher_type):
-    """The number the next voucher of this type gets (JV-n / PV-n / RV-n / CV-n / DN-n / CN-n)."""
-    row = exec_sp_one("dbo.sp_Voucher", {"Action": "NEXT_NUMBER", "CompanyId": company_id, "VoucherType": voucher_type})
+def voucher_next_number(company_id, voucher_type, voucher_type_name=None):
+    """The number the next voucher of this type gets (JV-n / PV-n / RV-n / CV-n / DN-n / CN-n,
+    or a Voucher Type master entry's own series, e.g. RV12-n, when voucher_type_name is given)."""
+    row = exec_sp_one("dbo.sp_Voucher", {"Action": "NEXT_NUMBER", "CompanyId": company_id, "VoucherType": voucher_type,
+                                         "VoucherTypeName": voucher_type_name or None})
     return (row or {}).get("next_number")
 
 
-def voucher_save(company_id, branch_name, voucher_type, voucher_date, narration, lines, voucher_id=None):
+def voucher_save(company_id, branch_name, voucher_type, voucher_date, narration, lines, voucher_id=None, voucher_type_name=None, manual_no=None):
     """
     Creates or updates (when voucher_id is given) a manual Voucher -
     views.voucher_create/voucher_update. `lines` is the raw submitted
@@ -617,7 +626,9 @@ def voucher_save(company_id, branch_name, voucher_type, voucher_date, narration,
     import json as _json
     row = exec_sp_one("dbo.sp_Voucher", {
         "Action": "SAVE", "Id": voucher_id, "CompanyId": company_id, "BranchName": branch_name,
-        "VoucherType": voucher_type, "VoucherDate": voucher_date, "Narration": narration,
+        "VoucherType": voucher_type, "VoucherTypeName": voucher_type_name or None,
+        "ManualNo": manual_no or None,  # used only for Manual / Override master types
+        "VoucherDate": voucher_date, "Narration": narration,
         "LinesJson": _json.dumps(lines),
     })
     if row and row.get("status") == "Error":

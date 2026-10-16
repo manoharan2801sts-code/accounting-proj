@@ -4,6 +4,58 @@
   const editId = new URLSearchParams(window.location.search).get("id");
   const returnTo = new URLSearchParams(window.location.search).get("returnTo") || "accounts.html";
 
+  // The company's current Default Bank ({id, name} or {id: null}) - a light
+  // lookup started as soon as the company is known, so it's ready by the
+  // time Yes is clicked. null result = the lookup failed.
+  let defaultBankLookup = null;
+  function loadDefaultBank() {
+    defaultBankLookup = fetch(`http://localhost:8000/api/ledgers/default-bank/?company_id=${activeCompanyId}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .catch(() => null);
+    return defaultBankLookup;
+  }
+
+  // Default Bank - only one per company. Choosing Yes while another bank
+  // ledger already is the default asks first. Change updates the database
+  // right away (no need to wait for Save Ledger): an existing ledger becomes
+  // the default at once (dbo.sp_Ledger clears the old one); a new, not yet
+  // saved ledger clears the old default now and becomes the default when it
+  // is saved. Cancel puts this one back to No. With no default bank yet,
+  // Yes is simply accepted.
+  document.getElementById("is_default_bank_yes").addEventListener("change", async (e) => {
+    if (!e.target.checked) return;
+    // Already looked up when the page opened (see loadDefaultBank), so the
+    // popup shows straight away; falls back to asking now if that failed.
+    const data = (await (defaultBankLookup || loadDefaultBank())) || {};
+    const current = data.id && String(data.id) !== String(editId) ? data : null;
+    if (!current) return;
+    const ok = await voyagerConfirm(
+      `"${current.name}" is currently the Default Bank. Do you want to change the Default Bank to this ledger?`,
+      { title: "Change Default Bank", confirmLabel: "Change", icon: "warning", confirmStyle: "primary" }
+    );
+    if (!ok) { document.getElementById("is_default_bank_no").checked = true; return; }
+    const setDefault = async (id, value) => {
+      const res = await fetch(`http://localhost:8000/api/ledgers/${id}/update/?company_id=${activeCompanyId}`, {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ is_default_bank: value }),
+      });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Could not change the Default Bank.");
+    };
+    defaultBankLookup = null; // the default is changing - look it up fresh next time
+    try {
+      if (editId) {
+        await setDefault(editId, true); // also clears the old default (same save)
+        showToast(`Default Bank changed to "${document.getElementById("name").value.trim() || "this ledger"}".`);
+      } else {
+        await setDefault(current.id, false);
+        showToast(`"${current.name}" is no longer the Default Bank - this ledger becomes the Default Bank when you save it.`);
+      }
+    } catch (err) {
+      document.getElementById("is_default_bank_no").checked = true;
+      voyagerAlert(err.message || "Could not change the Default Bank. Is the Django backend running?", { icon: "error" });
+    }
+  });
+
   // States now load from a real XML file at runtime instead of a
   // hardcoded JS array - assets/data/india-states.xml. Feeds the Debtor's
   // and Creditor's State Name dropdowns.
@@ -210,6 +262,7 @@
     };
     set("bank_account_no", ledger.bank_account_no); set("bank_branch", ledger.bank_branch);
     set("ifsc_code", ledger.ifsc_code); set("swift_code", ledger.swift_code);
+    document.getElementById(ledger.is_default_bank ? "is_default_bank_yes" : "is_default_bank_no").checked = true;
     set("in_alias_name", ledger.alias_name); set("in_address_line1", ledger.address_line1); set("in_address_line2", ledger.address_line2);
     set("in_city", ledger.city); set("in_pincode", ledger.pincode); set("in_state_name", ledger.state_name);
     set("in_gst_no", ledger.gst_no); set("in_gst_type", ledger.gst_registration_type); set("in_pan_no", ledger.pan_no);
@@ -312,6 +365,7 @@
       Object.assign(payload, {
         bank_account_no: val("bank_account_no"), bank_branch: val("bank_branch"),
         ifsc_code: val("ifsc_code"), swift_code: val("swift_code"),
+        is_default_bank: document.getElementById("is_default_bank_yes").checked,
       });
     } else if (cat === "DEBTOR" && activeCountry !== "AE") {
       Object.assign(payload, {
@@ -386,13 +440,15 @@
   try {
     active = await VoyagerShell.init({
       activeKey: "accounts",
-      onCompanyChange: (id, country) => { activeCompanyId = Number(id); activeCountry = country; populateRefs(activeCompanyId); },
+      onCompanyChange: (id, country) => { activeCompanyId = Number(id); activeCountry = country; populateRefs(activeCompanyId); loadDefaultBank(); },
     });
   } catch (err) {
     console.error("Shell init failed", err);
   }
   if (active) {
-    activeCompanyId = Number(active.id); activeCountry = active.country; await populateRefs(activeCompanyId);
+    activeCompanyId = Number(active.id); activeCountry = active.country;
+    loadDefaultBank(); // in the background - ready before Default Bank = Yes is clicked
+    await populateRefs(activeCompanyId);
   } else {
     voyagerAlert("Could not load the active company. Check your connection and reload the page.", { icon: "error" });
   }

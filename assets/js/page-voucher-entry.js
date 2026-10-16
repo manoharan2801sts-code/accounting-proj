@@ -24,6 +24,9 @@
     document.getElementById("save-btn").style.display = viewMode ? "none" : "";
     document.getElementById("edit-btn").style.display = viewMode ? "" : "none";
     document.getElementById("cancel-link").textContent = viewMode ? `<- Back to ${backLabel()}` : "Cancel";
+    applyNumberMethod();
+    // Re-lock each line's other column (By = Debit only, To = Credit only).
+    document.querySelectorAll("#lines-body tr").forEach((tr) => { if (tr.querySelector("select.line-account")) updateLineMeta(tr); });
   }
   document.getElementById("edit-btn").addEventListener("click", () => {
     viewMode = false;
@@ -62,9 +65,10 @@
 
     document.getElementById("lines-body").innerHTML = jv.accounts.map((a) => `
       <tr>
-        <td><input class="form-control-custom" value="${a.ledger_name || "—"}" disabled /></td>
-        <td><input class="form-control-custom" type="text" value="${a.debit ? Number(a.debit).toFixed(2) : ""}" disabled /></td>
-        <td><input class="form-control-custom" type="text" value="${a.credit ? Number(a.credit).toFixed(2) : ""}" disabled /></td>
+        <td class="vx-dc">${a.debit ? "By" : "To"}</td>
+        <td><input class="form-control-custom line-account" value="${a.ledger_name || "—"}" disabled /></td>
+        <td class="vx-amt"><input class="form-control-custom" type="text" value="${a.debit ? Number(a.debit).toFixed(2) : ""}" disabled /></td>
+        <td class="vx-amt"><input class="form-control-custom" type="text" value="${a.credit ? Number(a.credit).toFixed(2) : ""}" disabled /></td>
         <td></td>
       </tr>`).join("");
 
@@ -110,24 +114,29 @@
     const tr = document.createElement("tr");
     tr.id = id;
     tr.innerHTML = `
-      <td><select class="form-control-custom line-account">${accountOptionsHtml()}</select><div class="line-bills"></div></td>
-      <td><input class="form-control-custom line-debit dom-amount" type="text" inputmode="decimal" value="${prefill && prefill.debit ? Number(prefill.debit).toFixed(2) : ""}" /></td>
-      <td><input class="form-control-custom line-credit dom-amount" type="text" inputmode="decimal" value="${prefill && prefill.credit ? Number(prefill.credit).toFixed(2) : ""}" /></td>
-      <td><button type="button" class="btn-outline-brand remove-line" style="padding:0.4rem 0.7rem; font-size:0.78rem;">✕</button></td>`;
+      <td class="vx-dc" tabindex="0"></td>
+      <td><select class="form-control-custom line-account">${accountOptionsHtml()}</select><div class="vx-curbal"></div><div class="line-bills"></div></td>
+      <td class="vx-amt"><input class="form-control-custom line-debit dom-amount" type="text" inputmode="decimal" value="${prefill && prefill.debit ? Number(prefill.debit).toFixed(2) : ""}" /></td>
+      <td class="vx-amt"><input class="form-control-custom line-credit dom-amount" type="text" inputmode="decimal" value="${prefill && prefill.credit ? Number(prefill.credit).toFixed(2) : ""}" /></td>
+      <td><button type="button" class="remove-line vx-btn-remove" title="Remove line">&times;</button></td>`;
     document.getElementById("lines-body").appendChild(tr);
     const debitInput = tr.querySelector(".line-debit");
     const creditInput = tr.querySelector(".line-credit");
     // A single line is either a Debit or a Credit, never both - typing
     // into one clears whatever's in the other.
     debitInput.addEventListener("input", () => {
+      tr._autoBalance = false; // typed by hand - never auto-adjusted again
       if (debitInput.value && parseFloat(debitInput.value) > 0) creditInput.value = "";
       recalcTotals();
     });
     creditInput.addEventListener("input", () => {
+      tr._autoBalance = false;
       if (creditInput.value && parseFloat(creditInput.value) > 0) debitInput.value = "";
       recalcTotals();
     });
-    tr.querySelector(".remove-line").addEventListener("click", () => { tr.remove(); recalcTotals(); });
+    // Leaving an amount box balances the voucher automatically (see autoBalance).
+    [debitInput, creditInput].forEach((inp) => inp.addEventListener("change", autoBalance));
+    tr.querySelector(".remove-line").addEventListener("click", () => { tr.remove(); recalcTotals(); autoBalance(); });
     if (prefill && prefill.account) tr.querySelector(".line-account").value = prefill.account;
 
     // Bill-by-Bill: a Sundry Debtor / Creditor ledger with Maintain Balance
@@ -147,7 +156,35 @@
       });
       inp.addEventListener("change", () => maybeAllocate(tr));
     });
-    tr.querySelector(".line-account").addEventListener("change", () => maybeAllocate(tr));
+    tr.querySelector(".line-account").addEventListener("change", () => { updateLineMeta(tr); fillDefaultBank(); maybeAllocate(tr); });
+    // Switching a line's side - click By / To, or press B (By) / T (To) like
+    // Tally while on the By/To label or in the Debit / Credit box. An amount
+    // already entered moves across to the other column with it.
+    function setSide(next) {
+      if (viewMode || lineSide(tr) === next) {
+        if (!viewMode) (next === "By" ? debitInput : creditInput).focus();
+        return;
+      }
+      const amount = debitInput.value || creditInput.value;
+      tr._sideManual = next;
+      tr._autoBalance = false;
+      debitInput.value = next === "By" ? amount : "";
+      creditInput.value = next === "To" ? amount : "";
+      recalcTotals();
+      if (amount) autoBalance();
+      (next === "By" ? debitInput : creditInput).focus();
+    }
+    tr.querySelector(".vx-dc").addEventListener("click", () => setSide(lineSide(tr) === "By" ? "To" : "By"));
+    tr.addEventListener("keydown", (e) => {
+      if (e.ctrlKey || e.altKey || e.metaKey) return;
+      const key = e.key.toLowerCase();
+      if (key !== "b" && key !== "t") return;
+      // Not inside the account dropdown - letters there search ledger names.
+      if (!e.target.matches(".vx-dc, .line-debit, .line-credit")) return;
+      e.preventDefault();
+      setSide(key === "b" ? "By" : "To");
+    });
+    updateLineMeta(tr);
     tr.querySelector(".line-bills").addEventListener("click", () => { if (!viewMode) maybeAllocate(tr, true); });
   }
 
@@ -218,6 +255,12 @@
       }
       tr._allocSig = sig;
       if (!data.bill_wise) { tr._alloc = null; renderLineBills(tr); return; }
+      // Bill-wise details are asked only on the settling side, any voucher type:
+      //   Sundry Debtors   (receivables) - only when the line is a CREDIT
+      //   Sundry Creditors (payables)    - only when the line is a DEBIT
+      // The other side (e.g. debiting a debtor) posts with no bill popup.
+      const asksBills = data.side === "payables" ? isDebit : !isDebit;
+      if (!asksBills) { tr._alloc = null; renderLineBills(tr); return; }
       // Invoices on the other side of this line: a Credit settles Debit bills
       // (customer receipts), a Debit settles Credit bills (supplier payments).
       // Less whatever the voucher's other lines already allocated to them.
@@ -336,7 +379,7 @@
     const currentNew = current.find((a) => a.type === "New Invoice");
     let type = currentNew ? "New Invoice" : Object.keys(currentAgainst).length ? "Against Invoice" : current.length ? "On Account" : "Against Invoice";
     const defaultNewRef = () => {
-      const t = document.getElementById("voucher_type").value;
+      const t = voucherBaseType();
       return `${VOUCHER_PREFIX[t] || "JV"}-${document.getElementById("voucher_no").value || ""}`;
     };
     // A bill this line already allocated to stays listed, even if it's now
@@ -470,7 +513,95 @@
     });
   }
 
+  // Tally-style auto balance: when the hand-entered Debit and Credit totals
+  // differ, the difference goes into the OPPOSITE column of one line - an
+  // empty line (the next one), or a new line when none is empty. That line
+  // keeps following the difference as other amounts change, until its own
+  // amount is typed by hand (then it's left alone). Balanced -> it clears.
+  function autoBalance() {
+    if (viewMode) return;
+    const rows = Array.from(document.querySelectorAll("#lines-body tr"));
+    const amt = (tr, cls) => parseFloat(tr.querySelector(cls).value) || 0;
+    let debit = 0, credit = 0;
+    rows.filter((tr) => !tr._autoBalance).forEach((tr) => { debit += amt(tr, ".line-debit"); credit += amt(tr, ".line-credit"); });
+    const diff = Math.round((debit - credit) * 100) / 100;
+    let target = rows.find((tr) => tr._autoBalance);
+    if (!diff) {
+      if (target) { target.querySelector(".line-debit").value = ""; target.querySelector(".line-credit").value = ""; }
+      recalcTotals();
+      return;
+    }
+    if (!target) {
+      target = rows.find((tr) => !amt(tr, ".line-debit") && !amt(tr, ".line-credit"));
+      if (!target) {
+        addLine();
+        target = document.getElementById("lines-body").lastElementChild;
+      }
+      target._autoBalance = true;
+    }
+    const dp = window.VoyagerUtil ? VoyagerUtil.getDecimalPlaces() : 2;
+    // More Debit entered -> the balancing line is a Credit, and vice versa.
+    target.querySelector(".line-credit").value = diff > 0 ? diff.toFixed(dp) : "";
+    target.querySelector(".line-debit").value = diff < 0 ? (-diff).toFixed(dp) : "";
+    recalcTotals();
+    fillDefaultBank(); // Payment: the balancing "To" line is the Default Bank
+  }
+
+  // Tally-style line labels: "By" = a Debit line, "To" = a Credit line. A line
+  // with no amount yet shows what it will most likely be - "To" when the
+  // voucher is short on Credit, otherwise "By". Under the ledger: its current
+  // balance (Chart of Accounts balance, Debit + / Credit -), e.g. "345.46 Dr".
+  // Each line has a side, like Tally: "By" = Debit only (Credit box locked),
+  // "To" = Credit only (Debit box locked). Side = the column holding the
+  // amount; a blank line uses the side picked by clicking its By/To label,
+  // else follows the balance ("To" when the voucher is short on Credit).
+  function lineSide(tr) {
+    if (parseFloat(tr.querySelector(".line-debit").value) || 0) return "By";
+    if (parseFloat(tr.querySelector(".line-credit").value) || 0) return "To";
+    if (tr._sideManual) return tr._sideManual;
+    let d = 0, c = 0;
+    const rows = Array.from(document.querySelectorAll("#lines-body tr")).filter((o) => o.querySelector(".line-debit"));
+    rows.forEach((o) => {
+      if (o === tr) return;
+      d += parseFloat(o.querySelector(".line-debit").value) || 0;
+      c += parseFloat(o.querySelector(".line-credit").value) || 0;
+    });
+    if (d > c) return "To";
+    if (c > d) return "By";
+    // Nothing to balance yet: line 1 starts on the voucher type's usual side
+    // (Receipt -> To, the party paying in; everything else -> By), and every
+    // later line starts on the opposite side of line 1.
+    const firstSide = voucherBaseType() === "RECEIPT" ? "To" : "By";
+    if (tr === rows[0]) return firstSide;
+    const first = rows[0];
+    const lead = first && (first._sideManual
+      || ((parseFloat(first.querySelector(".line-debit").value) || 0) ? "By" : null)
+      || ((parseFloat(first.querySelector(".line-credit").value) || 0) ? "To" : null)
+      || firstSide);
+    return lead === "To" ? "By" : "To";
+  }
+  function updateLineMeta(tr) {
+    const tag = lineSide(tr);
+    const dc = tr.querySelector(".vx-dc");
+    dc.textContent = tag;
+    dc.title = viewMode ? "" : "B = By (Debit), T = To (Credit) - or click to switch";
+    dc.tabIndex = viewMode ? -1 : 0;
+    dc.classList.toggle("vx-dc-click", !viewMode);
+    if (!viewMode) {
+      tr.querySelector(".line-debit").disabled = tag !== "By";
+      tr.querySelector(".line-credit").disabled = tag !== "To";
+    }
+    const name = tr.querySelector(".line-account").value;
+    const ledger = name && accounts.find((a) => a.name === name);
+    const curBal = tr.querySelector(".vx-curbal");
+    if (!ledger) { curBal.innerHTML = ""; return; }
+    const bal = Number(ledger.balance) || 0;
+    const dp = window.VoyagerUtil ? VoyagerUtil.getDecimalPlaces() : 2;
+    curBal.innerHTML = `Cur Bal: <strong>${Math.abs(bal).toLocaleString("en-IN", { minimumFractionDigits: dp, maximumFractionDigits: dp })} ${bal < 0 ? "Cr" : "Dr"}</strong>`;
+  }
+
   function recalcTotals() {
+    document.querySelectorAll("#lines-body tr").forEach((tr) => { if (tr.querySelector("select.line-account")) updateLineMeta(tr); });
     let debit = 0, credit = 0;
     document.querySelectorAll("#lines-body tr").forEach((tr) => {
       debit += parseFloat(tr.querySelector(".line-debit").value) || 0;
@@ -493,7 +624,82 @@
   }
 
   const ACCOUNTS_API = "http://localhost:8000/api/accounts/";
+  // Payment / Receipt: once line 1 (the party) has its ledger, the next empty
+  // line becomes the Default Bank automatically (Ledger Master's Default
+  // Bank) - "To <bank>" on a Payment (money goes out of the bank), "By
+  // <bank>" on a Receipt (money comes into the bank). Only fills a line with
+  // no ledger yet - never replaces a ledger already picked - and does nothing
+  // when no Default Bank is set or it's already on the voucher.
+  let defaultBankName = null;
+  const BANK_SIDE = { PAYMENT: "To", RECEIPT: "By" };
+  function fillDefaultBank() {
+    const bankSide = BANK_SIDE[voucherBaseType()];
+    if (viewMode || !defaultBankName || !bankSide) return;
+    const rows = Array.from(document.querySelectorAll("#lines-body tr")).filter((tr) => tr.querySelector("select.line-account"));
+    if (!rows.length || !rows[0].querySelector(".line-account").value) return;
+    if (rows.some((tr) => tr.querySelector(".line-account").value === defaultBankName)) return;
+    const target = rows.slice(1).find((tr) => !tr.querySelector(".line-account").value);
+    if (!target) return;
+    const sel = target.querySelector(".line-account");
+    if (!Array.from(sel.options).some((o) => o.value === defaultBankName)) return;
+    sel.value = defaultBankName;
+    target._sideManual = bankSide;
+    recalcTotals();
+  }
+
+  // ---------- Voucher Type master -> this screen's Voucher Type list ----------
+  // The 6 standard types (Journal, Contra, Payment, Receipt, Debit Note,
+  // Credit Note) are always listed; every ACTIVE type created in Voucher Type
+  // master whose "Type of Voucher" is one of those 6 is listed after them
+  // (e.g. "Petty Cash Payment" under Payment). Master types under General
+  // (Tax Invoice, Sales Air ...) are ticket invoice types - never listed.
+  // A master type behaves exactly like its category (numbering, By/To,
+  // Cash/Bank rules, Default Bank ...) - see voucherBaseType.
+  const CATEGORY_VALUE = { "Journal": "JOURNAL", "Contra": "CONTRA", "Payment": "PAYMENT", "Receipt": "RECEIPT", "Debit Note": "DEBIT_NOTE", "Credit Note": "CREDIT_NOTE" };
+  // The selected type's category value (JOURNAL / PAYMENT / ...) - for a
+  // master type this is its "Type of Voucher", never the master entry itself.
+  function voucherBaseType() {
+    const sel = document.getElementById("voucher_type");
+    const opt = sel.selectedOptions[0];
+    return (opt && opt.dataset.base) || sel.value;
+  }
+  // The master entry's own name when one is selected, else null.
+  function voucherTypeName() {
+    const opt = document.getElementById("voucher_type").selectedOptions[0];
+    return opt && opt.dataset.base ? opt.textContent : null;
+  }
+  async function loadVoucherTypeOptions(companyId) {
+    const sel = document.getElementById("voucher_type");
+    if (ticketId) return; // a ticket's own JV - its type is fixed
+    let types = [];
+    try {
+      const res = await fetch(`http://localhost:8000/api/voucher-type/?company_id=${companyId}`);
+      types = res.ok ? await res.json() : [];
+    } catch (_) { types = []; }
+    const standard = new Set(Object.keys(CATEGORY_VALUE).map((k) => k.toLowerCase()));
+    const current = sel.value;
+    sel.querySelectorAll("option[data-base]").forEach((o) => o.remove());
+    types
+      .filter((t) => t.is_active && CATEGORY_VALUE[t.voucher_category] && !standard.has(String(t.name).trim().toLowerCase()))
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .forEach((t) => {
+        const o = document.createElement("option");
+        o.value = `VT:${t.id}`;
+        o.dataset.base = CATEGORY_VALUE[t.voucher_category];
+        o.dataset.method = t.number_method || "Automatic"; // drives the No. box (applyNumberMethod)
+        o.textContent = t.name;
+        o.title = `${t.name} (${t.voucher_category})`;
+        sel.appendChild(o);
+      });
+    if (Array.from(sel.options).some((o) => o.value === current)) sel.value = current;
+  }
+
   async function populateRefs(companyId) {
+    await loadVoucherTypeOptions(companyId);
+    try {
+      const res = await fetch(`http://localhost:8000/api/ledgers/default-bank/?company_id=${companyId}`);
+      defaultBankName = res.ok ? (await res.json()).name || null : null;
+    } catch (_) { defaultBankName = null; }
     // Account dropdown = real Chart of Accounts leaf Ledgers (no groups),
     // not the old mock account list.
     try {
@@ -506,10 +712,11 @@
       allAccountRows = [];
       accounts = [];
     }
-    document.querySelectorAll(".line-account").forEach((sel) => {
+    document.querySelectorAll("select.line-account").forEach((sel) => {
       const current = sel.value;
       sel.innerHTML = accountOptionsHtml();
       if (current) sel.value = current;
+      updateLineMeta(sel.closest("tr")); // Cur Bal needs the ledger list just loaded
     });
   }
 
@@ -522,7 +729,16 @@
     // the <select>'s own options are UPPER_SNAKE ("PAYMENT") - reverse
     // the same VOUCHER_TYPE_LABELS map the submit handler uses.
     const upperSnake = Object.keys(VOUCHER_TYPE_LABELS).find((k) => VOUCHER_TYPE_LABELS[k] === v.voucher_type);
-    document.getElementById("voucher_type").value = upperSnake || v.voucher_type;
+    const typeSel = document.getElementById("voucher_type");
+    // Saved against a Voucher Type master entry -> select that entry (same
+    // name + category); otherwise the standard type.
+    const masterOpt = v.voucher_type_name && Array.from(typeSel.options).find((o) =>
+      o.dataset.base && o.textContent === v.voucher_type_name && o.dataset.base === upperSnake);
+    if (masterOpt) typeSel.value = masterOpt.value;
+    else typeSel.value = upperSnake || v.voucher_type;
+    lastVoucherType = voucherBaseType(); // a saved voucher's own type
+    applyNumberMethod();
+    renderShortcutBar();
     document.getElementById("voucher_date").value = v.voucher_date;
     document.getElementById("narration").value = v.narration || "";
     document.getElementById("lines-body").innerHTML = "";
@@ -536,16 +752,84 @@
   // Voucher No. - automatic, one series per voucher type (JV / PV / RV / CV /
   // DN / CN). A new voucher shows the number it will get; the server assigns
   // it for real on save. An existing voucher keeps its own number.
+  // Voucher No. follows the selected master type's Voucher Number Method,
+  // same as the ticket screens: Automatic = next number, locked; Automatic &
+  // Manual Override = next number, editable; Manual = empty, must be typed.
+  // Standard types (no master entry) are Automatic.
+  function numberMethod() {
+    const opt = document.getElementById("voucher_type").selectedOptions[0];
+    return (opt && opt.dataset.method) || "Automatic";
+  }
+  function applyNumberMethod() {
+    const inp = document.getElementById("voucher_no");
+    const m = numberMethod();
+    const editable = !viewMode && !ticketId && m !== "Automatic";
+    inp.readOnly = !editable;
+    inp.tabIndex = editable ? 0 : -1;
+    inp.classList.toggle("vx-no-edit", editable);
+    inp.placeholder = editable && m === "Manual" ? "Enter No." : "";
+    inp.title = m === "Manual" ? "Manual - type the voucher number"
+      : m === "Automatic & Manual Override" ? "Automatic - you can change it" : "Automatic - numbered per voucher type";
+  }
+  // No "-" in a typed number (it separates the series prefix from the number).
+  document.getElementById("voucher_no").addEventListener("input", (e) => {
+    if (e.target.value.includes("-")) e.target.value = e.target.value.replace(/-/g, "");
+  });
+
   async function showNextVoucherNo() {
+    applyNumberMethod();
     if (editId || ticketId || !activeCompanyId) return;
-    const type = VOUCHER_TYPE_LABELS[document.getElementById("voucher_type").value] || "Journal";
+    if (numberMethod() === "Manual") { document.getElementById("voucher_no").value = ""; return; }
+    const type = VOUCHER_TYPE_LABELS[voucherBaseType()] || "Journal";
     try {
-      const res = await fetch(`http://localhost:8000/api/vouchers/next-number/?company_id=${activeCompanyId}&voucher_type=${encodeURIComponent(type)}`);
+      const name = voucherTypeName(); // a master entry has its own series (starts at 1)
+      const res = await fetch(`http://localhost:8000/api/vouchers/next-number/?company_id=${activeCompanyId}&voucher_type=${encodeURIComponent(type)}`
+        + (name ? `&voucher_type_name=${encodeURIComponent(name)}` : ""));
       const data = await res.json();
       document.getElementById("voucher_no").value = res.ok ? numberOnly(data.next_number) : "";
     } catch (_) { document.getElementById("voucher_no").value = ""; }
   }
   document.getElementById("voucher_type").addEventListener("change", showNextVoucherNo);
+  // Type changed -> blank lines take the new type's usual sides (Receipt's
+  // line 1 = To), then the Default Bank line is filled for Payment / Receipt.
+  // Receipt <-> Payment are mirror images (Receipt: By Bank / To Party,
+  // Payment: By Party / To Bank), so switching between the two flips every
+  // entered line to the other side - the lines stay a valid voucher of the
+  // new type instead of e.g. a "Payment" with the bank still on the Debit.
+  // A flipped line's bill allocation no longer applies (it was for the
+  // other side), so it's cleared and asked again when relevant.
+  let lastVoucherType = voucherBaseType();
+  const hasAmount = (tr) => (parseFloat(tr.querySelector(".line-debit").value) || 0) || (parseFloat(tr.querySelector(".line-credit").value) || 0);
+  // Lines with no amount yet take the NEW type's natural sides (Receipt:
+  // To, By ... / everything else: By, To ...) - forget any side they had
+  // picked up under the old type.
+  function resetBlankLineSides() {
+    document.querySelectorAll("#lines-body tr").forEach((tr) => {
+      if (tr.querySelector(".line-debit") && !hasAmount(tr)) tr._sideManual = null;
+    });
+  }
+  function flipAllLineSides() {
+    document.querySelectorAll("#lines-body tr").forEach((tr) => {
+      const dr = tr.querySelector(".line-debit"), cr = tr.querySelector(".line-credit");
+      if (!dr || !cr || !hasAmount(tr)) return; // blank lines: see resetBlankLineSides
+      const debit = dr.value, credit = cr.value;
+      const side = lineSide(tr);
+      dr.value = credit;
+      cr.value = debit;
+      tr._sideManual = side === "By" ? "To" : "By";
+      if (tr._alloc) { tr._alloc = null; tr._allocSig = ""; renderLineBills(tr); }
+      maybeAllocate(tr);
+    });
+  }
+  document.getElementById("voucher_type").addEventListener("change", () => {
+    const now = voucherBaseType();
+    const mirror = (a, b) => (a === "RECEIPT" && b === "PAYMENT") || (a === "PAYMENT" && b === "RECEIPT");
+    if (!viewMode && mirror(lastVoucherType, now)) flipAllLineSides();
+    if (!viewMode) resetBlankLineSides();
+    lastVoucherType = now;
+    recalcTotals();
+    fillDefaultBank();
+  });
   document.getElementById("add-line-btn").addEventListener("click", () => addLine());
 
   // Backend Voucher.VOUCHER_TYPE_CHOICES are Title Case ("Journal", "Debit
@@ -556,6 +840,124 @@
     RECEIPT: "Receipt", DEBIT_NOTE: "Debit Note", CREDIT_NOTE: "Credit Note",
   };
 
+  // ---------- Voucher Type shortcut keys ----------
+  // F1 Journal, F2 Contra, F3 Payment, F4 Receipt, F5 Debit Note, F6 Credit
+  // Note - same order as the Voucher Type list. Listed as a plain legend at
+  // the bottom of the page (keyboard only, no buttons). Only while the type can
+  // actually be changed (a new voucher, or an existing one in Edit) - the
+  // browser's own F-key action (help, find, refresh ...) is blocked here.
+  const SHORTCUT_TYPES = Object.keys(VOUCHER_TYPE_LABELS).map((value, i) => ({ key: `F${i + 1}`, value, label: VOUCHER_TYPE_LABELS[value] }));
+  function setVoucherTypeOption(optValue) {
+    const sel = document.getElementById("voucher_type");
+    if (sel.value === optValue) return;
+    sel.value = optValue;
+    sel.dispatchEvent(new Event("change"));
+  }
+  // F-key: the standard type directly - unless Voucher Type master entries
+  // exist under it (e.g. "Test Journal" under Journal), then a small popup
+  // lists the standard type + those entries to pick from (click, or Up /
+  // Down + Enter; Esc closes without changing anything).
+  function pickVoucherType(value) {
+    const sel = document.getElementById("voucher_type");
+    if (!sel || sel.disabled || ticketId) return;
+    const standard = Array.from(sel.options).find((o) => o.value === value && !o.dataset.base);
+    if (!standard) return;
+    const masters = Array.from(sel.options).filter((o) => o.dataset.base === value);
+    if (!masters.length) { setVoucherTypeOption(value); return; }
+    openVoucherTypePicker(VOUCHER_TYPE_LABELS[value] || standard.textContent, [standard, ...masters]);
+  }
+  function openVoucherTypePicker(title, options) {
+    let modal = document.getElementById("vx-type-picker");
+    if (!modal) {
+      modal = document.createElement("div");
+      modal.className = "dom-modal-backdrop";
+      modal.id = "vx-type-picker";
+      modal.innerHTML = `
+        <div class="dom-modal-window" style="width:340px; max-width:92vw; background:#FFFFFF;">
+          <div class="dom-modal-titlebar"><div id="vx-tp-title"></div>
+            <button type="button" class="dom-titlebar-btn btn-close" data-tp="close">&times;</button></div>
+          <div id="vx-tp-list" role="listbox" style="padding:6px 0; max-height:300px; overflow-y:auto;"></div>
+        </div>`;
+      document.body.appendChild(modal);
+      const st = document.createElement("style");
+      st.textContent = `
+        #vx-tp-list .vx-tp-item { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:7px 14px;
+          font-size:12.5px; font-weight:600; color:var(--color-text-dark); cursor:pointer; }
+        #vx-tp-list .vx-tp-item small { font-weight:500; color:var(--color-text-muted); font-size:11px; }
+        #vx-tp-list .vx-tp-item.active { background:var(--color-primary); color:#FFFFFF; }
+        #vx-tp-list .vx-tp-item.active small { color:#FFFFFF; }`;
+      modal.appendChild(st);
+      const close = () => modal.classList.remove("open");
+      modal.querySelector('[data-tp="close"]').addEventListener("click", close);
+      modal.addEventListener("click", (e) => { if (e.target === modal) close(); });
+      modal.addEventListener("keydown", (e) => {
+        const items = Array.from(modal.querySelectorAll(".vx-tp-item"));
+        let i = items.findIndex((x) => x.classList.contains("active"));
+        if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+          e.preventDefault();
+          i = e.key === "ArrowDown" ? (i + 1) % items.length : (i - 1 + items.length) % items.length;
+          items.forEach((x, k) => x.classList.toggle("active", k === i));
+          items[i].scrollIntoView({ block: "nearest" });
+        } else if (e.key === "Enter") {
+          e.preventDefault();
+          if (items[i]) items[i].click();
+        } else if (e.key === "Escape") {
+          e.preventDefault();
+          close();
+        }
+      });
+      modal._close = close;
+    }
+    modal.querySelector("#vx-tp-title").textContent = `Choose ${title} Voucher Type`;
+    const current = document.getElementById("voucher_type").value;
+    const list = modal.querySelector("#vx-tp-list");
+    list.innerHTML = options.map((o, k) => `
+      <div class="vx-tp-item" role="option" tabindex="-1" data-value="${o.value}">
+        <span>${o.textContent}</span><small>${k === 0 ? "Standard" : title}</small>
+      </div>`).join("");
+    const items = Array.from(list.querySelectorAll(".vx-tp-item"));
+    const start = Math.max(0, items.findIndex((x) => x.dataset.value === current));
+    items.forEach((x, k) => {
+      x.classList.toggle("active", k === start);
+      x.addEventListener("mouseenter", () => items.forEach((y) => y.classList.toggle("active", y === x)));
+      x.addEventListener("click", () => { modal._close(); setVoucherTypeOption(x.dataset.value); });
+    });
+    modal.classList.add("open");
+    modal.tabIndex = -1;
+    setTimeout(() => modal.focus(), 0);
+  }
+  function renderShortcutBar() {
+    const bar = document.getElementById("vx-shortcuts");
+    const sel = document.getElementById("voucher_type");
+    if (!bar || !sel) return;
+    if (ticketId) { bar.innerHTML = ""; return; } // a ticket's own JV - type is fixed
+    // Dimmed while the type can't be changed (a saved voucher before Edit).
+    bar.classList.toggle("is-off", sel.disabled);
+    bar.innerHTML = `<span class="vx-sc-label">Shortcut Keys:</span>` + SHORTCUT_TYPES.map((s) =>
+      `<span class="vx-sc"><kbd>${s.key}</kbd>${s.label}</span>`).join("") +
+      // Line side keys (on the By/To label or in a Debit / Credit box).
+      `<span class="vx-sc"><kbd>B</kbd>By (Debit)</span><span class="vx-sc"><kbd>T</kbd>To (Credit)</span>`;
+  }
+  // Bound once per document - this page's script re-runs on every SPA visit,
+  // so the key handler calls the LATEST visit's picker (it reads this
+  // visit's own ticketId and looks the live elements up by id).
+  window.__pickVoucherType = pickVoucherType;
+  if (!window.__voucherTypeShortcutsBound) {
+    window.__voucherTypeShortcutsBound = true;
+    document.addEventListener("keydown", (e) => {
+      const m = /^F([1-9])$/.exec(e.key);
+      if (!m || e.ctrlKey || e.altKey || e.metaKey || !document.getElementById("vx-shortcuts")) return;
+      const s = SHORTCUT_TYPES[Number(m[1]) - 1];
+      if (!s) return;
+      e.preventDefault();
+      if (document.querySelector(".dom-modal-backdrop.open, #voyager-alert-modal.open")) return; // a popup is open
+      window.__pickVoucherType(s.value);
+    });
+  }
+  // Re-drawn whenever view/edit mode flips (disabled state) too.
+  new MutationObserver(renderShortcutBar).observe(document.getElementById("voucher_type"), { attributes: true, attributeFilter: ["disabled"] });
+  renderShortcutBar();
+
   document.getElementById("voucher-form").addEventListener("submit", async (e) => {
     e.preventDefault();
     const lines = Array.from(document.querySelectorAll("#lines-body tr")).map((tr) => ({
@@ -565,13 +967,20 @@
       bill_allocations: billAllocationsFor(tr),
     })).filter((l) => l.account_name && (l.debit || l.credit));
 
-    const type = document.getElementById("voucher_type").value;
+    const type = voucherBaseType();
+    const typedNo = document.getElementById("voucher_no").value.trim();
+    if (numberMethod() === "Manual" && !typedNo) {
+      voyagerAlert("Voucher No. is required - this voucher type is numbered manually.");
+      return;
+    }
 
-    // Payment vouchers must settle out of an actual Cash-in-Hand or Bank
-    // Accounts ledger - hard block, no override, unlike the Credit-side
-    // warning below.
-    if (type === "PAYMENT" && !lines.some((l) => isCashOrBankLedger(l.account_name))) {
-      voyagerAlert("A Payment voucher must include at least one ledger under Cash-in-Hand or Bank Accounts.");
+    // Payment vouchers must pay OUT of Cash / Bank - at least one CREDIT
+    // ("To") line on a Cash-in-Hand or Bank Accounts ledger. Hard block, no
+    // override (checked on the server too). The side matters: a bank only on
+    // the Debit side - e.g. lines kept from a Receipt after switching the
+    // type to Payment - is not a payment out of the bank.
+    if (type === "PAYMENT" && !lines.some((l) => l.credit > 0 && isCashOrBankLedger(l.account_name))) {
+      voyagerAlert("A Payment voucher must have at least one Credit line on a ledger under Bank Accounts or Cash-in-Hand.");
       return;
     }
 
@@ -610,6 +1019,9 @@
     const payload = {
       company_id: activeCompanyId,
       voucher_type: VOUCHER_TYPE_LABELS[type] || type,
+      voucher_type_name: voucherTypeName(),
+      // Manual / Override types: the number typed (Automatic ignores it).
+      voucher_no_manual: numberMethod() !== "Automatic" ? typedNo : null,
       voucher_date: document.getElementById("voucher_date").value,
       narration: document.getElementById("narration").value,
       lines: resolvedLines,

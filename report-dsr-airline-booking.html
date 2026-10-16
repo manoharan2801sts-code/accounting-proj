@@ -101,17 +101,15 @@
       border-bottom: 1px solid var(--color-border); gap: 1rem; flex-wrap: wrap; background: #FAFBFD;
     }
     .table-search { max-width: 220px; width: 100%; height: 26px; font-size: 11.5px; padding: 0 0.5rem; }
-    /* No horizontal scrollbar, ever (explicit request) - the main area now
-       spans the full window width (no more 1440px cap) and every
-       long-text column is already capped via .truncate-cell below, so
-       everything fits in one page; overflow-x: hidden is the hard
-       guarantee against a stray wide column reintroducing the scrollbar
-       on a narrower screen. */
-    .table-scroll { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; }
+    /* Scrolls inside the grid both ways - with the Earnings columns the
+       table can be wider than the screen, so it scrolls sideways within
+       its own box (never the page). The Total row below follows the same
+       horizontal scroll (see the scroll sync in syncTotalColumnWidths). */
+    .table-scroll { flex: 1; min-height: 0; overflow-y: auto; overflow-x: auto; }
     .table-custom { width: 100%; border-collapse: collapse; text-align: left; }
     .table-custom th { padding: 0.35rem 0.75rem; background: #F8FAFC; border-bottom: 1px solid var(--color-border);
       font-size: 10.5px; font-weight: 700; color: var(--color-text-muted); letter-spacing: 0.03em;
-      position: sticky; top: 0; z-index: 1; }
+      position: sticky; top: 0; z-index: 1; white-space: nowrap; }
     .table-custom td {
       padding: 0.2rem 0.75rem; border-bottom: 1px solid var(--color-border-subtle);
       font-size: 12px; color: var(--color-text); vertical-align: middle; line-height: 1.3;
@@ -138,7 +136,7 @@
        still never scrolls away when there are many. Column widths are
        synced to the main table's header via JS (syncTotalColumnWidths). */
     .lb-total-wrap { flex-shrink: 0; overflow: hidden; }
-    #lb-total-table { table-layout: fixed; }
+    #lb-total-table { table-layout: fixed; width: auto; }
     .lb-total-row td { border-top: 2px solid var(--color-border); font-weight: 700; background: #FAFBFD; }
   </style>
 </head>
@@ -238,10 +236,13 @@
                 <th class="amt-header">Base Fare</th>
                 <th class="amt-header">Other Tax</th>
                 <th class="amt-header">Net Amount</th>
+                <th class="amt-header">Commission Earnings</th>
+                <th class="amt-header">Other Earnings</th>
+                <th class="amt-header">Total Earnings</th>
               </tr>
             </thead>
             <tbody id="main-data-tbody">
-              <tr><td colspan="12" style="text-align:center; padding:2rem; color:var(--color-text-muted);">Loading…</td></tr>
+              <tr><td colspan="16" style="text-align:center; padding:2rem; color:var(--color-text-muted);">Loading…</td></tr>
             </tbody>
           </table>
         </div>
@@ -261,7 +262,7 @@
   <script src="assets/js/api.js?v=4"></script>
   <script src="assets/js/util.js?v=5"></script>
   <script src="assets/js/entry-common.js"></script>
-  <script src="assets/js/shell.js?v=29"></script>
+  <script src="assets/js/shell.js?v=31"></script>
   <script>
     // Not gated on DOMContentLoaded - when this page is opened via the
     // app's SPA navigation (shell.js's navigateTo), its <script> tags are
@@ -438,6 +439,20 @@
     // passenger, Airline/Supplier show every distinct value across that
     // ticket's passengers, and the amount columns are summed across all
     // of them.
+    // Supplier Commission AMOUNT of one Booking / Reschedule line - same
+    // formula as the ticket screen's computeSuppLine and the JV
+    // (TicketLine.computed_supp_commission): Percentage = the chosen base x
+    // rate, Flat = the amount itself. SSR lines carry none (0).
+    function supplierCommission(r) {
+      const n = (k) => Number(r[k]) || 0;
+      const gross = n("basic_fare") + n("yq") + n("yr") + n("k3_tax") + n("tax_others") + n("seat") + n("meal") + n("baggage") + n("other_ssr");
+      const base = { "Basic": n("basic_fare"), "Basic + YQ": n("basic_fare") + n("yq"), "Basic + YR": n("basic_fare") + n("yr"),
+        "Basic + YQ + YR": n("basic_fare") + n("yq") + n("yr"), "Gross": gross }[r.supp_comm_on] || 0;
+      if (r.supp_comm_type === "Percentage") return base * n("supp_comm_value") / 100;
+      if (r.supp_comm_type === "Flat") return n("supp_comm_value");
+      return 0;
+    }
+
     function groupRowsByTicket(rows) {
       const byTicket = new Map();
       rows.forEach((r) => {
@@ -460,6 +475,7 @@
             lead_passenger_name: r.passenger_name, airline_names: [], supplier_names: [], sectors: [],
             booking_status: r.booking_status,
             basic_fare: 0, other_tax: 0, net_amount: 0,
+            commission_earnings: 0, other_earnings: 0,
           };
           byTicket.set(groupKey, g);
         }
@@ -491,11 +507,38 @@
         g.basic_fare += lineBasic;
         g.net_amount += lineNet;
         g.other_tax += lineNet - lineBasic;
+        // Earnings - Booking / Reschedule / SSR Updation:
+        //   Commission Earnings = Supplier Commission Amount - Customer Commission (Discount) Amount
+        //   Other Earnings      = Customer Markup + Addl Markup + SSR Markup + Service Fee
+        //                         + Addl Service Fee + SSR Service Fee (+ Agent Penalty - Reschedule)
+        //   Total Earnings      = Commission Earnings + Other Earnings
+        const n = (k) => Number(r[k]) || 0;
+        if (r.cancellation_ticket_id == null) {
+          g.commission_earnings += supplierCommission(r) - n("computed_discount");
+          g.other_earnings += n("markup") + n("addl_markup") + n("ssr_markup")
+            + n("service_fee") + n("addl_service_fee") + n("ssr_service_fee") + n("agent_penalty");
+        } else {
+          // Cancellation (its own formula, nothing else changes):
+          //   Commission Earnings = -(Supplier Commission - Customer Commission)
+          //     - the commission earned is given back, so a positive result
+          //     shows with "-" and a negative one shows positive
+          //   Other Earnings = Customer Markup + Addl Markup + SSR Markup +
+          //     Service Fee + Addl Service Fee + SSR Service Fee + Agent Penalty
+          //     - Customer Markup Reversal
+          //   Total Earnings = Commission Earnings + Other Earnings
+          g.commission_earnings += -(n("supp_commission_amount") - n("cust_commission_amount"));
+          g.other_earnings += n("markup") + n("addl_markup") + n("ssr_markup")
+            + n("service_fee") + n("addl_service_fee") + n("ssr_service_fee") + n("agent_penalty")
+            - n("cust_markup_reversal_total");
+        }
       });
       byTicket.forEach((g) => {
         g.basic_fare = Math.round(g.basic_fare * 100) / 100;
         g.net_amount = Math.round(g.net_amount * 100) / 100;
         g.other_tax = Math.round(g.other_tax * 100) / 100;
+        g.commission_earnings = Math.round(g.commission_earnings * 100) / 100;
+        g.other_earnings = Math.round(g.other_earnings * 100) / 100;
+        g.total_earnings = Math.round((g.commission_earnings + g.other_earnings) * 100) / 100;
       });
       return Array.from(byTicket.values());
     }
@@ -506,7 +549,7 @@
       selectedRowIndex = -1; // stale after a full re-render - rows are new DOM nodes
       const tickets = groupRowsByTicket(rows);
       if (!tickets.length) {
-        tbody.innerHTML = `<tr><td colspan="13" style="text-align:center; padding:2rem; color:var(--color-text-muted);">No records found for the selected filters.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="16" style="text-align:center; padding:2rem; color:var(--color-text-muted);">No records found for the selected filters.</td></tr>`;
         totalRow.innerHTML = "";
         return;
       }
@@ -525,6 +568,7 @@
           <td class="amt">${fmtAmt(t.basic_fare)}</td>
           <td class="amt">${fmtAmt(t.other_tax)}</td>
           <td class="amt">${fmtAmt(t.net_amount)}</td>
+          <td class="amt">${fmtAmt(t.commission_earnings)}</td><td class="amt">${fmtAmt(t.other_earnings)}</td><td class="amt" style="font-weight:700;">${fmtAmt(t.total_earnings)}</td>
         </tr>
       `).join("");
 
@@ -533,11 +577,17 @@
       const totalBasicFare = tickets.reduce((sum, t) => sum + (Number(t.basic_fare) || 0), 0);
       const totalOtherTax = tickets.reduce((sum, t) => sum + (Number(t.other_tax) || 0), 0);
       const totalNetAmount = tickets.reduce((sum, t) => sum + (Number(t.net_amount) || 0), 0);
+      const totalCommission = tickets.reduce((sum, t) => sum + t.commission_earnings, 0);
+      const totalOther = tickets.reduce((sum, t) => sum + t.other_earnings, 0);
+      const totalEarnings = tickets.reduce((sum, t) => sum + t.total_earnings, 0);
       totalRow.innerHTML = `
         <td colspan="10" style="text-align:right;">Total :</td>
         <td class="amt">${fmtAmt(totalBasicFare)}</td>
         <td class="amt">${fmtAmt(totalOtherTax)}</td>
-        <td class="amt">${fmtAmt(totalNetAmount)}</td>`;
+        <td class="amt">${fmtAmt(totalNetAmount)}</td>
+        <td class="amt">${fmtAmt(totalCommission)}</td>
+        <td class="amt">${fmtAmt(totalOther)}</td>
+        <td class="amt">${fmtAmt(totalEarnings)}</td>`;
       syncTotalColumnWidths();
     }
 
@@ -548,6 +598,17 @@
       const headerCells = document.querySelectorAll("#main-data-table thead th");
       const totalCells = document.querySelectorAll("#lb-total-row td");
       if (!headerCells.length || !totalCells.length) return;
+      // Same overall width as the main table (it can be wider than the
+      // screen), kept at the same horizontal scroll position.
+      const mainTable = document.getElementById("main-data-table");
+      document.getElementById("lb-total-table").style.width = mainTable.getBoundingClientRect().width + "px";
+      const scroller = document.querySelector(".table-scroll");
+      const totalWrap = document.querySelector(".lb-total-wrap");
+      if (!scroller.dataset.totalSync) {
+        scroller.dataset.totalSync = "1";
+        scroller.addEventListener("scroll", () => { totalWrap.scrollLeft = scroller.scrollLeft; });
+      }
+      totalWrap.scrollLeft = scroller.scrollLeft;
       const widths = Array.from(headerCells).map((th) => th.getBoundingClientRect().width);
       let i = 0;
       totalCells.forEach((td) => {
@@ -661,7 +722,7 @@
       } catch (err) {
         console.error("Could not load tickets for the DSR report - is the Django backend running?", err);
         allRows = [];
-        tbody.innerHTML = `<tr><td colspan="11" style="text-align:center; padding:2rem; color:var(--color-text-muted);">Could not load data. Is the Django backend running on localhost:8000?</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="16" style="text-align:center; padding:2rem; color:var(--color-text-muted);">Could not load data. Is the Django backend running on localhost:8000?</td></tr>`;
         return;
       }
       populateReferenceFilters();

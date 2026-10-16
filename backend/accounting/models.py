@@ -47,6 +47,85 @@ if django.VERSION < (5, 0):
 # so an edited mapping is never served stale for longer than that.
 _field_gst_pct_cache = {}
 
+# ---------------------------------------------------------------------------
+# Ledger Mapping effective dates (MasterMappingHistory) - the single place
+# every JV / GST calculation resolves a mapped field's ledger from:
+#   resolve_mapping(company, field, as_of) -> the mapping in force ON as_of
+#   = the latest history row with effective_from <= as_of; a document dated
+#   before every row uses the earliest one; as_of None = the latest mapping.
+# Cached per (company, product); clear_mapping_caches() after any Ledger
+# Mapping save/delete or ledger GST % change.
+# ---------------------------------------------------------------------------
+_mapping_history_cache = {}
+
+
+def _as_date(value):
+    import datetime as _dt
+    if value is None or value == "":
+        return None
+    if isinstance(value, _dt.datetime):
+        return value.date()
+    if isinstance(value, _dt.date):
+        return value
+    try:
+        return _dt.date.fromisoformat(str(value)[:10])
+    except ValueError:
+        return None
+
+
+def _mapping_history(company_id, product_type="Airline"):
+    key = (int(company_id), product_type)
+    if key not in _mapping_history_cache:
+        from . import sp_client
+        out = {}
+        for r in sp_client.master_mapping_history(company_id, product_type):
+            out.setdefault(r["field_name"], []).append({
+                "effective_from": _as_date(r["effective_from"]), "ledger_id": r["ledger_id"],
+                "ledger_name": r["ledger_name"], "gst_pct": float(r["ledger_gst_percentage"] or 0),
+                "masters_category": r["masters_category"],
+            })
+        for rows in out.values():
+            rows.sort(key=lambda r: r["effective_from"])
+        _mapping_history_cache[key] = out
+    return _mapping_history_cache[key]
+
+
+def resolve_mapping(company_id, field_name, as_of=None, product_type="Airline"):
+    """The Ledger Mapping in force for field_name on as_of (a document's own
+    date) - {ledger_id, ledger_name, gst_pct, effective_from, masters_category},
+    or None when the field was never mapped."""
+    if company_id is None:
+        return None
+    rows = _mapping_history(company_id, product_type).get(field_name)
+    if not rows:
+        return None
+    day = _as_date(as_of)
+    if day is None:
+        return rows[-1]
+    in_force = [r for r in rows if r["effective_from"] <= day]
+    return in_force[-1] if in_force else rows[0]
+
+
+def mapped_gst_pct(company_id, field_name, as_of=None):
+    """GST % of the ledger mapped to field_name on as_of (0 when unmapped)."""
+    r = resolve_mapping(company_id, field_name, as_of)
+    return r["gst_pct"] if r else 0.0
+
+
+def document_date(header):
+    """The date a document's mappings are resolved for - its Invoice Date
+    (Booking Ref / Cancellation Ref / SSR Ref Date when there's none)."""
+    for attr in ("invoice_date", "booking_ref_date", "cancellation_ref_date", "ssr_ref_date"):
+        value = getattr(header, attr, None)
+        if value:
+            return value
+    return None
+
+
+def clear_mapping_caches():
+    _mapping_history_cache.clear()
+    _field_gst_pct_cache.clear()
+
 
 class LedgerGroup(models.Model):
     ACCOUNT_TYPE_CHOICES = [
@@ -157,6 +236,9 @@ class Ledger(models.Model):
     bank_branch = models.CharField(max_length=100, null=True, blank=True)
     ifsc_code = models.CharField(max_length=15, null=True, blank=True)
     swift_code = models.CharField(max_length=15, null=True, blank=True)
+    # The company's Default Bank (Bank Accounts ledgers) - at most one per
+    # company; dbo.sp_Ledger clears it on the others when one is set.
+    is_default_bank = models.BooleanField(default=False, db_default=False)
 
     # Debtor — shared
     alias_name = models.CharField(max_length=100, null=True, blank=True)
@@ -167,10 +249,7 @@ class Ledger(models.Model):
     place_of_supply = models.CharField(max_length=60, null=True, blank=True)
     credit_days = models.IntegerField(null=True, blank=True, default=0)
     credit_limit = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True, default=0)
-    customer_type = models.CharField(
-        max_length=20, null=True, blank=True,
-        choices=[("RETAIL", "Retail"), ("CORPORATE", "Corporate"), ("AGENT", "Agent")]
-    )
+    customer_type = models.CharField(max_length=20, null=True, blank=True, choices=[('RETAIL', 'Retail'), ('CORPORATE', 'Corporate'), ('AGENT', 'Agent')])
 
     # Debtor — India
     city = models.CharField(max_length=60, null=True, blank=True)
@@ -519,6 +598,7 @@ class TicketLine(models.Model):
         field was removed from the UI) - see page-ticket-entry.js.
         """
         company_id = self.ticket.company_id
+        doc_date = document_date(self.ticket)
 
         # Cast to float - self.service_fee etc. are plain Python floats
         # before this line has ever been saved (ticket_create/
@@ -531,13 +611,9 @@ class TicketLine(models.Model):
         # 'decimal.Decimal'/'float'" depending on which side it is, so
         # every operand here is explicitly floated first.
         def field_ledger_gst_pct(field_name):
-            cache_key = (company_id, field_name)
-            if cache_key not in _field_gst_pct_cache:
-                m = MasterMapping.objects.filter(
-                    company_id=company_id, product_type="Airline", field_name=field_name
-                ).select_related("ledger").first()
-                _field_gst_pct_cache[cache_key] = float(m.ledger.gst_percentage) if m and m.ledger_id else 0.0
-            return _field_gst_pct_cache[cache_key]
+            # GST % of the ledger mapped to this field ON THIS DOCUMENT'S OWN
+            # DATE (Ledger Mapping effective dates - see resolve_mapping).
+            return mapped_gst_pct(company_id, field_name, doc_date)
 
         return (
             float(self.service_fee) * field_ledger_gst_pct("Service Fee A/c") / 100
@@ -575,15 +651,12 @@ class TicketLine(models.Model):
         was removed from the UI) - see page-ticket-entry.js.
         """
         company_id = self.ticket.company_id
+        doc_date = document_date(self.ticket)
 
         def field_ledger_gst_pct(field_name):
-            cache_key = (company_id, field_name)
-            if cache_key not in _field_gst_pct_cache:
-                m = MasterMapping.objects.filter(
-                    company_id=company_id, product_type="Airline", field_name=field_name
-                ).select_related("ledger").first()
-                _field_gst_pct_cache[cache_key] = float(m.ledger.gst_percentage) if m and m.ledger_id else 0.0
-            return _field_gst_pct_cache[cache_key]
+            # GST % of the ledger mapped to this field ON THIS DOCUMENT'S OWN
+            # DATE (Ledger Mapping effective dates - see resolve_mapping).
+            return mapped_gst_pct(company_id, field_name, doc_date)
 
         return (
             float(self.supp_service_fee) * field_ledger_gst_pct("Supplier Service Fee A/c") / 100
@@ -863,15 +936,12 @@ class RescheduleAirlineTicketLine(models.Model):
     @property
     def computed_gst(self):
         company_id = self.reschedule_ticket.company_id
+        doc_date = document_date(self.reschedule_ticket)
 
         def field_ledger_gst_pct(field_name):
-            cache_key = (company_id, field_name)
-            if cache_key not in _field_gst_pct_cache:
-                m = MasterMapping.objects.filter(
-                    company_id=company_id, product_type="Airline", field_name=field_name
-                ).select_related("ledger").first()
-                _field_gst_pct_cache[cache_key] = float(m.ledger.gst_percentage) if m and m.ledger_id else 0.0
-            return _field_gst_pct_cache[cache_key]
+            # GST % of the ledger mapped to this field ON THIS DOCUMENT'S OWN
+            # DATE (Ledger Mapping effective dates - see resolve_mapping).
+            return mapped_gst_pct(company_id, field_name, doc_date)
 
         return (
             float(self.service_fee) * field_ledger_gst_pct("Service Fee A/c") / 100
@@ -903,15 +973,12 @@ class RescheduleAirlineTicketLine(models.Model):
     def computed_supp_gst(self):
         """Supplier GST Amount - same convention as computed_gst above (2026-10-07). See TicketLine's own copy for the full explanation."""
         company_id = self.reschedule_ticket.company_id
+        doc_date = document_date(self.reschedule_ticket)
 
         def field_ledger_gst_pct(field_name):
-            cache_key = (company_id, field_name)
-            if cache_key not in _field_gst_pct_cache:
-                m = MasterMapping.objects.filter(
-                    company_id=company_id, product_type="Airline", field_name=field_name
-                ).select_related("ledger").first()
-                _field_gst_pct_cache[cache_key] = float(m.ledger.gst_percentage) if m and m.ledger_id else 0.0
-            return _field_gst_pct_cache[cache_key]
+            # GST % of the ledger mapped to this field ON THIS DOCUMENT'S OWN
+            # DATE (Ledger Mapping effective dates - see resolve_mapping).
+            return mapped_gst_pct(company_id, field_name, doc_date)
 
         return (
             float(self.supp_service_fee) * field_ledger_gst_pct("Supplier Service Fee A/c") / 100
@@ -1175,15 +1242,12 @@ class CancellationAirlineTicketLine(models.Model):
     @property
     def computed_gst(self):
         company_id = self.cancellation_ticket.company_id
+        doc_date = document_date(self.cancellation_ticket)
 
         def field_ledger_gst_pct(field_name):
-            cache_key = (company_id, field_name)
-            if cache_key not in _field_gst_pct_cache:
-                m = MasterMapping.objects.filter(
-                    company_id=company_id, product_type="Airline", field_name=field_name
-                ).select_related("ledger").first()
-                _field_gst_pct_cache[cache_key] = float(m.ledger.gst_percentage) if m and m.ledger_id else 0.0
-            return _field_gst_pct_cache[cache_key]
+            # GST % of the ledger mapped to this field ON THIS DOCUMENT'S OWN
+            # DATE (Ledger Mapping effective dates - see resolve_mapping).
+            return mapped_gst_pct(company_id, field_name, doc_date)
 
         return (
             float(self.service_fee) * field_ledger_gst_pct("Service Fee A/c") / 100
@@ -1218,15 +1282,12 @@ class CancellationAirlineTicketLine(models.Model):
     def computed_supp_gst(self):
         """Supplier GST Amount - same convention as computed_gst above (2026-10-07). See TicketLine's own copy for the full explanation."""
         company_id = self.cancellation_ticket.company_id
+        doc_date = document_date(self.cancellation_ticket)
 
         def field_ledger_gst_pct(field_name):
-            cache_key = (company_id, field_name)
-            if cache_key not in _field_gst_pct_cache:
-                m = MasterMapping.objects.filter(
-                    company_id=company_id, product_type="Airline", field_name=field_name
-                ).select_related("ledger").first()
-                _field_gst_pct_cache[cache_key] = float(m.ledger.gst_percentage) if m and m.ledger_id else 0.0
-            return _field_gst_pct_cache[cache_key]
+            # GST % of the ledger mapped to this field ON THIS DOCUMENT'S OWN
+            # DATE (Ledger Mapping effective dates - see resolve_mapping).
+            return mapped_gst_pct(company_id, field_name, doc_date)
 
         return (
             float(self.supp_service_fee) * field_ledger_gst_pct("Supplier Service Fee A/c") / 100
@@ -1452,6 +1513,11 @@ class Voucher(models.Model):
     company_id = models.IntegerField()
     branch_name = models.CharField(max_length=100, null=True, blank=True)
     voucher_type = models.CharField(max_length=20, choices=VOUCHER_TYPE_CHOICES, default="Journal")
+    # The Voucher Type master entry picked on the Voucher screen (e.g. "Petty
+    # Cash Payment"), when one was - voucher_type above stays its category
+    # (Payment), which drives numbering / validation / reports. NULL = one
+    # of the 6 standard types was picked directly.
+    voucher_type_name = models.CharField(max_length=100, null=True, blank=True)
     voucher_date = models.DateField()
     narration = models.CharField(max_length=250, null=True, blank=True)
 
@@ -1490,7 +1556,7 @@ class VoucherType(models.Model):
     """
     CATEGORY_CHOICES = [
         ("General", "General"), ("Journal", "Journal"), ("Payment", "Payment"),
-        ("Receipt", "Receipt"), ("Debit Note", "Debit Note"), ("Credit Note", "Credit Note"),
+        ("Receipt", "Receipt"), ("Contra", "Contra"), ("Debit Note", "Debit Note"), ("Credit Note", "Credit Note"),
     ]
     NUMBER_METHOD_CHOICES = [
         ("Automatic", "Automatic"), ("Manual", "Manual"),
@@ -1509,6 +1575,10 @@ class VoucherType(models.Model):
     voucher_category = models.CharField(max_length=20, choices=CATEGORY_CHOICES, default="General")
     is_active = models.BooleanField(default=True)
     number_method = models.CharField(max_length=30, choices=NUMBER_METHOD_CHOICES, default="Automatic")
+    # Automatic numbering only (NULL otherwise): "Restart Numbers" or
+    # "Keep Original Numbers" - asked in a popup when Automatic is chosen.
+    NUMBERING_BEHAVIOUR_CHOICES = [("Restart Numbers", "Restart Numbers"), ("Keep Original Numbers", "Keep Original Numbers")]
+    numbering_behaviour = models.CharField(max_length=30, choices=NUMBERING_BEHAVIOUR_CHOICES, null=True, blank=True)
 
     allow_additional_numbering = models.BooleanField(default=False)
     allow_effective_dates = models.BooleanField(default=False)
@@ -1637,6 +1707,40 @@ class MasterMapping(models.Model):
 
     def __str__(self):
         return f"{self.product_type} — {self.field_name}"
+
+
+class MasterMappingHistory(models.Model):
+    """
+    Ledger Mapping (MasterMapping) with Effective From dates - same idea as
+    PGMasterHistory: one row per (company, product, field, Effective From),
+    written by every Ledger Mapping save (dbo.sp_MasterMapping SAVE_ROW).
+    A document (ticket / reschedule / cancellation / SSR) always posts to the
+    ledger that was mapped ON ITS OWN DATE - the latest row whose
+    effective_from is on or before that date (see resolve_mapping) - so
+    re-mapping a field later never rewrites already-booked documents.
+    MasterMapping itself keeps the latest-effective mapping (what the Ledger
+    Mapping page shows).
+    """
+    company_id = models.IntegerField()
+    product_type = models.CharField(max_length=20)
+    masters_category = models.CharField(max_length=40)
+    field_name = models.CharField(max_length=60)
+    ledger_id = models.IntegerField()
+    ledger_name = models.CharField(max_length=200, null=True, blank=True)
+    effective_from = models.DateField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "MasterMappingHistory"
+        constraints = [
+            models.UniqueConstraint(fields=["company_id", "product_type", "field_name", "effective_from"],
+                                    name="uq_master_mapping_history_effective_from")
+        ]
+        indexes = [models.Index(fields=["company_id", "product_type", "field_name", "effective_from"], name="mmh_lookup_idx")]
+
+    def __str__(self):
+        return f"{self.product_type} - {self.field_name} @ {self.effective_from}"
 
 
 class FOPMaster(models.Model):

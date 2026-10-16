@@ -34,7 +34,7 @@
       <div class="v-card">
         <div class="v-head" data-idx="${i}" data-id="${v.id}" title="Double-click to open this voucher">
           <div class="v-no">${displayVoucherNo(v)}</div>
-          <div class="v-type"><span class="pill pill-neutral">${titleCaseLabel(v.voucher_type)}</span></div>
+          <div class="v-type"><span class="pill pill-neutral" title="${titleCaseLabel(v.voucher_type)}">${v.voucher_type_name || titleCaseLabel(v.voucher_type)}</span></div>
           <div class="v-date">${fmtDate(v.voucher_date)}</div>
           <div class="v-narration">${v.narration || ""}</div>
           <div class="v-amount">${fmtMoney(v.total_debit, ccy)}</div>

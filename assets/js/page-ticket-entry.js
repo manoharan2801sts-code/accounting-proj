@@ -202,6 +202,13 @@
   document.getElementById("invoice_date").addEventListener("change", () => {
     if (document.getElementById("payment_gateway_ref").value) updatePgCharges();
   });
+  // A different Invoice Date can fall under a different Ledger Mapping
+  // (effective dates) - reload it and re-work the GST figures shown.
+  document.getElementById("invoice_date").addEventListener("change", async () => {
+    if (!activeCompanyId) return;
+    await populateMappedFieldNames(activeCompanyId);
+    if (passengers.length) { renderPaxTable(); recalcSummary(); }
+  });
 
   function updateGatewayRefField() {
     const isGateway = document.getElementById("payment_mode").value === "Payment Gateway";
@@ -322,7 +329,11 @@
   const MASTER_MAPPING_API = "http://localhost:8000/api/master-mapping/";
   async function populateMappedFieldNames(companyId) {
     try {
-      const res = await fetch(`${MASTER_MAPPING_API}?company_id=${companyId}&product_type=Airline`);
+      // Ledger Mapping in force on this document's Invoice Date (effective
+      // dates) - the same ledgers / GST % the saved JV will use.
+      const invIso = toISOFromDDMMYYYY(getDateGroupValue(document.getElementById("invoice_date")));
+      const res = await fetch(`${MASTER_MAPPING_API}?company_id=${companyId}&product_type=Airline`
+        + (invIso ? `&as_of=${encodeURIComponent(invIso)}` : ""));
       const rows = res.ok ? await res.json() : [];
       mappedFieldNames = new Set(rows.map((r) => r.field_name));
       fieldLedgerGstPct = {};
@@ -424,25 +435,44 @@
   // (voucher-type.html) - only active voucher types, by name. Picking one
   // drives Invoice Number auto-numbering per that voucher type's own
   // Number Method (see applyInvoiceNumbering below).
+  let voucherTypeLoadSeq = 0; // only the latest call fills the list (calls can overlap)
   async function populateVoucherTypeOptions(companyId) {
     const select = document.getElementById("invoice_type");
-    const current = select.value;
+    const seq = ++voucherTypeLoadSeq;
+    let loaded;
     try {
       const res = await fetch(`${VOUCHER_TYPE_API}?company_id=${companyId}`);
-      voucherTypes = res.ok ? await res.json() : [];
+      loaded = res.ok ? await res.json() : [];
     } catch (err) {
       console.error("Could not load Voucher Types", err);
-      voucherTypes = [];
+      loaded = [];
     }
-    // Cancellation only ever posts against a Credit Note - narrow the
-    // dropdown to just that category in that mode (New Ticket/Reschedule
-    // keep seeing every active voucher type, same as before).
+    if (seq !== voucherTypeLoadSeq) return;
+    voucherTypes = loaded;
+    // Which Voucher Type master entries are invoice types here, by their
+    // "Type of Voucher": Booking / Reschedule -> General only; Cancellation
+    // -> Credit Note only. (Journal / Payment / Receipt / Contra / Debit Note
+    // types belong to the Voucher screen, never here.)
+    const category = cancellationMode ? "Credit Note" : "General";
     const activeNames = voucherTypes
-      .filter((vt) => vt.is_active)
-      .filter((vt) => !cancellationMode || vt.voucher_category === "Credit Note")
+      .filter((vt) => vt.is_active && vt.voucher_category === category)
       .map((vt) => vt.name);
+    // Read after the fetch - a saved record may have set its own type meanwhile.
+    const current = select.value;
     fillPlain(select, activeNames, "Select...");
-    select.value = activeNames.includes(current) ? current : "";
+    setInvoiceTypeValue(current);
+  }
+  // Sets Invoice Type; a saved record's own type stays visible even when it's
+  // no longer in this screen's list (e.g. saved before the list was narrowed,
+  // or since deactivated) instead of the box silently going blank.
+  function setInvoiceTypeValue(value) {
+    const select = document.getElementById("invoice_type");
+    if (value && !Array.from(select.options).some((o) => o.value === value)) {
+      const o = document.createElement("option");
+      o.value = value; o.textContent = value;
+      select.appendChild(o);
+    }
+    select.value = value || "";
   }
 
   // Invoice Number follows the selected Invoice Type's (=VoucherType)
@@ -2184,6 +2214,9 @@
     const ticketNoBase = p.ticket_no.includes("-") ? p.ticket_no.slice(0, p.ticket_no.lastIndexOf("-")) : p.ticket_no;
     if (ticketNoBase.length !== 10) { voyagerAlert("Ticket No. must be exactly 10 characters (not counting any -1/-2 passenger suffix)."); return; }
     if (!p.passenger_name) { voyagerAlert("Pax Name is required."); return; }
+    // Sector is mandatory in Booking and Reschedule (Cancellation's sectors
+    // come from the picked ticket and are locked).
+    if (!cancellationMode && !modalSectors.length) { voyagerAlert("Sector is required - add at least one sector."); return; }
     // Mandatory in both New Ticket and Reschedule's own "Reschedule PNR
     // Details" tab (this same Save & Apply handler covers both flows) -
     // Supplier only ever gets filled via a valid Office ID lookup, so an
@@ -2503,9 +2536,17 @@
     document.getElementById("sc-markup-reversal").textContent = z(supplierMarkupReversalTotal + customerMarkupReversalTotal);
     document.getElementById("sc-total").textContent = z(scTotalDisplay);
 
-    // Earnings = Sales Cost Total - Purchase Cost Total - Sales Cost GST
-    // Amount - Sales Cost TDS Amount + Purchase Cost TDS Amount.
-    const earnings = total - purchaseTotal - gst - tds + suppTds;
+    // Earnings - Booking / Reschedule:
+    //   Customer Markup + Addl Markup + SSR Markup (markup)
+    //   + Customer Service Fee + Addl Service Fee + SSR Service Fee (serviceFee)
+    //   + Supplier Commission Amount - Customer Discount Amount
+    //   + Agent Penalty (Reschedule only)
+    // Cancellation: the same customer Markups + Service Fees + Agent Penalty,
+    // less the Customer Markup Reversal, and the commission earned is given
+    // back - (Supplier Commission Amount - Customer Discount Amount).
+    const earnings = cancellationMode
+      ? markup + serviceFee + agentPenalty - customerMarkupReversalTotal - (suppCommission - discount)
+      : markup + serviceFee + suppCommission - discount + (rescheduleMode ? agentPenalty : 0);
     document.getElementById("invoice_total").textContent = z(earnings);
   }
   document.getElementById("refresh-total-btn").addEventListener("click", recalcSummary);
@@ -3372,7 +3413,7 @@
     document.getElementById("page-title").textContent = `View Airline Ticket - ${t.lines[0]?.ticket_no || t.invoice_number} (${t.lines[0]?.passenger_name || ""})`;
     document.getElementById("invoice_number").value = t.invoice_number;
     setDateGroupValue(document.getElementById("invoice_date"), isoToDDMMYYYY(t.invoice_date));
-    document.getElementById("invoice_type").value = t.invoice_type || "";
+    setInvoiceTypeValue(t.invoice_type || "");
     document.getElementById("booking_mode").value = t.booking_mode || "";
     document.getElementById("customer").value = t.customer_name || "";
     document.getElementById("booking_reference").value = t.booking_reference || "";
@@ -3536,6 +3577,19 @@
   // on top of cancellationLookupModal once a search result is picked -
   // previously grew inline inside that same search popup.
   const cancellationPaxModal = document.getElementById("cancellation-pax-modal");
+  // Reschedule / Cancellation picker: when the ticket has exactly one
+  // passenger and one sector there's nothing to choose - tick both and press
+  // the picker's own action button for the user (same code path as clicking
+  // it), so the screen opens straight away. Returns true when it did.
+  function skipSinglePaxSectorPicker(paxSel, sectorSel, actionBtnId) {
+    const pax = document.querySelectorAll(paxSel), secs = document.querySelectorAll(sectorSel);
+    if (pax.length !== 1 || secs.length !== 1) return false;
+    pax[0].checked = true;
+    secs[0].checked = true;
+    pax[0].dispatchEvent(new Event("change"));
+    document.getElementById(actionBtnId).click();
+    return true;
+  }
 
   function openCancellationLookupModal() {
     ["cx-f-invoice-number", "cx-search-spnr", "cx-search-airline-pnr", "cx-f-gds-pnr", "cx-search-ticket-no",
@@ -3577,6 +3631,8 @@
       // Opens as its own popup on top of the search modal (2026-10-07
       // request) instead of growing inline inside it.
       cancellationLookupModal.classList.remove("open");
+      // One passenger with one sector - straight to the Cancellation screen.
+      if (skipSinglePaxSectorPicker(".cx-pax-check", ".cx-sector-check", "cx-cancel-btn")) return;
       cancellationPaxModal.classList.add("open");
     } catch (err) {
       voyagerAlert(err.message || "Could not search for this ticket. Is the Django backend running?", { icon: "error" });
@@ -3974,6 +4030,7 @@
   // PNR Details to reconstruct).
   function enterSavedCancellationMode(ct) {
     cancellationMode = true;
+    if (activeCompanyId) populateVoucherTypeOptions(activeCompanyId); // Credit Note types only
     viewMode = true;
     cxEditSavedCancellationId = ct.id;
     // Summary grid's Markup Reversal column - opening a saved cancellation
@@ -3987,7 +4044,7 @@
     document.getElementById("booking_ref_date_label").innerHTML = "Cancellation Ref Date";
     document.getElementById("invoice_number").value = ct.invoice_number || "";
     setDateGroupValue(document.getElementById("invoice_date"), ct.invoice_date ? isoToDDMMYYYY(ct.invoice_date) : "");
-    document.getElementById("invoice_type").value = ct.invoice_type || "";
+    setInvoiceTypeValue(ct.invoice_type || "");
     document.getElementById("booking_mode").value = ct.booking_mode || "";
     document.getElementById("customer").value = ct.customer_name || "";
     document.getElementById("booking_reference").value = ct.cancellation_reference || "";
@@ -4109,6 +4166,9 @@
       // Opens as its own popup on top of the search modal (2026-10-07
       // request) instead of growing inline inside it.
       rescheduleLookupModal.classList.remove("open");
+      // One passenger with one sector - nothing to choose, so go straight
+      // to the Reschedule screen without the picker popup.
+      if (skipSinglePaxSectorPicker(".rs-pax-check", ".rs-sector-check", "rs-reschedule-btn")) return;
       reschedulePaxModal.classList.add("open");
     } catch (err) {
       voyagerAlert(err.message || "Could not search for this ticket. Is the Django backend running?", { icon: "error" });
@@ -4440,7 +4500,7 @@
     document.getElementById("parent_pnr").textContent = (rt.lines[0] && rt.lines[0].parent_pnr) || originalTicket.booking_reference || "—";
     document.getElementById("invoice_number").value = rt.invoice_number || "";
     setDateGroupValue(document.getElementById("invoice_date"), rt.invoice_date ? isoToDDMMYYYY(rt.invoice_date) : todayDDMMYYYY());
-    document.getElementById("invoice_type").value = rt.invoice_type || "";
+    setInvoiceTypeValue(rt.invoice_type || "");
     document.getElementById("booking_mode").value = rt.booking_mode || "";
     document.getElementById("customer").value = rt.customer_name || "";
     document.getElementById("booking_reference").value = rt.booking_reference || "";
@@ -4590,6 +4650,13 @@
       voyagerAlert("This Booking Reference is already used."); return;
     }
     if (passengers.length === 0) { voyagerAlert("Add at least one passenger via Proceed ->."); return; }
+    // Every passenger needs a Sector (Booking and Reschedule) - also catches
+    // passengers carried over without one (e.g. picked for a reschedule).
+    const noSector = passengers.findIndex((p) => !String(p.sector || "").trim());
+    if (noSector !== -1) {
+      voyagerAlert(`Passenger ${noSector + 1} (${passengers[noSector].passenger_name || "-"}) has no Sector - open it and add at least one sector.`);
+      return;
+    }
 
     const payload = buildTicketPayload();
     const url = rescheduleMode
@@ -4731,6 +4798,8 @@
         custTds: Math.round((r.tds || 0) * 100) / 100,
         taxParts: { YQ: p.yq || 0, YR: p.yr || 0, K3: p.k3_tax || 0, OT: p.tax_others || 0 },
         airlineName: p.airline_name || "", pgCharges: 0,
+        // Template 3 (Performa) passenger table: YQ Tax + SSR split.
+        yq: p.yq || 0, baggage: p.baggage || 0, seat: p.seat || 0, meal: p.meal || 0, otherSsr: p.other_ssr || 0,
         // Booking invoice's TDS column (next to Discount): the customer TDS Amount.
         fareTds: isBookingMode() ? Math.round((r.tds || 0) * 100) / 100 : 0,
         // Tax Invoice (classic) template, Booking + Reschedule (not Cancellation) -
@@ -4792,6 +4861,7 @@
       invoiceDateLabel: cancellationMode ? "Credit Note Date" : "Invoice Date",
       invoiceDate: fmtInvoiceDate(getDateGroupValue(document.getElementById("invoice_date"))),
       refLabel: "Booking ID", refValue: document.getElementById("booking_reference").value,
+      airlinePnr: document.getElementById("airline_pnr_header").value,
       customer: { name: customerName, code: cust.code || "", address: cust.address || "", state: custState, gst_no: cust.gst_no || "", pan: cust.pan_number || "" },
       placeOfSupply: custState,
       infoRows: [["Date of Travel", travelDates.join(", ")], ["Airline PNR", document.getElementById("airline_pnr_header").value], ["Sector", sectors.join(", ")]],
