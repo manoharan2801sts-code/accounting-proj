@@ -67,11 +67,22 @@ def load_data(force=False):
     with open(inserts_file, "r", encoding="utf-8") as f:
         sql_content = f.read()
 
-    # Split statements
+    # Split statements properly (avoid splitting semicolons inside string literals/base64)
     statements = []
-    for chunk in sql_content.split(";"):
-        stmt = chunk.strip()
-        if stmt and not stmt.startswith("--") and not stmt.upper().startswith("USE "):
+    current = []
+    for line in sql_content.splitlines():
+        line_s = line.strip()
+        if not line_s or line_s.startswith("--") or line_s.upper().startswith("USE "):
+            continue
+        current.append(line_s)
+        if line_s.endswith(";"):
+            stmt = " ".join(current).rstrip(";").strip()
+            if stmt:
+                statements.append(stmt)
+            current = []
+    if current:
+        stmt = " ".join(current).rstrip(";").strip()
+        if stmt:
             statements.append(stmt)
 
     print(f"[INFO] Found {len(statements)} statements to execute.")
