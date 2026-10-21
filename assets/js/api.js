@@ -39,10 +39,18 @@
   const nativeFetch = window.fetch.bind(window);
   const API_PREFIXES = [API_BASE, "http://localhost:8000/api", "http://127.0.0.1:8000/api"];
   window.fetch = function (input, init) {
-    const url = typeof input === "string" ? input : (input && input.url) || "";
+    let url = typeof input === "string" ? input : (input && input.url) || "";
+    // On production (e.g. Render), redirect any hardcoded localhost:8000/api calls to the current server's API_BASE
+    if (API_BASE !== "http://localhost:8000/api") {
+      if (url.startsWith("http://localhost:8000/api")) {
+        url = url.replace("http://localhost:8000/api", API_BASE);
+      } else if (url.startsWith("http://127.0.0.1:8000/api")) {
+        url = url.replace("http://127.0.0.1:8000/api", API_BASE);
+      }
+    }
     const token = localStorage.getItem(TOKEN_KEY);
-    const isApi = API_PREFIXES.some((p) => url.startsWith(p));
-    if (!isApi || !token || token === "demo-token") return nativeFetch(input, init);
+    const isApi = API_PREFIXES.some((p) => url.startsWith(p)) || url.startsWith(API_BASE);
+    if (!isApi || !token || token === "demo-token") return nativeFetch(url || input, init);
     const opts = { ...(init || {}) };
     const headers = new Headers(opts.headers || (typeof input !== "string" && input.headers) || {});
     if (!headers.has("Authorization")) headers.set("Authorization", `Bearer ${token}`);
