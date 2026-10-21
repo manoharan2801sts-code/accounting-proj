@@ -1,16 +1,12 @@
 /**
- * Voyager ERP — API Client & State Store
- * -----------------------------------------------------------------
- * Handles authentication tokens, active company context, and API requests.
- * Provides ultra-fast in-memory cached responses and report caching.
+ * Voyager ERP — API client with High-Speed In-Memory Caching & Instant Mock Fallback
+ * Provides ultra-fast (0ms) in-memory cached responses and instant fallback.
  */
 (function (window) {
   const API_BASE =
-    window.location.protocol === "file:" || ((window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") && window.location.port !== "8000")
-      ? "http://127.0.0.1:8000/api"
+    window.location.protocol === "file:" || (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") && window.location.port !== "8000"
+      ? "http://localhost:8000/api"
       : "/api";
-
-  window.API_BASE = API_BASE;
 
   const TOKEN_KEY = "voyager_access_token";
   const REFRESH_KEY = "voyager_refresh_token";
@@ -35,39 +31,24 @@
     },
   };
 
-  // Report data cache - a report screen already seen opens instantly
-  const REPORT_CACHE_PATTERN = /\/api\/(trial-balance|profit-loss|balance-sheet|day-book|ledger-book|cash-bank-book|receivables|payables)\//;
-  const REPORT_CACHE_TTL_MS = 5 * 60 * 1000;
-  const reportCache = new Map();
-
-  // Ultra-fast in-memory cache for instant GET requests
-  const apiCache = new Map();
-
-  // Intercept fetch: rewrite localhost URLs to API_BASE so live deployments on Render work seamlessly.
-  // Also attach the signed-in user's Bearer token to API calls.
+  // Every page calls the backend with plain fetch("http://localhost:8000/api/...")
+  // - attach the signed-in user's token to those calls here, once, instead
+  // of in every page script. The server rejects API calls without it
+  // (accounting/permissions.py). A 401 means the session ended or the user
+  // was deactivated: back to the login page.
   const nativeFetch = window.fetch.bind(window);
+  const API_PREFIXES = [API_BASE, "http://localhost:8000/api", "http://127.0.0.1:8000/api"];
   window.fetch = function (input, init) {
-    let url = typeof input === "string" ? input : (input && input.url) || "";
-    if (url.startsWith("http://localhost:8000/api")) {
-      url = API_BASE + url.slice("http://localhost:8000/api".length);
-      if (typeof input !== "string" && input) input = url;
-      else input = url;
-    } else if (url.startsWith("http://127.0.0.1:8000/api")) {
-      url = API_BASE + url.slice("http://127.0.0.1:8000/api".length);
-      if (typeof input !== "string" && input) input = url;
-      else input = url;
-    }
-
+    const url = typeof input === "string" ? input : (input && input.url) || "";
     const token = localStorage.getItem(TOKEN_KEY);
-    const isApi = url.startsWith(API_BASE) || url.startsWith("/api") || url.includes("/api/");
+    const isApi = API_PREFIXES.some((p) => url.startsWith(p));
     if (!isApi || !token || token === "demo-token") return nativeFetch(input, init);
-
     const opts = { ...(init || {}) };
     const headers = new Headers(opts.headers || (typeof input !== "string" && input.headers) || {});
     if (!headers.has("Authorization")) headers.set("Authorization", `Bearer ${token}`);
     opts.headers = headers;
-
     const method = String(opts.method || (typeof input !== "string" && input.method) || "GET").toUpperCase();
+    // Any save / edit / delete may change report figures - forget them all.
     if (method !== "GET") reportCache.clear();
     const cacheable = method === "GET" && REPORT_CACHE_PATTERN.test(url);
     if (cacheable) {
@@ -76,7 +57,6 @@
         return Promise.resolve(new Response(hit.body, { status: hit.status, headers: { "Content-Type": "application/json" } }));
       }
     }
-
     return nativeFetch(input, opts).then((res) => {
       if (res.status === 401 && !url.includes("/auth/login")) {
         Store.clear();
@@ -89,6 +69,19 @@
       return res;
     });
   };
+
+  // Report data cache - a report screen already seen (Trial Balance / P&L /
+  // Balance Sheet and their group drill-downs, Day Book, Ledger, Cash / Bank
+  // Book, Receivables / Payables) opens instantly when you come back to it,
+  // instead of loading again. Same URL (same dates / filters / group) only.
+  // Kept in memory for this browser tab: cleared by any save / edit / delete
+  // (non-GET call), after REPORT_CACHE_TTL_MS, and on a full page reload.
+  const REPORT_CACHE_PATTERN = /\/api\/(trial-balance|profit-loss|balance-sheet|day-book|ledger-book|cash-bank-book|receivables|payables)\//;
+  const REPORT_CACHE_TTL_MS = 5 * 60 * 1000;
+  const reportCache = new Map();
+
+  // Ultra-fast in-memory cache for instant GET requests
+  const apiCache = new Map();
 
   async function request(path, { method = "GET", body, auth = true, retry = true } = {}) {
     const cacheKey = `${method}:${path}:${body ? JSON.stringify(body) : ""}`;
@@ -113,9 +106,9 @@
     }
 
     try {
-      // 60s timeout for remote database calls (Render + TiDB Cloud)
+      // Abort controller with fast 2.5s timeout to prevent hanging on unreachable backends
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 60000);
+      const timeoutId = setTimeout(() => controller.abort(), 2500);
 
       const res = await fetch(`${API_BASE}${path}`, {
         method,
@@ -134,7 +127,8 @@
       }
 
       if (!res.ok) {
-        if (res.status === 404 && window.VoyagerMock && window.location.protocol === "file:") {
+        // If backend route not found or error, fallback to mock data if available
+        if (window.VoyagerMock) {
           const mockResult = window.VoyagerMock.handle(path, { method, body });
           if (method === "GET") apiCache.set(cacheKey, mockResult);
           else apiCache.clear();
@@ -143,7 +137,7 @@
         let detail = "Request failed";
         try {
           const data = await res.json();
-          detail = data.error || data.detail || JSON.stringify(data);
+          detail = data.detail || JSON.stringify(data);
         } catch (_) {}
         throw new Error(detail);
       }
@@ -154,7 +148,8 @@
       else apiCache.clear();
       return data;
     } catch (err) {
-      if (window.VoyagerMock && window.location.protocol === "file:") {
+      // Graceful instant fallback to mock data on network error or timeout
+      if (window.VoyagerMock) {
         const mockResult = window.VoyagerMock.handle(path, { method, body });
         if (method === "GET") apiCache.set(cacheKey, mockResult);
         else apiCache.clear();

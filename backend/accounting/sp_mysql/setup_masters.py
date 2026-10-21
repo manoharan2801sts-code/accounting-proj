@@ -340,12 +340,32 @@ _FOP_COLS = ("`id`, `card_type`, `card_number`, `bank_name`, "
 def fop_master_list(p):
     company_id = _int(p.get("CompanyId"))
     card_type = _str(p.get("CardType"), 20)
+    as_of = _date(p.get("AsOfDate"))
     rows = query(
-        f"SELECT {_FOP_COLS} FROM `FOPMaster`"
-        f" WHERE `company_id` = %s AND (%s IS NULL OR {_ci('`card_type`')})"
-        " ORDER BY `card_type`, `card_number`",
+        "SELECT `id`, `card_type`, `card_number`, `bank_name`, `card_master_ledger_id`, `card_master_ledger_name`, `effective_from`, `is_active` "
+        f"FROM `FOPMaster` WHERE `company_id` = %s AND (%s IS NULL OR {_ci('`card_type`')}) "
+        "ORDER BY `card_type`, `card_number`",
         [company_id, card_type, card_type],
     )
+    if as_of:
+        for r in rows:
+            if r.get("card_type") == "Own Card":
+                hist = query(
+                    "SELECT `card_master_ledger_id`, `card_master_ledger_name` FROM `FOPMasterHistory` "
+                    "WHERE `fop_master_id` = %s AND `effective_from` <= %s "
+                    "ORDER BY `effective_from` DESC LIMIT 1",
+                    [r["id"], as_of],
+                )
+                if not hist:
+                    hist = query(
+                        "SELECT `card_master_ledger_id`, `card_master_ledger_name` FROM `FOPMasterHistory` "
+                        "WHERE `fop_master_id` = %s "
+                        "ORDER BY `effective_from` ASC LIMIT 1",
+                        [r["id"]],
+                    )
+                if hist:
+                    r["card_master_ledger_id"] = hist[0]["card_master_ledger_id"]
+                    r["card_master_ledger_name"] = hist[0]["card_master_ledger_name"]
     return [bits(r, "is_active") for r in rows]
 
 
@@ -353,11 +373,32 @@ def fop_master_list(p):
 def fop_master_get_by_card_number(p):
     company_id = _int(p.get("CompanyId"))
     card_number = _str(p.get("CardNumber"), 40)
-    return query(
-        f"SELECT `id`, `card_master_ledger_id` FROM `FOPMaster`"
-        f" WHERE `company_id` = %s AND {_ci('`card_number`')}",
+    as_of = _date(p.get("AsOfDate"))
+    row = query_one(
+        "SELECT `id`, `card_type`, `card_master_ledger_id`, `card_master_ledger_name` FROM `FOPMaster` "
+        f"WHERE `company_id` = %s AND {_ci('`card_number`')}",
         [company_id, card_number],
     )
+    if not row:
+        return []
+    if as_of and row.get("card_type") == "Own Card":
+        hist = query(
+            "SELECT `card_master_ledger_id`, `card_master_ledger_name` FROM `FOPMasterHistory` "
+            "WHERE `fop_master_id` = %s AND `effective_from` <= %s "
+            "ORDER BY `effective_from` DESC LIMIT 1",
+            [row["id"], as_of],
+        )
+        if not hist:
+            hist = query(
+                "SELECT `card_master_ledger_id`, `card_master_ledger_name` FROM `FOPMasterHistory` "
+                "WHERE `fop_master_id` = %s "
+                "ORDER BY `effective_from` ASC LIMIT 1",
+                [row["id"]],
+            )
+        if hist:
+            row["card_master_ledger_id"] = hist[0]["card_master_ledger_id"]
+            row["card_master_ledger_name"] = hist[0]["card_master_ledger_name"]
+    return [row]
 
 
 @sp("dbo.sp_FOPMaster", "SAVE")
@@ -368,12 +409,15 @@ def fop_master_save(p):
     card_number = _str(p.get("CardNumber"), 40)
     bank_name = _str(p.get("BankName"), 100)
     ledger_id = _int(p.get("CardMasterLedgerId"))
+    effective_from = _date(p.get("EffectiveFrom"))
     is_active = _bit(p.get("IsActive"))
 
     if company_id is None or card_type is None or _blank(card_number):
         return _err("company_id, card_type and card_number are required")
     if _eq_ci(card_type, "Own Card") and ledger_id is None:
         return _err("card_master_ledger_id is required for Own Card")
+    if _eq_ci(card_type, "Own Card") and effective_from is None:
+        return _err("Effective From date is required for the Card Master ledger.")
 
     ledger_name = None
     if ledger_id is not None:
@@ -428,7 +472,35 @@ def fop_master_save(p):
                     " VALUES (%s, %s, %s, %s, %s, %s, %s)",
                     [company_id, card_type, card_number, bank_name, ledger_id, ledger_name, is_active],
                 )
-        rows = query(f"SELECT {_FOP_COLS} FROM `FOPMaster` WHERE `id` = %s", [result_id])
+
+            if _eq_ci(card_type, "Own Card") and ledger_id is not None and effective_from is not None:
+                h_row = query_one(
+                    "SELECT `id` FROM `FOPMasterHistory` WHERE `fop_master_id` = %s AND `effective_from` = %s",
+                    [result_id, effective_from],
+                )
+                if h_row:
+                    execute(
+                        "UPDATE `FOPMasterHistory` SET `card_master_ledger_id` = %s, `card_master_ledger_name` = %s, `updated_at` = UTC_TIMESTAMP(6) WHERE `id` = %s",
+                        [ledger_id, ledger_name, h_row["id"]],
+                    )
+                else:
+                    execute(
+                        "INSERT INTO `FOPMasterHistory` (`company_id`, `fop_master_id`, `card_master_ledger_id`, `card_master_ledger_name`, `effective_from`, `created_at`, `updated_at`) "
+                        "VALUES (%s, %s, %s, %s, %s, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))",
+                        [company_id, result_id, ledger_id, ledger_name, effective_from],
+                    )
+                latest = query_one(
+                    "SELECT `card_master_ledger_id`, `card_master_ledger_name`, `effective_from` FROM `FOPMasterHistory` "
+                    "WHERE `fop_master_id` = %s ORDER BY `effective_from` DESC LIMIT 1",
+                    [result_id],
+                )
+                if latest:
+                    execute(
+                        "UPDATE `FOPMaster` SET `card_master_ledger_id` = %s, `card_master_ledger_name` = %s, `effective_from` = %s WHERE `id` = %s",
+                        [latest["card_master_ledger_id"], latest["card_master_ledger_name"], latest["effective_from"], result_id],
+                    )
+
+        rows = query("SELECT `id`, `card_type`, `card_number`, `bank_name`, `card_master_ledger_id`, `card_master_ledger_name`, `effective_from`, `is_active` FROM `FOPMaster` WHERE `id` = %s", [result_id])
     except DatabaseError as exc:
         return _err(_db_message(exc))
     for r in rows:

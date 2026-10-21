@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
-  <title>DSR — Airline Ticket Booking — TRAVEL AGENCY</title>
+  <title>Returns — Airline Ticket Booking — TRAVEL AGENCY</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
   <link href="assets/css/design-system.css" rel="stylesheet" />
@@ -126,6 +126,16 @@
     .table-custom tbody tr.dsr-data-row.dsr-row-selected td { background: var(--color-primary); color: #FFFFFF; }
     .table-custom tbody tr:last-child td { border-bottom: none; }
     .table-custom tbody tr.dsr-data-row { cursor: pointer; }
+    /* One row per reference (S PNR): a Booking + its Cancellation / SSR
+       fold into one parent row; a single click shows each document under it. */
+    .dsr-caret { display: inline-block; width: 12px; color: var(--color-primary); font-weight: 700; transition: transform var(--t-fast); }
+    tr.dsr-parent.is-open .dsr-caret { transform: rotate(90deg); }
+    .table-custom tbody tr.dsr-child td { background: #F8FAFC; font-size: 11.5px; }
+    .table-custom tbody tr.dsr-child td.dsr-child-label { padding-left: 1.6rem; color: var(--color-text-muted); }
+    .dsr-doc-count { margin-left: 4px; font-size: 10.5px; color: var(--color-text-muted); }
+    .table-custom tbody tr.dsr-data-row.dsr-row-selected .dsr-caret,
+    .table-custom tbody tr.dsr-data-row.dsr-row-selected .dsr-doc-count,
+    .table-custom tbody tr.dsr-data-row.dsr-row-selected td.dsr-child-label { color: #FFFFFF; }
     
     .amt { font-family: var(--font-mono); font-weight: 600; text-align: right; }
     th.amt-header { text-align: right; }
@@ -145,7 +155,7 @@
   <div class="app-body">
     <main class="app-main dsr-main" style="max-width: 100%;">
       <div class="page-header-row">
-        <div style="font-weight:700; font-size:0.78rem; color:var(--color-text-dark);">DSR</div>
+        <div style="font-weight:700; font-size:0.78rem; color:var(--color-text-dark);">Returns</div>
         <div class="dsr-toolbar">
           <span class="dsr-toolbar-label">From</span>
           <input type="date" class="form-control-custom dsr-toolbar-date" id="filter-from" />
@@ -257,12 +267,12 @@
     </main>
   </div>
 
-  <script src="assets/js/hardcode.js?v=2"></script>
+  <script src="assets/js/hardcode.js?v=6"></script>
   <script src="assets/js/mock-data.js"></script>
   <script src="assets/js/api.js?v=4"></script>
   <script src="assets/js/util.js?v=5"></script>
   <script src="assets/js/entry-common.js"></script>
-  <script src="assets/js/shell.js?v=31"></script>
+  <script src="assets/js/shell.js?v=36"></script>
   <script>
     // Not gated on DOMContentLoaded - when this page is opened via the
     // app's SPA navigation (shell.js's navigateTo), its <script> tags are
@@ -344,6 +354,14 @@
         ? `ticket-entry.html?reschedule_saved_id=${row.dataset.rescheduleId}`
         : `ticket-entry.html?id=${row.dataset.id}`;
     }
+    document.getElementById("main-data-tbody").addEventListener("click", (e) => {
+      const parent = e.target.closest("tr.dsr-parent");
+      if (!parent) return;
+      const open = !parent.classList.contains("is-open");
+      parent.classList.toggle("is-open", open);
+      document.querySelectorAll(`#main-data-tbody tr.dsr-child[data-parent="${parent.dataset.group}"]`)
+        .forEach((r) => { r.style.display = open ? "" : "none"; });
+    });
     document.getElementById("main-data-tbody").addEventListener("dblclick", (e) => {
       const row = e.target.closest(".dsr-data-row");
       if (!row) return;
@@ -553,9 +571,31 @@
         totalRow.innerHTML = "";
         return;
       }
-      let rowsHtml = tickets.map((t) => `
-        <tr class="dsr-data-row" data-id="${t.ticket_id || ""}" data-reschedule-id="${t.reschedule_ticket_id || ""}" data-cancellation-id="${t.cancellation_ticket_id || ""}" data-ssr-id="${t.ssr_ticket_id || ""}" title="Double-click to view this ticket">
-          <td>${fmtDateDMY(t.invoice_date)}</td>
+      // One entry per reference number (S PNR): a Booking, its Cancellation
+      // and any SSR Updation sold on it share the reference, so they fold
+      // into ONE row whose amounts / earnings are the sum of all of them. A
+      // Reschedule has its own reference, so it's its own row. A single
+      // click on a combined row shows each document under it (like the
+      // Receivables bill adjustments); double-click opens a document.
+      const KIND = (t) => (t.cancellation_ticket_id ? "Cancellation" : t.ssr_ticket_id ? "SSR Updation"
+        : t.reschedule_ticket_id ? "Reschedule" : "Booking");
+      const refGroups = [];
+      const byRef = new Map();
+      tickets.forEach((t) => {
+        const key = String(t.booking_reference || "").trim().toUpperCase() || `INV:${t.invoice_number}`;
+        let g = byRef.get(key);
+        if (!g) { g = { docs: [] }; byRef.set(key, g); refGroups.push(g); }
+        g.docs.push(t);
+      });
+      const SUM_KEYS = ["basic_fare", "other_tax", "net_amount", "commission_earnings", "other_earnings", "total_earnings"];
+      const docAttrs = (t) => `data-id="${t.ticket_id || ""}" data-reschedule-id="${t.reschedule_ticket_id || ""}" data-cancellation-id="${t.cancellation_ticket_id || ""}" data-ssr-id="${t.ssr_ticket_id || ""}"`;
+      const amountCells = (t) => `
+          <td class="amt">${fmtAmt(t.basic_fare)}</td>
+          <td class="amt">${fmtAmt(t.other_tax)}</td>
+          <td class="amt">${fmtAmt(t.net_amount)}</td>
+          <td class="amt">${fmtAmt(t.commission_earnings)}</td><td class="amt">${fmtAmt(t.other_earnings)}</td><td class="amt" style="font-weight:700;">${fmtAmt(t.total_earnings)}</td>`;
+      const infoCells = (t, firstCell, statusHtml) => `
+          ${firstCell}
           <td>${t.invoice_number || "-"}</td>
           <td class="truncate-cell" title="${escAttr(t.customer_name || "-")}">${t.customer_name || "-"}</td>
           <td>${t.booking_reference || "-"}</td>
@@ -564,14 +604,25 @@
           <td class="truncate-cell" title="${escAttr(t.sectors.join(", ") || "-")}">${t.sectors.join(", ") || "-"}</td>
           <td class="truncate-cell" title="${escAttr(t.airline_names.join(", ") || "-")}">${t.airline_names.join(", ") || "-"}</td>
           <td class="truncate-cell" title="${escAttr(t.supplier_names.join(", ") || "-")}">${t.supplier_names.join(", ") || "-"}</td>
-          <td>${statusBadgeHtml(t.booking_status)}</td>
-          <td class="amt">${fmtAmt(t.basic_fare)}</td>
-          <td class="amt">${fmtAmt(t.other_tax)}</td>
-          <td class="amt">${fmtAmt(t.net_amount)}</td>
-          <td class="amt">${fmtAmt(t.commission_earnings)}</td><td class="amt">${fmtAmt(t.other_earnings)}</td><td class="amt" style="font-weight:700;">${fmtAmt(t.total_earnings)}</td>
-        </tr>
-      `).join("");
-
+          <td>${statusHtml}</td>`;
+      let rowsHtml = refGroups.map((g, gi) => {
+        if (g.docs.length === 1) {
+          const t = g.docs[0];
+          return `<tr class="dsr-data-row" ${docAttrs(t)} title="Double-click to view this ticket">
+            ${infoCells(t, `<td>${fmtDateDMY(t.invoice_date)}</td>`, statusBadgeHtml(t.booking_status))}${amountCells(t)}</tr>`;
+        }
+        // The booking / reschedule leads the row (its date, invoice and
+        // status); amounts are the sum of every document on the reference.
+        const lead = g.docs.find((t) => !t.cancellation_ticket_id && !t.ssr_ticket_id) || g.docs[0];
+        const sum = { ...lead };
+        SUM_KEYS.forEach((k) => { sum[k] = Math.round(g.docs.reduce((s, t) => s + (Number(t[k]) || 0), 0) * 100) / 100; });
+        const parent = `<tr class="dsr-data-row dsr-parent" data-group="${gi}" ${docAttrs(lead)} title="Click to show each document - double-click to open the ${KIND(lead)}">
+            ${infoCells(sum, `<td><span class="dsr-caret">&#9656;</span>${fmtDateDMY(lead.invoice_date)}</td>`,
+              `${statusBadgeHtml(lead.booking_status)}<span class="dsr-doc-count">(${g.docs.length})</span>`)}${amountCells(sum)}</tr>`;
+        const children = g.docs.map((t) => `<tr class="dsr-data-row dsr-child" data-parent="${gi}" style="display:none;" ${docAttrs(t)} title="Double-click to open this ${KIND(t)}">
+            ${infoCells(t, `<td class="dsr-child-label">&#8627; ${KIND(t)} &middot; ${fmtDateDMY(t.invoice_date)}</td>`, statusBadgeHtml(t.booking_status))}${amountCells(t)}</tr>`).join("");
+        return parent + children;
+      }).join("");
       tbody.innerHTML = rowsHtml;
 
       const totalBasicFare = tickets.reduce((sum, t) => sum + (Number(t.basic_fare) || 0), 0);
@@ -720,7 +771,7 @@
         const ssrData = ssrRes.ok ? await ssrRes.json() : [];
         allRows = [...data, ...rescheduleData, ...cancellationData, ...ssrData].map((l) => ({ ...l, pnr: l.airline_pnr || l.gds_pnr || l.booking_reference }));
       } catch (err) {
-        console.error("Could not load tickets for the DSR report - is the Django backend running?", err);
+        console.error("Could not load tickets for the Returns report - is the Django backend running?", err);
         allRows = [];
         tbody.innerHTML = `<tr><td colspan="16" style="text-align:center; padding:2rem; color:var(--color-text-muted);">Could not load data. Is the Django backend running on localhost:8000?</td></tr>`;
         return;
@@ -876,7 +927,7 @@
       const blob = new Blob([csv.join("\n")], { type: "text/csv;charset=utf-8;" });
       const link = document.createElement("a");
       link.href = URL.createObjectURL(blob);
-      link.download = "rep-dsr-airline-booking.csv";
+      link.download = "returns-airline-booking.csv";
       link.click();
     }
 

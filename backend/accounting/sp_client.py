@@ -362,27 +362,30 @@ def voucher_type_delete(voucher_type_id, company_id):
 # FOP Master (dbo.sp_FOPMaster) - see StoredProcedures.sql
 # ==========================================================================
 
-def fop_master_list(company_id, card_type=None):
-    """FOPMaster rows for a company, optionally filtered by card_type - views.fop_master_list."""
-    return exec_sp("dbo.sp_FOPMaster", {"Action": "LIST", "CompanyId": company_id, "CardType": card_type})
+def fop_master_list(company_id, card_type=None, as_of=None):
+    """FOPMaster rows for a company, optionally filtered by card_type - views.fop_master_list.
+    as_of: each card's Card Master ledger in force on that date (Effective From history)."""
+    return exec_sp("dbo.sp_FOPMaster", {"Action": "LIST", "CompanyId": company_id, "CardType": card_type, "AsOfDate": as_of})
 
 
 def fop_master_save(company_id, card_type, card_number, bank_name=None, card_master_ledger_id=None,
-                     is_active=None, card_id=None):
+                     is_active=None, card_id=None, effective_from=None):
     """Upserts a FOPMaster row - views.fop_master_save. Raises StoredProcedureError on failure."""
     row = exec_sp_one("dbo.sp_FOPMaster", {
         "Action": "SAVE", "Id": card_id, "CompanyId": company_id, "CardType": card_type,
         "CardNumber": card_number, "BankName": bank_name, "CardMasterLedgerId": card_master_ledger_id,
-        "IsActive": is_active,
+        "IsActive": is_active, "EffectiveFrom": effective_from,
     })
     if row and row.get("status") == "Error":
         raise StoredProcedureError(row.get("error") or "Could not save this card.")
     return row
 
 
-def fop_master_get_by_card_number(company_id, card_number):
-    """Resolves a card's own GL ledger by card_number - views._fop_payment_lines/_reschedule_fop_payment_lines's Own Card lookup."""
-    return exec_sp_one("dbo.sp_FOPMaster", {"Action": "GET_BY_CARD_NUMBER", "CompanyId": company_id, "CardNumber": card_number})
+def fop_master_get_by_card_number(company_id, card_number, as_of=None):
+    """Resolves a card's own GL ledger by card_number - views._fop_payment_lines/_reschedule_fop_payment_lines's
+    Own Card lookup. as_of = the document's own date: the Card Master ledger in force then (Effective From)."""
+    return exec_sp_one("dbo.sp_FOPMaster", {"Action": "GET_BY_CARD_NUMBER", "CompanyId": company_id, "CardNumber": card_number,
+                                             "AsOfDate": as_of})
 
 
 def fop_master_delete(card_id, company_id):
@@ -537,7 +540,8 @@ def tickets_list(company_id):
     return exec_sp("dbo.sp_Ticket", {"Action": "LIST", "CompanyId": company_id})
 
 
-def ticket_save(company_id, customer_name, header_fields, lines, jv_narration, jv_total_debit, jv_total_credit, ticket_id=None):
+def ticket_save(company_id, customer_name, header_fields, lines, jv_narration, jv_total_debit, jv_total_credit, ticket_id=None,
+                allow_chain_edit=False):
     """
     Creates or updates (when ticket_id is given) a Ticket + its TicketLines
     + its auto-posted JournalVoucher, all in ONE atomic dbo.sp_Ticket SAVE
@@ -569,6 +573,9 @@ def ticket_save(company_id, customer_name, header_fields, lines, jv_narration, j
         "LinesJson": _json.dumps(lines, default=str),
         "JvNarration": jv_narration, "JvTotalDebit": jv_total_debit, "JvTotalCredit": jv_total_credit,
     }
+    # Super Admin may edit a Booking that later processes are built on
+    # (dbo.fn_TicketChainLock); everyone else is refused.
+    params["AllowChainEdit"] = 1 if allow_chain_edit else 0
     row = exec_sp_one("dbo.sp_Ticket", params)
     if row and row.get("status") == "Error":
         raise StoredProcedureError(row.get("error") or "Could not save this ticket.")
@@ -674,7 +681,7 @@ def reschedule_resolve_lines(original_ticket_id, pairs):
 
 
 def reschedule_ticket_save(company_id, customer_name, header_fields, lines, jv_narration, jv_total_debit, jv_total_credit,
-                            reschedule_ticket_id=None, original_ticket_id=None):
+                            reschedule_ticket_id=None, original_ticket_id=None, allow_chain_edit=False):
     """
     Creates or updates (when reschedule_ticket_id is given) a
     RescheduleAirlineTicket + its lines (wholesale replace on update) + its
@@ -703,6 +710,7 @@ def reschedule_ticket_save(company_id, customer_name, header_fields, lines, jv_n
         "LinesJson": _json.dumps(lines, default=str),
         "JvNarration": jv_narration, "JvTotalDebit": jv_total_debit, "JvTotalCredit": jv_total_credit,
     }
+    params["AllowChainEdit"] = 1 if allow_chain_edit else 0  # Super Admin only - see ticket_save
     row = exec_sp_one("dbo.sp_RescheduleTicket", params)
     if row and row.get("status") == "Error":
         raise StoredProcedureError(row.get("error") or "Could not save this reschedule ticket.")
@@ -978,3 +986,57 @@ def ssr_ticket_save(company_id, header_fields, lines, jv_narration, jv_total_deb
         raise StoredProcedureError((row or {}).get("error") or "Could not save this SSR Updation.")
     line_ids = [int(x) for x in row["line_ids"].split(",")] if row.get("line_ids") else []
     return {"id": row["id"], "line_ids": line_ids, "voucher_id": row.get("voucher_id"), "voucher_no": row.get("voucher_no")}
+
+
+# ----------------------------------------------------------------------------
+# Miscellaneous transactions (trans-misc.html) - dbo.sp_MiscTransaction
+# ----------------------------------------------------------------------------
+def ticket_chain_lock_message(company_id, ticket_id=None, reschedule_id=None):
+    """Why a Booking (ticket_id) / Reschedule (reschedule_id) can't be edited -
+    the later processes built on it (dbo.fn_TicketChainLock) - or None when free."""
+    from django.db import connection
+    if connection.vendor != "microsoft":
+        from .sp_mysql import ticket_chain_lock_message as chain_lock_mysql
+        return chain_lock_mysql(company_id, ticket_id, reschedule_id)
+    with connection.cursor() as cur:
+        cur.execute("SELECT message FROM dbo.fn_TicketChainLock(%s, %s, %s)", [company_id, ticket_id, reschedule_id])
+        row = cur.fetchone()
+    return row[0] if row else None
+
+
+def misc_list(company_id):
+    """Every saved Miscellaneous transaction - the Find popup."""
+    return exec_sp("dbo.sp_MiscTransaction", {"Action": "LIST", "CompanyId": company_id})
+
+
+def misc_get(misc_id, company_id):
+    """One Miscellaneous transaction (with customer / supplier names + states and its JV), or None."""
+    row = exec_sp_one("dbo.sp_MiscTransaction", {"Action": "GET", "Id": misc_id, "CompanyId": company_id})
+    return None if not row or row.get("status") == "Error" else row
+
+
+def misc_save(company_id, fields, jv_narration, jv_total_debit, jv_total_credit, misc_id=None):
+    """
+    Creates (misc_id None) or updates a Miscellaneous transaction + its own
+    MSC-n Journal Voucher (none when Cancelled) in ONE dbo.sp_MiscTransaction
+    SAVE call. Raises StoredProcedureError on a validation failure.
+    Returns {"id", "voucher_id", "voucher_no"}.
+    """
+    params = {
+        "Action": "SAVE", "Id": misc_id, "CompanyId": company_id,
+        "BranchName": fields.get("branch_name"), "InvoiceNumber": fields.get("invoice_number"),
+        "InvoiceDate": fields.get("invoice_date"), "InvoiceType": fields.get("invoice_type"),
+        "Status": fields.get("status"), "UserName": fields.get("user_name"),
+        "Reference": fields.get("reference"), "RefDate": fields.get("ref_date"),
+        "PaymentMode": fields.get("payment_mode"), "PaymentGatewayRef": fields.get("payment_gateway_ref"),
+        "Currency": fields.get("currency"), "CustomerName": fields.get("customer_name"),
+        "SupplierName": fields.get("supplier_name"), "Description": fields.get("description"),
+        "BaseAmount": fields.get("base_amount"), "OtherTaxes": fields.get("other_taxes"), "Markup": fields.get("markup"), "ServiceFee": fields.get("service_fee"),
+        "SuppMarkup": fields.get("supp_markup"), "SuppServiceFee": fields.get("supp_service_fee"),
+        "TotalBilled": fields.get("total_billed"),
+        "JvNarration": jv_narration, "JvTotalDebit": jv_total_debit, "JvTotalCredit": jv_total_credit,
+    }
+    row = exec_sp_one("dbo.sp_MiscTransaction", params)
+    if not row or row.get("status") == "Error":
+        raise StoredProcedureError((row or {}).get("error") or "Could not save this Miscellaneous transaction.")
+    return {"id": row["id"], "voucher_id": row.get("voucher_id"), "voucher_no": row.get("voucher_no")}

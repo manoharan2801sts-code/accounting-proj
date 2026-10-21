@@ -166,5 +166,40 @@ def exec_sp(proc_name, params=None):
     return copy.deepcopy(cache["calls"][memo_key])
 
 
+def ticket_chain_lock_message(company_id, ticket_id=None, reschedule_id=None):
+    items = []
+    if ticket_id is not None:
+        rows = query(
+            "SELECT 'Reschedule' AS kind, invoice_number FROM Rescheduled_Al_Ticket WHERE company_id = %s AND original_ticket_id = %s "
+            "UNION ALL "
+            "SELECT 'Cancellation' AS kind, invoice_number FROM Cancellation_AL_Tickets WHERE company_id = %s AND original_ticket_id = %s "
+            "UNION ALL "
+            "SELECT 'SSR Updation' AS kind, invoice_number FROM SSR_AL_Tickets WHERE company_id = %s AND original_ticket_id = %s",
+            [company_id, ticket_id, company_id, ticket_id, company_id, ticket_id]
+        )
+        for r in rows:
+            items.append(f"{r['kind']} {r['invoice_number']}")
+    if reschedule_id is not None:
+        rows = query(
+            "SELECT DISTINCT 'Reschedule' AS kind, r2.invoice_number "
+            "FROM Rescheduled_Al_TicketLines l2 "
+            "JOIN Rescheduled_Al_Ticket r2 ON r2.id = l2.reschedule_ticket_id "
+            "WHERE r2.company_id = %s AND r2.id <> %s "
+            "  AND l2.based_on_reschedule_line_id IN (SELECT id FROM Rescheduled_Al_TicketLines WHERE reschedule_ticket_id = %s) "
+            "UNION ALL "
+            "SELECT 'SSR Updation' AS kind, s.invoice_number FROM SSR_AL_Tickets s "
+            "WHERE s.company_id = %s AND s.source_reschedule_ticket_id = %s "
+            "UNION ALL "
+            "SELECT 'Cancellation' AS kind, c.invoice_number FROM Cancellation_AL_Tickets c "
+            "WHERE c.company_id = %s AND c.original_ticket_id = (SELECT original_ticket_id FROM Rescheduled_Al_Ticket WHERE id = %s)",
+            [company_id, reschedule_id, reschedule_id, company_id, reschedule_id, company_id, reschedule_id]
+        )
+        for r in rows:
+            items.append(f"{r['kind']} {r['invoice_number']}")
+    if not items:
+        return None
+    return "Locked by: " + ", ".join(items)
+
+
 # Register every procedure's handlers.
-from . import ledger_masters, setup_masters, tickets_vouchers, reschedule_cancellation, user_management, ssr  # noqa: E402,F401
+from . import ledger_masters, setup_masters, tickets_vouchers, reschedule_cancellation, user_management, ssr, misc  # noqa: E402,F401

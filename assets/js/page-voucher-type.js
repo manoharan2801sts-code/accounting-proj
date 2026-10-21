@@ -115,7 +115,7 @@
   function clearForm() {
     document.getElementById("vt-name").value = "";
     document.getElementById("vt-alias").value = "";
-    document.getElementById("vt-type").value = "General";
+    document.getElementById("vt-type").value = "Airline";
     document.getElementById("vt-number-method").value = "Automatic";
     document.getElementById("vt-numbering").value = "Keep Original Numbers";
     syncNumberingField();
@@ -141,7 +141,7 @@
   function fillForm(vt) {
     document.getElementById("vt-name").value = vt.name || "";
     document.getElementById("vt-alias").value = vt.alias_name || "";
-    document.getElementById("vt-type").value = vt.voucher_category || "General";
+    document.getElementById("vt-type").value = vt.voucher_category || "Airline";
     document.getElementById("vt-number-method").value = vt.number_method || "Automatic";
     document.getElementById("vt-numbering").value = vt.numbering_behaviour || "Keep Original Numbers";
     syncNumberingField();

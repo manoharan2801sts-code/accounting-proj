@@ -186,6 +186,15 @@ def main():
         "Rescheduled_Al_TicketLines",
         "Cancellation_AL_Tickets",
         "Cancellation_Al_TicketLines",
+        "SSR_AL_Tickets",
+        "SSR_AL_TicketLines",
+        "Misc_Transactions",
+        "FOPMasterHistory",
+        "MasterMappingHistory",
+        "PGMasterHistory",
+        "MenuMaster",
+        "UserMenuAccess",
+        "AppUsers",
         "django_migrations",
     ]
 

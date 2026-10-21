@@ -19,6 +19,8 @@
   const bankName = document.getElementById("fm-bank-name");
   const cardMasterGroup = document.getElementById("fm-card-master-group");
   const cardMaster = document.getElementById("fm-card-master");
+  const effectiveFromGroup = document.getElementById("fm-effective-from-group");
+  const effectiveFrom = document.getElementById("fm-effective-from");
   const statusToggle = document.getElementById("fm-status-toggle");
   const statusLabel = document.getElementById("fm-status-label");
   const btnSave = document.getElementById("fm-btn-save");
@@ -58,6 +60,7 @@
     // both card types now; Bank Name is shown for both; Card Master
     // (ledger) is Own Card only, hidden for Client Card.
     cardMasterGroup.style.display = isClient ? "none" : "block";
+    effectiveFromGroup.style.display = isClient ? "none" : "block";
     bankNameGroup.style.display = "block";
 
     // Update Headings
@@ -70,7 +73,7 @@
       <th style="width:38px; text-align:center;">#</th>
       <th style="width:190px;">Card Number</th>
       <th style="width:150px;">Bank Name</th>
-      ${isClient ? "" : "<th>Card Master</th>"}
+      ${isClient ? "" : '<th>Card Master</th><th style="width:110px;">Effective From</th>'}
       <th style="width:90px; text-align:center;">Status</th>
       <th style="width:65px; text-align:center;">Action</th>
     </tr>`;
@@ -108,7 +111,7 @@
     tbody.innerHTML = "";
 
     if (currentCards.length === 0) {
-      const colSpan = getSelectedCardType() === "Client Card" ? 5 : 6;
+      const colSpan = getSelectedCardType() === "Client Card" ? 5 : 7;
       tbody.innerHTML = `<tr>
         <td colspan="${colSpan}" style="text-align:center; padding:2.5rem 1rem; color:var(--color-text-muted);">
           <div style="font-size:13px; font-weight:600; margin-bottom:4px;">No ${getSelectedCardType()}s found</div>
@@ -126,7 +129,8 @@
 
       const isClient = getSelectedCardType() === "Client Card";
       const bankNameHtml = card.bank_name ? card.bank_name : `<span style="color:var(--color-text-faint);">-</span>`;
-      const cardMasterHtml = isClient ? "" : `<td style="color:var(--color-text-dark); font-weight:500;">${card.card_master_ledger_name || "-"}</td>`;
+      const effDmy = card.effective_from ? card.effective_from.split("-").reverse().join("/") : "-";
+      const cardMasterHtml = isClient ? "" : `<td style="color:var(--color-text-dark); font-weight:500;">${card.card_master_ledger_name || "-"}</td><td>${effDmy}</td>`;
       const statusHtml = `<span class="fm-badge-status ${card.is_active ? "active" : "inactive"}">${card.is_active ? "Active" : "Inactive"}</span>`;
       const minusBtnHtml = `<button type="button" class="fm-btn-minus" data-id="${card.id}" title="Delete Card">&minus;</button>`;
 
@@ -151,6 +155,10 @@
     bankName.value = card.bank_name || "";
 
     if (type !== "Client Card") populateLedgerOptions(card.card_master_ledger_id);
+    // The latest Effective From - saving it again corrects that entry; a
+    // new date keeps the old ledger for documents before it.
+    effectiveFrom.value = card.effective_from || "";
+    effectiveFrom.dispatchEvent(new Event("change"));
     statusToggle.checked = !!card.is_active;
     statusLabel.textContent = card.is_active ? "Active" : "Inactive";
 
@@ -178,6 +186,8 @@
     cardLast4.value = "";
     bankName.value = "";
     cardMaster.value = "";
+    effectiveFrom.value = new Date().toISOString().slice(0, 10);
+    effectiveFrom.dispatchEvent(new Event("change"));
     statusToggle.checked = true;
     statusLabel.textContent = "Active";
 
@@ -217,6 +227,12 @@
         cardMaster.focus();
         return;
       }
+      // Same rule as Ledger Mapping: the ledger needs its Effective From date.
+      if (!effectiveFrom.value) {
+        voyagerAlert("Pick the Effective From date for the Card Master ledger.");
+        effectiveFrom.focus();
+        return;
+      }
     }
 
     const isActive = statusToggle.checked;
@@ -227,6 +243,7 @@
       card_number: cardNumberVal,
       bank_name: bankNameVal,
       card_master_ledger_id: ledgerId ? Number(ledgerId) : null,
+      effective_from: isClient ? null : effectiveFrom.value,
       is_active: isActive,
     };
 

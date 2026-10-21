@@ -314,6 +314,12 @@
     "company-master.html": {
       edit: ["#cm-edit-btn", "#cm-save-btn"],
     },
+    "trans-misc.html": {
+      edit: ["#misc-edit-btn"],
+      save: ["#misc-save-btn"],
+      saveNeeds: savedRecordInUrl("misc_saved_id"),
+      lock: ["#misc-form"],
+    },
     "groups.html": {
       add: ["#new-group-btn"],
       edit: [".edit-btn"],
@@ -1145,10 +1151,20 @@
       const t = (text || "").trim().toLowerCase();
       return (!t || t === "india" || t === "in" || t === "bharat") ? "IN" : "AE";
     }
-    function fyLabelForCountry(countryCode) {
-      const today = new Date();
-      if (countryCode !== "IN") return `FY ${today.getFullYear()}`;
-      const fyStart = today.getMonth() >= 3 ? today.getFullYear() : today.getFullYear() - 1;
+    // FY badge = the financial year the company's LAST ENTRY falls in (today
+    // when nothing is posted yet). The year starts in the month of Company
+    // Master's Financial Year From (e.g. 1 Apr -> Apr-Mar); with none set,
+    // India = Apr-Mar, anything else = Jan-Dec.
+    function fyLabelForCountry(countryCode, lastEntry, fyFrom, serverFyStart) {
+      // The server's own range (dbo.fn_CompanyFinancialYear) when it sent one.
+      if (serverFyStart) {
+        const y = Number(serverFyStart.slice(0, 4));
+        return serverFyStart.slice(5, 7) === "01" ? `FY ${y}` : `FY ${y}-${String(y + 1).slice(-2)}`;
+      }
+      const d = lastEntry ? new Date(`${lastEntry}T00:00:00`) : new Date();
+      const startMonth = fyFrom ? Number(String(fyFrom).slice(5, 7)) - 1 : (countryCode === "IN" ? 3 : 0);
+      if (!startMonth) return `FY ${d.getFullYear()}`;
+      const fyStart = d.getMonth() >= startMonth ? d.getFullYear() : d.getFullYear() - 1;
       return `FY ${fyStart}-${String(fyStart + 1).slice(-2)}`;
     }
     if (select) {
@@ -1172,12 +1188,14 @@
           const res = await fetch("http://localhost:8000/api/company-master/", { signal: controller.signal });
           clearTimeout(timeoutId);
           const rows = res.ok ? await res.json() : [];
-          companies = rows.map((c) => ({ id: c.id, name: c.company_name, country_code: countryCodeFromText(c.country) }));
+          companies = rows.map((c) => ({ id: c.id, name: c.company_name, country_code: countryCodeFromText(c.country),
+            last_entry: c.last_entry_date || "", fy_from: c.financial_year_from || "",
+            fy_start: c.fy_start || "", fy_end: c.fy_end || "" }));
         } catch (_) { companies = []; }
         if (!companies.length) companies = [{ id: 1, name: "Travel Agency", country_code: "IN" }];
 
         select.innerHTML = companies.map((c) =>
-          `<option value="${c.id}" data-country="${c.country_code}">${c.name} (${c.country_code})</option>`).join("");
+          `<option value="${c.id}" data-country="${c.country_code}" data-last-entry="${c.last_entry || ""}" data-fy-from="${c.fy_from || ""}" data-fy-start="${c.fy_start || ""}" data-fy-end="${c.fy_end || ""}">${c.name} (${c.country_code})</option>`).join("");
         const savedId = Store.getCompanyId();
         if (savedId && companies.some((c) => String(c.id) === savedId)) select.value = savedId;
         else Store.setCompanyId(select.value);
@@ -1195,7 +1213,7 @@
           // topnav markup that creates #fy-label is only (re)built further
           // up, in a separate block that doesn't share scope with this one.
           const fyLabelEl = document.getElementById("fy-label");
-          if (fyLabelEl) fyLabelEl.textContent = fyLabelForCountry(activeCountry);
+          if (fyLabelEl) fyLabelEl.textContent = fyLabelForCountry(activeCountry, activeOpt && activeOpt.dataset.lastEntry, activeOpt && activeOpt.dataset.fyFrom, activeOpt && activeOpt.dataset.fyStart);
         };
 
         flagDropdown.innerHTML = companies.map((c) => `
@@ -1347,14 +1365,23 @@
       rect.left + rect.width * 0.75,
       Math.max(rect.right - 30, rect.left),
     ];
+    let coverEl = null;
     const covered = sampleXs.some((x) => {
       const el = document.elementFromPoint(x, sampleY);
-      return el && el !== input && !input.contains(el);
+      if (el && el !== input && !input.contains(el)) { coverEl = el; return true; }
+      return false;
     });
-    if (covered) {
+    // Covered by a popup's backdrop (the input sits on the page BEHIND an
+    // open modal): still draw the date, one layer under that backdrop, so
+    // it shows dimmed like every other field instead of going blank.
+    // Anything else (a dropdown menu opening over it) still hides it.
+    const backdrop = coverEl && coverEl.closest(".dom-modal-backdrop, #voyager-alert-modal");
+    if (covered && !(backdrop && !backdrop.contains(input))) {
       span.style.display = "none";
       return;
     }
+    const backdropZ = backdrop ? parseInt(getComputedStyle(backdrop).zIndex, 10) : NaN;
+    span.style.zIndex = covered && !isNaN(backdropZ) ? String(backdropZ - 1) : "";
     span.style.display = "flex";
 
     const cs = getComputedStyle(input);
@@ -1568,6 +1595,8 @@
       document.body.appendChild(calEl);
     }
     calInput = input;
+    const pair = datePairOf(input);
+    if (pair) applyDatePairLimits(pair);
     const current = parseIso(input.value) || parseIso(input.min && new Date().toISOString().slice(0, 10) < input.min ? input.min : "");
     const now = new Date();
     calView = current ? { year: current.year, month: current.month } : { year: now.getFullYear(), month: now.getMonth() };
@@ -1580,6 +1609,56 @@
     if (calEl) calEl.style.display = "none";
     calInput = null;
   }
+
+  // ---- From / To date pairs (every screen) ----
+  // A date input whose id has "from" (or "start" / "check_in") is paired
+  // with the one named the same way with "to" ("end" / "check_out"), e.g.
+  // vf-from / vf-to, fd-date-from / fd-date-to, start_date / end_date. The To
+  // calendar can't go before the From date (earlier days / months greyed
+  // out) and From can't go after To; a To that ends up before From (typed,
+  // or From moved past it) snaps to the From date.
+  const DATE_PAIR_WORDS = [["from", "to"], ["start", "end"], ["check_in", "check_out"]];
+  const matchCase = (src, word) => (src === src.toUpperCase() ? word.toUpperCase() : src[0] === src[0].toUpperCase() ? word[0].toUpperCase() + word.slice(1) : word);
+  function dateById(id) {
+    const el = id && document.getElementById(id);
+    return el && el.matches('input[type="date"]') ? el : null;
+  }
+  function datePairOf(input) {
+    const id = input && input.id;
+    if (!id) return null;
+    for (const [a, b] of DATE_PAIR_WORDS) {
+      let re = new RegExp(a, "i");
+      if (re.test(id)) {
+        const to = dateById(id.replace(re, (m) => matchCase(m, b)));
+        if (to) return { from: input, to };
+      }
+      // Last occurrence of the "to" word, so ids with an earlier "to" still pair.
+      re = new RegExp(`${b}(?!.*${b})`, "i");
+      if (re.test(id)) {
+        const from = dateById(id.replace(re, (m) => matchCase(m, a)));
+        if (from) return { from, to: input };
+      }
+    }
+    return null;
+  }
+  function applyDatePairLimits(pair) {
+    const { from, to } = pair;
+    if (!("origMin" in to.dataset)) to.dataset.origMin = to.min || "";
+    if (!("origMax" in from.dataset)) from.dataset.origMax = from.max || "";
+    const om = to.dataset.origMin, oM = from.dataset.origMax;
+    to.min = from.value && (!om || from.value > om) ? from.value : om;
+    from.max = to.value && (!oM || to.value < oM) ? to.value : oM;
+  }
+  document.addEventListener("change", (e) => {
+    const input = e.target.closest && e.target.closest('input[type="date"]');
+    const pair = input && datePairOf(input);
+    if (!pair) return;
+    if (pair.from.value && pair.to.value && pair.to.value < pair.from.value) {
+      pair.to.value = pair.from.value;
+      if (input === pair.from) pair.to.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+    applyDatePairLimits(pair);
+  }, true);
 
   function pickCalendarDate(iso) {
     const input = calInput;
@@ -1630,5 +1709,11 @@
   window.addEventListener("resize", () => { if (calInput) positionCalendar(); });
 
   // can("add" | "edit" | "delete" | "view") for the page currently shown.
-  window.VoyagerShell = { init, navigateTo, can: (action) => !!pagePerm[action], reportState };
+  // The active company's financial year {start, end} (ISO dates, the FY
+  // badge's range) - or null when the server didn't send one.
+  function financialYear() {
+    const opt = document.getElementById("company-selector") && document.getElementById("company-selector").selectedOptions[0];
+    return opt && opt.dataset.fyStart ? { start: opt.dataset.fyStart, end: opt.dataset.fyEnd } : null;
+  }
+  window.VoyagerShell = { init, navigateTo, can: (action) => !!pagePerm[action], reportState, financialYear };
 })(window);

@@ -82,6 +82,12 @@
   }
   .jv-info-label { color: #64748B; display: block; font-size: 10px; font-weight: 600; margin-bottom: 2px; }
 
+  /* Find / Reschedule / Cancellation result lists: every column (headers
+     too) stays on one line - the list scrolls sideways if needed - and the
+     headers line up with their rows. */
+  #find-modal table th, #find-modal table td,
+  #reschedule-lookup-modal table th, #reschedule-lookup-modal table td,
+  #cancellation-lookup-modal table th, #cancellation-lookup-modal table td { white-space: nowrap; vertical-align: middle; }
 </style>
 </head><body>
 <header class="app-topnav" id="shell-topnav"></header>
@@ -174,10 +180,8 @@
               <div class="field-hint" id="customer_hint" style="display:none;"></div>
             </div>
             <div class="dom-field">
-              <label class="dom-label">Customer Code</label>
-              <div class="dom-input-readonly" id="customer_code" style="flex:0 0 90px;">—</div>
-              <label class="dom-label" style="min-width:52px;">Agent ID</label>
-              <div class="dom-input-readonly" id="customer_agent_id" style="flex:1;">—</div>
+              <label class="dom-label">Agent ID</label>
+              <div class="dom-input-readonly" id="customer_agent_id">—</div>
             </div>
             <div class="dom-field field-address">
               <label class="dom-label">Customer Address</label>
@@ -1436,7 +1440,7 @@
             <table style="width:100%; border-collapse:collapse; font-size:11.5px;">
               <thead>
                 <tr style="background:#3B6DB5; color:#FFFFFF; font-weight:700; text-align:left; height:26px;">
-                  <th style="width:30px; position:sticky; top:0; background:#3B6DB5;"></th>
+                  <th style="width:30px; padding:4px 8px; position:sticky; top:0; background:#3B6DB5;"><input type="checkbox" id="cx-pax-check-all" title="Select all passengers" /></th>
                   <th style="padding:4px 8px; position:sticky; top:0; background:#3B6DB5;">Pax Type</th>
                   <th style="padding:4px 8px; position:sticky; top:0; background:#3B6DB5;">Pax Name</th>
                 </tr>
@@ -1451,7 +1455,7 @@
             <table style="width:100%; border-collapse:collapse; font-size:11.5px;">
               <thead>
                 <tr style="background:#3B6DB5; color:#FFFFFF; font-weight:700; text-align:left; height:26px;">
-                  <th style="width:30px; position:sticky; top:0; background:#3B6DB5;"></th>
+                  <th style="width:30px; padding:4px 8px; position:sticky; top:0; background:#3B6DB5;"><input type="checkbox" id="cx-sector-check-all" title="Select all sectors" /></th>
                   <th style="padding:4px 8px; position:sticky; top:0; background:#3B6DB5;">Sector</th>
                   <th style="padding:4px 8px; position:sticky; top:0; background:#3B6DB5;">Flight No</th>
                   <th style="padding:4px 8px; position:sticky; top:0; background:#3B6DB5;">Class</th>
@@ -1474,13 +1478,13 @@
   </div>
 </div>
 
-<script src="assets/js/hardcode.js?v=2"></script>
+<script src="assets/js/hardcode.js?v=6"></script>
 <script src="assets/js/mock-data.js"></script>
 <script src="assets/js/loader.js?v=5"></script>
 <script src="assets/js/api.js?v=4"></script>
 <script src="assets/js/util.js?v=5"></script>
-<script src="assets/js/shell.js?v=31"></script>
+<script src="assets/js/shell.js?v=36"></script>
 <script src="assets/js/entry-common.js"></script>
 <script src="assets/js/invoice-templates.js?v=22"></script>
-<script src="assets/js/page-ticket-entry.js?v=153"></script>
+<script src="assets/js/page-ticket-entry.js?v=163"></script>
 </body></html>

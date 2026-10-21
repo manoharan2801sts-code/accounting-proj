@@ -65,6 +65,9 @@ RULES = {
     "ssr-ticket-create": ("add", ["trans-airline-ssr"]),
     "ssr-ticket-update": ("edit", ["trans-airline-ssr"]),
     "ssr-jv-preview-draft": ("view", ["trans-airline-ssr"]),
+    "misc-create": ("add", ["trans-misc"]),
+    "misc-update": ("edit", ["trans-misc"]),
+    "misc-jv-preview-draft": ("view", ["trans-misc"]),
     # Reports (their own data endpoints)
     "day-book-report": ("view", ["rep-day-book"]),
     "cash-bank-book-report": ("view", ["rep-cash-bank-book"]),

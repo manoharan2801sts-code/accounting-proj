@@ -294,9 +294,9 @@
 
   <script src="assets/js/mock-data.js"></script>
   <script src="assets/js/api.js?v=4"></script>
-  <script src="assets/js/hardcode.js?v=2"></script>
+  <script src="assets/js/hardcode.js?v=6"></script>
   <script src="assets/js/util.js?v=5"></script>
-  <script src="assets/js/shell.js?v=31"></script>
+  <script src="assets/js/shell.js?v=36"></script>
   <script>
     // Not gated on DOMContentLoaded - this page's <script> can be injected
     // by the app's SPA navigation (shell.js's navigateTo) into a document
@@ -576,6 +576,10 @@
         window.location.href = `trans-airline-ssr.html?ssr_saved_id=${row.dataset.ssrTicketId}`;
         return;
       }
+      if (row.dataset.miscId) {
+        window.location.href = `trans-misc.html?misc_saved_id=${row.dataset.miscId}`;
+        return;
+      }
       window.location.href = row.dataset.rescheduleTicketId
         ? `ticket-entry.html?reschedule_saved_id=${row.dataset.rescheduleTicketId}`
         : `ticket-entry.html?id=${row.dataset.ticketId}`;
@@ -839,7 +843,7 @@
         const totalDebit = txns.reduce((sum, t) => sum + (Number(t.debit) || 0), 0);
         const totalCredit = txns.reduce((sum, t) => sum + (Number(t.credit) || 0), 0);
         rows += txns.map((t, idx) => `
-          <tr class="${(t.ticket_id || t.reschedule_ticket_id || t.cancellation_ticket_id || t.ssr_ticket_id || t.voucher_id) ? "txn-row" : ""}" data-ticket-id="${t.ticket_id || ""}" data-reschedule-ticket-id="${t.reschedule_ticket_id || ""}" data-cancellation-ticket-id="${t.cancellation_ticket_id || ""}" data-ssr-ticket-id="${t.ssr_ticket_id || ""}" data-voucher-id="${t.voucher_id || ""}" title="${t.voucher_id ? "Click to open this voucher" : (t.ticket_id || t.reschedule_ticket_id || t.cancellation_ticket_id || t.ssr_ticket_id) ? "Click to open this ticket" : ""}">
+          <tr class="${(t.ticket_id || t.reschedule_ticket_id || t.cancellation_ticket_id || t.ssr_ticket_id || t.misc_id || t.voucher_id) ? "txn-row" : ""}" data-ticket-id="${t.ticket_id || ""}" data-reschedule-ticket-id="${t.reschedule_ticket_id || ""}" data-cancellation-ticket-id="${t.cancellation_ticket_id || ""}" data-ssr-ticket-id="${t.ssr_ticket_id || ""}" data-misc-id="${t.misc_id || ""}" data-voucher-id="${t.voucher_id || ""}" title="${t.voucher_id ? "Click to open this voucher" : t.misc_id ? "Click to open this transaction" : (t.ticket_id || t.reschedule_ticket_id || t.cancellation_ticket_id || t.ssr_ticket_id) ? "Click to open this ticket" : ""}">
             <td class="rownum">${idx + 1}</td>
             <td>${fmtDateDisplay(t.date)}</td>
             <td class="particulars">${t.particulars || opposingLabel(t.opposite)}</td>

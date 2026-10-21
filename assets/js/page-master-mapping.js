@@ -21,6 +21,9 @@
         { field: "Service Fee A/c", group: "Incomes" },
         { field: "Addl Service Fee A/c", group: "Incomes" },
         { field: "SSR Service Fee A/c", group: "Incomes" },
+        // Miscellaneous (trans-misc.html) - customer Markup / Service Fee.
+        { field: "Misc Markup A/c", group: "Incomes", only: "Miscellaneous" },
+        { field: "Misc Service Fee A/c", group: "Incomes", only: "Miscellaneous" },
       ],
     },
     "earnings-from-supplier": {
@@ -55,6 +58,8 @@
         { field: "Consolidator SSR Markup A/c", group: "Incomes" },
         { field: "Consolidator SSR Service Fee A/c", group: "Incomes" },
         { field: "Consolidator Reschedule Penalty A/c", group: "Incomes" },
+        { field: "Consolidator Misc Markup A/c", group: "Incomes", only: "Miscellaneous" },
+        { field: "Consolidator Misc Service Fee A/c", group: "Incomes", only: "Miscellaneous" },
       ],
     },
     "expenditure-to-supplier": {
@@ -68,19 +73,21 @@
         { field: "Supplier SSR Service Fee A/c", group: "Expenses" },
         { field: "Supplier Reschedule Penalty A/c", group: "Expenses" },
         { field: "Supplier Cancellation Penalty A/c", group: "Expenses" },
+        { field: "Supplier Misc Markup A/c", group: "Expenses", only: "Miscellaneous" },
+        { field: "Supplier Misc Service Fee A/c", group: "Expenses", only: "Miscellaneous" },
       ],
     },
     "gst-and-tds": {
       category: "GST and TDS",
       fields: [
-        { field: "Output IGST A/c", group: "Duties and Taxes" },
-        { field: "Output CGST A/c", group: "Duties and Taxes" },
-        { field: "Output SGST A/c", group: "Duties and Taxes" },
+        { field: "Output IGST A/c", group: "Duties and Taxes", misc: true },
+        { field: "Output CGST A/c", group: "Duties and Taxes", misc: true },
+        { field: "Output SGST A/c", group: "Duties and Taxes", misc: true },
         { field: "Discount TDS A/c", group: "Duties and Taxes" },
         { field: "Commission TDS A/c", group: "Duties and Taxes" },
-        { field: "Input IGST A/c", group: "Duties and Taxes" },
-        { field: "Input CGST A/c", group: "Duties and Taxes" },
-        { field: "Input SGST A/c", group: "Duties and Taxes" },
+        { field: "Input IGST A/c", group: "Duties and Taxes", misc: true },
+        { field: "Input CGST A/c", group: "Duties and Taxes", misc: true },
+        { field: "Input SGST A/c", group: "Duties and Taxes", misc: true },
       ],
     },
   };
@@ -95,6 +102,18 @@
     { key: "supplier", label: "Supplier", sections: ["expenditure-to-supplier", "earnings-from-supplier"] },
     { key: "gst-and-tds", label: "GST and TDS", sections: ["gst-and-tds"] },
   ];
+
+  // Which fields a Product lists: "only" fields belong to that one Product
+  // (the Misc ledgers -> Miscellaneous); Miscellaneous itself lists just
+  // those plus the GST fields marked misc. Every other Product: all fields
+  // except another Product's "only" ones.
+  const MISC = "Miscellaneous";
+  function fieldsFor(sectionKey, product) {
+    return SECTION_DEFS[sectionKey].fields.filter((f) => (f.only ? f.only === product : product !== MISC || f.misc));
+  }
+  const tabsFor = (product) => TAB_GROUPS
+    .map((tab) => ({ ...tab, sections: tab.sections.filter((k) => fieldsFor(k, product).length) }))
+    .filter((tab) => tab.sections.length);
 
   function fillPlain(el, values, placeholder) {
     el.innerHTML = (placeholder ? `<option value="">${placeholder}</option>` : "") +
@@ -135,8 +154,9 @@
   // "Expenditure To Customer"), each still its own heading + table so the
   // underlying masters_category saved to the backend is unaffected.
   function buildCategorySections() {
+    const tabs = tabsFor(productSel.value);
     tabsField.style.display = "";
-    tabsSlot.innerHTML = `<div class="mm-tabs">${TAB_GROUPS.map((tab, i) => `
+    tabsSlot.innerHTML = `<div class="mm-tabs">${tabs.map((tab, i) => `
       <button type="button" class="mm-tab-btn ${i === 0 ? "active" : ""}" data-tab="${tab.key}">${tab.label}</button>
     `).join("")}</div>`;
 
@@ -147,7 +167,7 @@
     // "consolidator-earnings") still share one <table>/<thead>, just a
     // separate <tbody> each - a section with its own "heading" also gets
     // a small sub-heading row in its own <tbody> right before it.
-    categoriesWrap.innerHTML = TAB_GROUPS.map((tab, i) => {
+    categoriesWrap.innerHTML = tabs.map((tab, i) => {
       return `
       <div class="mm-tab-panel ${i === 0 ? "active" : ""}" data-tab-panel="${tab.key}">
         <div class="mm-table-card">
@@ -179,11 +199,12 @@
   async function renderCategoryRows(sectionKey) {
     const product = productSel.value;
     const tbody = document.getElementById(`mm-fields-tbody-${sectionKey}`);
+    if (!tbody) return; // section not listed for this Product
     tbody.innerHTML = "";
     if (!product) return;
 
     const section = SECTION_DEFS[sectionKey];
-    for (const def of section.fields) {
+    for (const def of fieldsFor(sectionKey, product)) {
       const ledgers = await ledgersForGroup(def.group);
       const existing = existingMapping(product, def.field);
       const locked = !!existing;

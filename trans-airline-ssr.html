@@ -39,6 +39,12 @@
   #m-ssr-items { grid-template-columns: 82px 1fr 1fr; }
   #m-ssr-items .m-ssr-head { font-size: 10.5px; font-weight: 700; color: #64748B; }
   .ssr-result-row { cursor: pointer; border-bottom: 1px solid #E2E8F0; }
+  /* New / Find result grids: every column stays on one line (the box
+     scrolls sideways if needed); the long SSR text is cut with "..." and
+     shown in full on hover. Header cells line up with the rows. */
+  #ssr-find-modal table th, #ssr-find-modal table td,
+  #ssr-lookup-modal table th, #ssr-lookup-modal table td { white-space: nowrap; vertical-align: middle; }
+  #ssr-find-modal td.ssr-cut { max-width: 280px; overflow: hidden; text-overflow: ellipsis; }
   .ssr-result-row:hover td { background: var(--color-primary); color: #FFFFFF; }
 </style>
 </head><body>
@@ -87,10 +93,8 @@
               <div class="dom-input-readonly" id="customer">—</div>
             </div>
             <div class="dom-field">
-              <label class="dom-label">Customer Code</label>
-              <div class="dom-input-readonly" id="customer_code" style="flex:0 0 90px;">—</div>
-              <label class="dom-label" style="min-width:52px;">Agent ID</label>
-              <div class="dom-input-readonly" id="customer_agent_id" style="flex:1;">—</div>
+              <label class="dom-label">Agent ID</label>
+              <div class="dom-input-readonly" id="customer_agent_id">—</div>
             </div>
             <div class="dom-field field-address">
               <label class="dom-label">Customer Address</label>
@@ -417,11 +421,11 @@
   </div>
 </div>
 
-<script src="assets/js/hardcode.js?v=2"></script>
+<script src="assets/js/hardcode.js?v=6"></script>
 <script src="assets/js/mock-data.js"></script>
 <script src="assets/js/api.js?v=4"></script>
 <script src="assets/js/util.js?v=5"></script>
-<script src="assets/js/shell.js?v=31"></script>
+<script src="assets/js/shell.js?v=36"></script>
 <script src="assets/js/invoice-templates.js?v=22"></script>
-<script src="assets/js/page-ssr-entry.js?v=29"></script>
+<script src="assets/js/page-ssr-entry.js?v=34"></script>
 </body></html>

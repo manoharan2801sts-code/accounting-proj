@@ -23,16 +23,7 @@ Django's migration history matches without re-running the DDL:
     python manage.py migrate accounting --fake
 """
 from decimal import Decimal
-import django
 from django.db import models
-
-if django.VERSION < (5, 0):
-    from django.db.models.fields import Field as _Field
-    _orig_field_init = _Field.__init__
-    def _compat_field_init(self, *args, **kwargs):
-        kwargs.pop("db_default", None)
-        return _orig_field_init(self, *args, **kwargs)
-    _Field.__init__ = _compat_field_init
 
 # Process-level cache for TicketLine.computed_gst's per-field GST% lookup
 # (see field_ledger_gst_pct below) - MasterMapping rarely changes (an
@@ -106,9 +97,9 @@ def resolve_mapping(company_id, field_name, as_of=None, product_type="Airline"):
     return in_force[-1] if in_force else rows[0]
 
 
-def mapped_gst_pct(company_id, field_name, as_of=None):
+def mapped_gst_pct(company_id, field_name, as_of=None, product_type="Airline"):
     """GST % of the ledger mapped to field_name on as_of (0 when unmapped)."""
-    r = resolve_mapping(company_id, field_name, as_of)
+    r = resolve_mapping(company_id, field_name, as_of, product_type)
     return r["gst_pct"] if r else 0.0
 
 
@@ -247,9 +238,6 @@ class Ledger(models.Model):
     agent_id = models.CharField(max_length=30, null=True, blank=True)
     maintain_balance_bill_wise = models.CharField(max_length=5, null=True, blank=True)  # "Yes" / "No"
     place_of_supply = models.CharField(max_length=60, null=True, blank=True)
-    credit_days = models.IntegerField(null=True, blank=True, default=0)
-    credit_limit = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True, default=0)
-    customer_type = models.CharField(max_length=20, null=True, blank=True, choices=[('RETAIL', 'Retail'), ('CORPORATE', 'Corporate'), ('AGENT', 'Agent')])
 
     # Debtor — India
     city = models.CharField(max_length=60, null=True, blank=True)
@@ -1409,6 +1397,68 @@ class SSRAirlineTicketLine(models.Model):
         return f"{self.ticket_no} {self.sector}"
 
 
+class MiscTransaction(models.Model):
+    """
+    Miscellaneous transaction (trans-misc.html) - one free-text service
+    (Description) billed to a Customer and bought from a Supplier: a Base
+    Amount plus the customer's and the supplier's own Markup / Service Fee
+    (GST on each Service Fee from Ledger Mapping, never stored). Every
+    Confirmed Save posts its own Journal Voucher (JournalVoucher.
+    source_misc_ticket, category "MISC", MSC-1, MSC-2, ...) - see
+    views._compute_misc_jv_lines; a Cancelled one has none.
+    Written only through dbo.sp_MiscTransaction.
+    """
+    STATUS_CHOICES = [("Confirmed", "Confirmed"), ("Cancelled", "Cancelled")]
+
+    id = models.AutoField(primary_key=True)
+    company_id = models.IntegerField()
+    branch_name = models.CharField(max_length=100, null=True, blank=True)
+
+    invoice_number = models.CharField(max_length=20)
+    invoice_date = models.DateField()
+    invoice_type = models.CharField(max_length=100, null=True, blank=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="Confirmed", db_default="Confirmed")
+    user_name = models.CharField(max_length=100, null=True, blank=True)
+    reference = models.CharField(max_length=30)
+    ref_date = models.DateField(null=True, blank=True)
+    payment_mode = models.CharField(max_length=20, null=True, blank=True)
+    # Only meaningful when payment_mode == "Payment Gateway" (PG Master name).
+    payment_gateway_ref = models.CharField(max_length=60, null=True, blank=True)
+    currency = models.CharField(max_length=5, default="INR", db_default="INR")
+
+    customer = models.ForeignKey(
+        Ledger, on_delete=models.PROTECT, related_name="misc_as_customer", db_column="customer_ledger_id"
+    )
+    supplier = models.ForeignKey(
+        Ledger, on_delete=models.PROTECT, related_name="misc_as_supplier", db_column="supplier_ledger_id"
+    )
+
+    description = models.TextField(null=True, blank=True)
+    base_amount = models.DecimalField(max_digits=14, decimal_places=2, default=0, db_default=0)
+    # Taxes passed on as-is (like Base Amount: customer -> supplier).
+    other_taxes = models.DecimalField(max_digits=14, decimal_places=2, default=0, db_default=0)
+    markup = models.DecimalField(max_digits=14, decimal_places=2, default=0, db_default=0)
+    service_fee = models.DecimalField(max_digits=14, decimal_places=2, default=0, db_default=0)
+    supp_markup = models.DecimalField(max_digits=14, decimal_places=2, default=0, db_default=0)
+    supp_service_fee = models.DecimalField(max_digits=14, decimal_places=2, default=0, db_default=0)
+    # Sales Cost (what the customer pays) at save time - list / Find only.
+    total_billed = models.DecimalField(max_digits=14, decimal_places=2, default=0, db_default=0)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "Misc_Transactions"
+        constraints = [
+            models.UniqueConstraint(fields=["company_id", "invoice_number"], name="uq_misc_company_invoice_no"),
+            models.UniqueConstraint(fields=["company_id", "reference"], name="uq_misc_company_reference"),
+        ]
+        indexes = [models.Index(fields=["company_id"], name="misc_company_idx")]
+
+    def __str__(self):
+        return self.invoice_number
+
+
 class JournalVoucher(models.Model):
     """
     The auto-posted GL entry for a Ticket's JV (Airline/Hotel/Visa/
@@ -1435,7 +1485,7 @@ class JournalVoucher(models.Model):
     """
     CATEGORY_PREFIX = {
         "AIRLINE": "AL", "HOTEL": "HTL", "VISA": "VSA", "INSURANCE": "INS", "TOUR": "TUR",
-        "AIRLINE_RESCHEDULE": "ALR", "AIRLINE_CANCELLATION": "ALC", "AIRLINE_SSR": "ALS",
+        "AIRLINE_RESCHEDULE": "ALR", "AIRLINE_CANCELLATION": "ALC", "AIRLINE_SSR": "ALS", "MISC": "MSC",
     }
 
     id = models.AutoField(primary_key=True)
@@ -1466,6 +1516,10 @@ class JournalVoucher(models.Model):
     source_ssr_ticket = models.ForeignKey(
         SSRAirlineTicket, on_delete=models.SET_NULL, null=True, blank=True,
         related_name="vouchers", db_column="source_ssr_ticket_id"
+    )
+    source_misc_ticket = models.ForeignKey(
+        MiscTransaction, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="vouchers", db_column="source_misc_ticket_id"
     )
 
     total_debit = models.DecimalField(max_digits=16, decimal_places=2, default=0)
@@ -1539,7 +1593,10 @@ class Voucher(models.Model):
 
     class Meta:
         db_table = "Vouchers"
-        constraints = [models.UniqueConstraint(fields=["company_id", "voucher_no"], name="uq_voucher_company_no")]
+        # Plain numbers 1, 2, 3 ... - unique within a series (voucher type +
+        # master type name), not across the company.
+        constraints = [models.UniqueConstraint(fields=["company_id", "voucher_type", "voucher_type_name", "voucher_no"],
+                                               name="uq_voucher_company_series_no")]
         indexes = [models.Index(fields=["company_id"], name="voucher_company_idx")]
 
     def __str__(self):
@@ -1555,8 +1612,9 @@ class VoucherType(models.Model):
     only meaningful when allow_additional_numbering is True.
     """
     CATEGORY_CHOICES = [
-        ("General", "General"), ("Journal", "Journal"), ("Payment", "Payment"),
+        ("Airline", "Airline"), ("Journal", "Journal"), ("Payment", "Payment"),
         ("Receipt", "Receipt"), ("Contra", "Contra"), ("Debit Note", "Debit Note"), ("Credit Note", "Credit Note"),
+        ("Miscellaneous", "Miscellaneous"),
     ]
     NUMBER_METHOD_CHOICES = [
         ("Automatic", "Automatic"), ("Manual", "Manual"),
@@ -1572,7 +1630,7 @@ class VoucherType(models.Model):
     name = models.CharField(max_length=100)
     alias_name = models.CharField(max_length=100, null=True, blank=True)
 
-    voucher_category = models.CharField(max_length=20, choices=CATEGORY_CHOICES, default="General")
+    voucher_category = models.CharField(max_length=20, choices=CATEGORY_CHOICES, default="Airline")
     is_active = models.BooleanField(default=True)
     number_method = models.CharField(max_length=30, choices=NUMBER_METHOD_CHOICES, default="Automatic")
     # Automatic numbering only (NULL otherwise): "Restart Numbers" or
@@ -1662,6 +1720,7 @@ class MasterMapping(models.Model):
     PRODUCT_TYPE_CHOICES = [
         ("Airline", "Airline"), ("Hotel", "Hotel"), ("Bus", "Bus"),
         ("Visa", "Visa"), ("Insurance", "Insurance"), ("Rail", "Rail"),
+        ("Miscellaneous", "Miscellaneous"),
     ]
     MASTERS_CATEGORY_CHOICES = [
         ("Earnings From Customer", "Earnings From Customer"),
@@ -1766,6 +1825,9 @@ class FOPMaster(models.Model):
         null=True, blank=True,
     )
     card_master_ledger_name = models.CharField(max_length=200, null=True, blank=True)
+    # Effective From of the Card Master ledger above - always the LATEST
+    # entry of FOPMasterHistory (the ledger in force from that date on).
+    effective_from = models.DateField(null=True, blank=True)
 
     is_active = models.BooleanField(default=True)
 
@@ -1781,6 +1843,33 @@ class FOPMaster(models.Model):
 
     def __str__(self):
         return f"{self.card_type} — {self.card_number}"
+
+
+class FOPMasterHistory(models.Model):
+    """
+    Effective-date history of an Own Card's Card Master ledger (FOP Master),
+    same rules as Ledger Mapping's MasterMappingHistory: one row per
+    Effective From date (saving the same date again corrects it, a new date
+    adds a row). Each document posts its card leg to the ledger in force on
+    its own date - the latest row with effective_from <= that date, or the
+    earliest row when the date is before all of them. Written only through
+    dbo.sp_FOPMaster.
+    """
+    company_id = models.IntegerField()
+    fop_master = models.ForeignKey(FOPMaster, on_delete=models.CASCADE, related_name="history", db_column="fop_master_id")
+    card_master_ledger = models.ForeignKey(
+        Ledger, on_delete=models.PROTECT, related_name="fop_master_history", db_column="card_master_ledger_id"
+    )
+    card_master_ledger_name = models.CharField(max_length=200, null=True, blank=True)
+    effective_from = models.DateField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "FOPMasterHistory"
+        constraints = [
+            models.UniqueConstraint(fields=["fop_master", "effective_from"], name="uq_fop_history_card_date")
+        ]
 
 
 class PGMaster(models.Model):

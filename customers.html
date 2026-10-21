@@ -27,6 +27,8 @@
   .po-filter-hint { grid-column: 1 / -1; min-height: 16px; font-size: 11.5px; color: var(--color-danger); }
   .po-toggle { display: flex; align-items: center; gap: 0.5rem; font-size: 13px; color: var(--color-text-dark); cursor: pointer; user-select: none; margin-left: 0.3rem; }
   .po-toggle input { width: 16px; height: 16px; cursor: pointer; margin: 0; }
+  .po-toggle-grid { display: grid; grid-template-columns: auto auto; gap: 4px 1.1rem; align-items: center; }
+  .po-toggle-grid .po-toggle { margin-left: 0; }
   .po-card { flex: 1; min-height: 0; display: flex; flex-direction: column; margin-top: 0.8rem; background: var(--color-white);
     border: 1px solid var(--color-border); border-radius: var(--radius-md); overflow: hidden; }
   .po-card-head { display: flex; align-items: center; justify-content: space-between; padding: 0.55rem 1rem; border-bottom: 1px solid var(--color-border); flex-shrink: 0; }
@@ -76,9 +78,13 @@
       <span class="po-toolbar-label">As On</span>
       <input type="date" class="form-control-custom po-toolbar-date" id="po-as-of" />
       <button type="button" class="dom-nav-btn btn-primary" id="po-apply">Apply</button>
-      <label class="po-toggle"><input type="checkbox" id="po-all" /> <span id="po-all-label">All Customers</span></label>
-      <label class="po-toggle"><input type="checkbox" id="po-detailed" /> Detailed View</label>
-      <label class="po-toggle"><input type="checkbox" id="po-settled" /> Show Settled Bills</label>
+      <!-- Options in two rows: All / Detailed View, then the two Settled options. -->
+      <div class="po-toggle-grid">
+        <label class="po-toggle"><input type="checkbox" id="po-all" /> <span id="po-all-label">All Customers</span></label>
+        <label class="po-toggle"><input type="checkbox" id="po-detailed" /> Detailed View</label>
+        <label class="po-toggle"><input type="checkbox" id="po-settled" /> Show Settled Bills</label>
+        <label class="po-toggle"><input type="checkbox" id="po-only-settled" /> Show Only Settled Bills</label>
+      </div>
       <span style="margin-left:auto;"></span>
       <button type="button" class="dom-nav-btn" id="po-print">Print</button>
       <button type="button" class="dom-nav-btn btn-primary" id="po-export">Export CSV</button>
@@ -91,7 +97,7 @@
       <div class="po-scroll">
         <table id="po-table">
           <colgroup id="po-cols"><col style="width:30%"><col style="width:10%"><col style="width:12%"><col style="width:12%"><col style="width:12%"><col style="width:12%"><col style="width:12%"></colgroup>
-          <thead id="po-thead"><tr><th>Particulars</th><th>Date</th><th>Type</th><th>Reference</th><th class="amt">Billed</th><th class="amt">Adjusted</th><th class="amt">Outstanding</th></tr></thead>
+          <thead id="po-thead"><tr><th>Particulars</th><th>Date</th><th>Type</th><th>Reference</th><th class="amt">Outstanding</th><th class="amt">Unadjusted</th><th class="amt">Net Outstanding</th></tr></thead>
           <tbody id="po-tbody"><tr><td colspan="7" class="po-empty">Loading...</td></tr></tbody>
         </table>
       </div>
@@ -103,11 +109,11 @@
     </div>
   </main>
 </div>
-<script src="assets/js/hardcode.js?v=2"></script>
+<script src="assets/js/hardcode.js?v=6"></script>
 <script src="assets/js/mock-data.js"></script>
 <script src="assets/js/api.js?v=4"></script>
 <script src="assets/js/util.js?v=5"></script>
 <script src="assets/js/entry-common.js"></script>
-<script src="assets/js/shell.js?v=31"></script>
-<script src="assets/js/page-party-outstanding.js?v=6"></script>
+<script src="assets/js/shell.js?v=36"></script>
+<script src="assets/js/page-party-outstanding.js?v=11"></script>
 </body></html>

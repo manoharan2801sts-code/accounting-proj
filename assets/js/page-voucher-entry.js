@@ -3,6 +3,7 @@
   let activeCompanyId, activeCountry, accounts = [], originalVoucherNo = null;
   let allAccountRows = []; // unfiltered /api/accounts/ rows (ledgers + groups) - used to check a line's ledger group
   let lineCount = 0;
+  let savedLedgerEffect = {}; // ledger name -> saved voucher's Debit - Credit (edit / view only)
   const editId = getEditId();
   // ?view=1 (double-click on the Vouchers list) opens the voucher read-only
   // first; its Edit button unlocks it.
@@ -104,8 +105,25 @@
     return !!group && CASH_BANK_GROUP_NAMES.includes(normalizeGroupName(group.name));
   }
 
-  function accountOptionsHtml() {
-    return `<option value="">Select account…</option>` + accounts.map((a) => `<option value="${a.name}">${a.name}</option>`).join("");
+  // Ledger list for a line. Contra moves money between Cash / Bank only, so
+  // it lists just the ledgers under Bank Accounts / Cash-in-Hand (both By
+  // and To); every other type lists all ledgers. `keep` = a ledger already
+  // on the line that stays listed (a saved voucher opened in view mode).
+  function accountOptionsHtml(keep) {
+    const contra = voucherBaseType() === "CONTRA";
+    const list = accounts.filter((a) => !contra || isCashOrBankLedger(a.name) || a.name === keep);
+    return `<option value="">Select account…</option>` + list.map((a) => `<option value="${a.name}">${a.name}</option>`).join("");
+  }
+  // Re-lists every line's ledgers for the current voucher type. Switching to
+  // Contra clears a non Cash / Bank ledger already picked (not in view mode).
+  function refreshAccountOptions() {
+    document.querySelectorAll("#lines-body select.line-account").forEach((sel) => {
+      const current = sel.value;
+      const allowed = viewMode || voucherBaseType() !== "CONTRA" || !current || isCashOrBankLedger(current);
+      sel.innerHTML = accountOptionsHtml(viewMode ? current : undefined);
+      sel.value = allowed ? current : "";
+      if (!allowed) sel.dispatchEvent(new Event("change"));
+    });
   }
 
   function addLine(prefill) {
@@ -115,7 +133,7 @@
     tr.id = id;
     tr.innerHTML = `
       <td class="vx-dc" tabindex="0"></td>
-      <td><select class="form-control-custom line-account">${accountOptionsHtml()}</select><div class="vx-curbal"></div><div class="line-bills"></div></td>
+      <td><select class="form-control-custom line-account">${accountOptionsHtml(prefill && prefill.account)}</select><div class="vx-curbal"></div><div class="line-bills"></div></td>
       <td class="vx-amt"><input class="form-control-custom line-debit dom-amount" type="text" inputmode="decimal" value="${prefill && prefill.debit ? Number(prefill.debit).toFixed(2) : ""}" /></td>
       <td class="vx-amt"><input class="form-control-custom line-credit dom-amount" type="text" inputmode="decimal" value="${prefill && prefill.credit ? Number(prefill.credit).toFixed(2) : ""}" /></td>
       <td><button type="button" class="remove-line vx-btn-remove" title="Remove line">&times;</button></td>`;
@@ -156,11 +174,26 @@
       });
       inp.addEventListener("change", () => maybeAllocate(tr));
     });
-    tr.querySelector(".line-account").addEventListener("change", () => { updateLineMeta(tr); fillDefaultBank(); maybeAllocate(tr); });
+    tr.querySelector(".line-account").addEventListener("change", () => {
+      updateLineMeta(tr);
+      // A ledger picked on a line with no amount of its own becomes the
+      // balancing line - the voucher's difference fills in now (see autoBalance).
+      const hasOwnAmount = !tr._autoBalance && ((parseFloat(debitInput.value) || 0) || (parseFloat(creditInput.value) || 0));
+      // (A balancing line that already has its own ledger keeps the role.)
+      const others = Array.from(document.querySelectorAll("#lines-body tr")).filter((o) => o !== tr && o._autoBalance);
+      if (tr.querySelector(".line-account").value && !hasOwnAmount && !others.some((o) => o.querySelector(".line-account").value)) {
+        others.forEach((o) => { o._autoBalance = false; o.querySelector(".line-debit").value = ""; o.querySelector(".line-credit").value = ""; });
+        tr._autoBalance = true;
+      }
+      autoBalance();
+      fillDefaultBank();
+      maybeAllocate(tr);
+    });
     // Switching a line's side - click By / To, or press B (By) / T (To) like
     // Tally while on the By/To label or in the Debit / Credit box. An amount
     // already entered moves across to the other column with it.
     function setSide(next) {
+      if (contraFixedSide(tr)) next = contraFixedSide(tr); // Contra: side can't change
       if (viewMode || lineSide(tr) === next) {
         if (!viewMode) (next === "By" ? debitInput : creditInput).focus();
         return;
@@ -185,7 +218,13 @@
       setSide(key === "b" ? "By" : "To");
     });
     updateLineMeta(tr);
-    tr.querySelector(".line-bills").addEventListener("click", () => { if (!viewMode) maybeAllocate(tr, true); });
+    // Bill-allocated amount clicked: view mode shows the details read-only,
+    // otherwise the Bill-wise Details popup opens to view / change them.
+    tr.querySelectorAll(".vx-amt").forEach((td) => td.addEventListener("click", () => {
+      if (!td.classList.contains("vx-amt-link")) return;
+      if (viewMode || ticketId) viewBillAllocation(tr);
+      else maybeAllocate(tr, true);
+    }));
   }
 
   // ============================================================
@@ -213,20 +252,50 @@
     return s.ledger && s.amount > 0 ? `${s.ledger.id}|${s.isDebit ? "Dr" : "Cr"}|${s.amount}` : "";
   }
 
+  // Only Cur Bal shows under the ledger - a line with a bill allocation
+  // instead shows its Debit / Credit amount as a link; clicking it opens the
+  // Bill-wise Details (read-only in view mode, editable otherwise).
   function renderLineBills(tr) {
-    const el = tr.querySelector(".line-bills");
+    ensureBillAllocModal(); // its stylesheet carries the link look
+    const has = !!(tr._alloc && tr._alloc.length);
+    const { isDebit } = lineState(tr);
+    tr.querySelectorAll(".vx-amt").forEach((td) => {
+      const link = has && td.querySelector(isDebit ? ".line-debit" : ".line-credit") !== null;
+      td.classList.toggle("vx-amt-link", link);
+      td.title = link ? (viewMode ? "Click to view the bill-wise details" : "Click to view / change the bill-wise details") : "";
+    });
+  }
+
+  function viewBillAllocation(tr) {
+    const { ledger, amount, isDebit } = lineState(tr);
     const allocs = tr._alloc || [];
-    if (!allocs.length) { el.innerHTML = ""; el.style.display = "none"; return; }
-    const { amount, isDebit } = lineState(tr);
-    const allocated = allocs.reduce((s, a) => s + (a.type === "On Account" ? 0 : a.amount), 0);
-    const parts = allocs.filter((a) => a.type !== "On Account").map((a) =>
-      `${a.type === "New Invoice" ? "New Ref" : "Agst Ref"} ${escHtml(a.ref)}: ${money(a.amount)}`);
-    const onAccount = Math.round((amount - allocated) * 100) / 100;
-    if (onAccount > 0.005) parts.push(`On Account: ${money(onAccount)} (Unadjusted ${isDebit ? "Debit" : "Credit"})`);
-    el.innerHTML = parts.join(" &nbsp;|&nbsp; ");
-    el.title = viewMode ? "" : "Click to change the bill allocation";
-    el.style.display = "";
-    el.style.cursor = viewMode ? "default" : "pointer";
+    const against = allocs.filter((a) => a.type !== "On Account");
+    const onAccount = Math.round((amount - against.reduce((s, a) => s + a.amount, 0)) * 100) / 100;
+    const rows = against.map((a) => [a.type === "New Invoice" ? "New Ref" : "Agst Ref", a.ref, a.amount]);
+    if (onAccount > 0.005) rows.push(["On Account", `Unadjusted ${isDebit ? "Debit" : "Credit"}`, onAccount]);
+    const modal = ensureBillAllocModal();
+    modal.querySelector("#ba-ledger").textContent = ledger ? ledger.name : "";
+    modal.querySelector("#ba-amount").textContent = `${money(amount)} ${isDebit ? "Dr" : "Cr"}`;
+    modal.querySelector(".ba-types").style.display = "none";
+    modal.querySelector('[data-ba="ok"]').style.display = "none";
+    modal.querySelector('.voyager-alert-actions [data-ba="cancel"]').textContent = "Close";
+    modal.querySelector("#ba-panel").innerHTML = `
+      <div class="ba-table-wrap"><table class="ba-table">
+        <thead><tr><th>Type</th><th>Reference</th><th class="amt">Amount</th></tr></thead>
+        <tbody>${rows.map(([t, r, a]) => `<tr><td>${escHtml(t)}</td><td>${escHtml(r)}</td><td class="amt">${money(a)}</td></tr>`).join("")}</tbody>
+      </table></div>`;
+    modal.classList.add("open");
+    const close = () => {
+      modal.classList.remove("open");
+      modal.querySelector(".ba-types").style.display = "";
+      modal.querySelector('[data-ba="ok"]').style.display = "";
+      modal.querySelector('.voyager-alert-actions [data-ba="cancel"]').textContent = "Cancel";
+      modal.querySelectorAll('[data-ba="cancel"]').forEach((b) => b.removeEventListener("click", close));
+      document.removeEventListener("keydown", onKey, true);
+    };
+    const onKey = (e) => { if (e.key === "Escape" || e.key === "Enter") { e.preventDefault(); e.stopPropagation(); close(); } };
+    modal.querySelectorAll('[data-ba="cancel"]').forEach((b) => b.addEventListener("click", close));
+    document.addEventListener("keydown", onKey, true);
   }
 
   async function fetchPartyBills(ledgerId) {
@@ -315,7 +384,12 @@
       st.id = "bill-alloc-style";
       st.textContent = `
         #lines-body td { vertical-align: top; }
-        .line-bills { font-size: 11.5px; color: var(--color-primary, #3B6DB5); margin-top: 3px; font-weight: 600; }
+        .line-bills { display: none; }
+        /* Amount with a bill allocation = a link to its Bill-wise Details. The
+           (disabled, in view mode) input lets the click through to its cell. */
+        td.vx-amt-link { cursor: pointer; }
+        td.vx-amt-link input:disabled { pointer-events: none; }
+        td.vx-amt-link input { color: var(--color-primary, #3B6DB5) !important; text-decoration: underline; font-weight: 700; cursor: pointer; }
         #bill-alloc-modal { z-index: 1500; }
         #bill-alloc-modal .dom-modal-window { width: 760px; background: #FFFFFF; }
         .ba-body { padding: 12px 14px; font-size: 12.5px; color: #1E293B; }
@@ -539,12 +613,16 @@
       }
       target._autoBalance = true;
     }
+    fillDefaultBank(); // Payment / Receipt: the balancing line is the Default Bank
     const dp = window.VoyagerUtil ? VoyagerUtil.getDecimalPlaces() : 2;
-    // More Debit entered -> the balancing line is a Credit, and vice versa.
-    target.querySelector(".line-credit").value = diff > 0 ? diff.toFixed(dp) : "";
-    target.querySelector(".line-debit").value = diff < 0 ? (-diff).toFixed(dp) : "";
+    // The difference fills in only once the balancing line has a ledger -
+    // a blank line stays empty until a ledger is picked on it (then this
+    // runs again from the ledger's change). More Debit entered -> the
+    // balancing line is a Credit, and vice versa.
+    const ready = !!target.querySelector(".line-account").value;
+    target.querySelector(".line-credit").value = ready && diff > 0 ? diff.toFixed(dp) : "";
+    target.querySelector(".line-debit").value = ready && diff < 0 ? (-diff).toFixed(dp) : "";
     recalcTotals();
-    fillDefaultBank(); // Payment: the balancing "To" line is the Default Bank
   }
 
   // Tally-style line labels: "By" = a Debit line, "To" = a Credit line. A line
@@ -555,7 +633,17 @@
   // "To" = Credit only (Debit box locked). Side = the column holding the
   // amount; a blank line uses the side picked by clicking its By/To label,
   // else follows the balance ("To" when the voucher is short on Credit).
+  // Contra: line 1 is always To (the Cash / Bank the money leaves) and can't
+  // be switched (label click / B / T do nothing on it). Every other line
+  // works as usual - its side follows the balance and can be switched.
+  function contraFixedSide(tr) {
+    if (voucherBaseType() !== "CONTRA") return null;
+    const rows = Array.from(document.querySelectorAll("#lines-body tr")).filter((o) => o.querySelector(".line-debit"));
+    return rows[0] === tr ? "To" : null;
+  }
   function lineSide(tr) {
+    const fixed = contraFixedSide(tr);
+    if (fixed) return fixed;
     if (parseFloat(tr.querySelector(".line-debit").value) || 0) return "By";
     if (parseFloat(tr.querySelector(".line-credit").value) || 0) return "To";
     if (tr._sideManual) return tr._sideManual;
@@ -571,7 +659,8 @@
     // Nothing to balance yet: line 1 starts on the voucher type's usual side
     // (Receipt -> To, the party paying in; everything else -> By), and every
     // later line starts on the opposite side of line 1.
-    const firstSide = voucherBaseType() === "RECEIPT" ? "To" : "By";
+    // Contra -> To first (the Cash / Bank the money leaves), then By.
+    const firstSide = ["RECEIPT", "CONTRA"].includes(voucherBaseType()) ? "To" : "By";
     if (tr === rows[0]) return firstSide;
     const first = rows[0];
     const lead = first && (first._sideManual
@@ -584,18 +673,35 @@
     const tag = lineSide(tr);
     const dc = tr.querySelector(".vx-dc");
     dc.textContent = tag;
-    dc.title = viewMode ? "" : "B = By (Debit), T = To (Credit) - or click to switch";
+    const fixedSide = !!contraFixedSide(tr);
+    dc.title = viewMode ? "" : fixedSide ? "Contra: the first line is always To" : "B = By (Debit), T = To (Credit) - or click to switch";
     dc.tabIndex = viewMode ? -1 : 0;
-    dc.classList.toggle("vx-dc-click", !viewMode);
+    dc.classList.toggle("vx-dc-click", !viewMode && !fixedSide);
     if (!viewMode) {
-      tr.querySelector(".line-debit").disabled = tag !== "By";
-      tr.querySelector(".line-credit").disabled = tag !== "To";
+      // No amount without a ledger: both boxes stay locked (and empty) until
+      // the line has its account.
+      const hasLedger = !!tr.querySelector(".line-account").value;
+      const dr = tr.querySelector(".line-debit"), cr = tr.querySelector(".line-credit");
+      if (!hasLedger && !ticketId) { dr.value = ""; cr.value = ""; }
+      dr.disabled = !hasLedger || tag !== "By";
+      cr.disabled = !hasLedger || tag !== "To";
+      dr.title = cr.title = hasLedger ? "" : "Choose the ledger first";
     }
     const name = tr.querySelector(".line-account").value;
     const ledger = name && accounts.find((a) => a.name === name);
     const curBal = tr.querySelector(".vx-curbal");
     if (!ledger) { curBal.innerHTML = ""; return; }
-    const bal = Number(ledger.balance) || 0;
+    // Live Cur Bal = the ledger's balance before this voucher (a saved
+    // voucher being edited has its own saved amounts taken back out) + every
+    // line of this voucher on the same ledger, as typed (Debit +, Credit -).
+    // Re-run on every amount change (recalcTotals), so it moves in real time.
+    let live = 0;
+    document.querySelectorAll("#lines-body tr").forEach((o) => {
+      const sel = o.querySelector("select.line-account");
+      if (!sel || sel.value !== name) return;
+      live += (parseFloat(o.querySelector(".line-debit").value) || 0) - (parseFloat(o.querySelector(".line-credit").value) || 0);
+    });
+    const bal = (Number(ledger.balance) || 0) - (savedLedgerEffect[name] || 0) + live;
     const dp = window.VoyagerUtil ? VoyagerUtil.getDecimalPlaces() : 2;
     curBal.innerHTML = `Cur Bal: <strong>${Math.abs(bal).toLocaleString("en-IN", { minimumFractionDigits: dp, maximumFractionDigits: dp })} ${bal < 0 ? "Cr" : "Dr"}</strong>`;
   }
@@ -651,7 +757,7 @@
   // The 6 standard types (Journal, Contra, Payment, Receipt, Debit Note,
   // Credit Note) are always listed; every ACTIVE type created in Voucher Type
   // master whose "Type of Voucher" is one of those 6 is listed after them
-  // (e.g. "Petty Cash Payment" under Payment). Master types under General
+  // (e.g. "Petty Cash Payment" under Payment). Master types under Airline
   // (Tax Invoice, Sales Air ...) are ticket invoice types - never listed.
   // A master type behaves exactly like its category (numbering, By/To,
   // Cash/Bank rules, Default Bank ...) - see voucherBaseType.
@@ -714,7 +820,7 @@
     }
     document.querySelectorAll("select.line-account").forEach((sel) => {
       const current = sel.value;
-      sel.innerHTML = accountOptionsHtml();
+      sel.innerHTML = accountOptionsHtml(current);
       if (current) sel.value = current;
       updateLineMeta(sel.closest("tr")); // Cur Bal needs the ledger list just loaded
     });
@@ -743,6 +849,10 @@
     document.getElementById("narration").value = v.narration || "";
     document.getElementById("lines-body").innerHTML = "";
     lineCount = 0;
+    // What this saved voucher already put into each ledger's balance - Cur
+    // Bal takes it back out so the live figure never counts it twice.
+    savedLedgerEffect = {};
+    v.lines.forEach((l) => { savedLedgerEffect[l.ledger_name] = (savedLedgerEffect[l.ledger_name] || 0) + (Number(l.debit) || 0) - (Number(l.credit) || 0); });
     v.lines.forEach((l) => addLine({ account: l.ledger_name, debit: l.debit, credit: l.credit, bill_allocations: l.bill_allocations }));
     recalcTotals();
   }
@@ -826,6 +936,18 @@
     const mirror = (a, b) => (a === "RECEIPT" && b === "PAYMENT") || (a === "PAYMENT" && b === "RECEIPT");
     if (!viewMode && mirror(lastVoucherType, now)) flipAllLineSides();
     if (!viewMode) resetBlankLineSides();
+    if (!viewMode && now === "CONTRA") {
+      document.querySelectorAll("#lines-body tr").forEach((tr) => {
+        const dr = tr.querySelector(".line-debit"), cr = tr.querySelector(".line-credit");
+        if (!dr || !cr) return;
+        if (contraFixedSide(tr) !== "To") return; // only line 1 is fixed
+        const amount = dr.value || cr.value;
+        tr._sideManual = null;
+        dr.value = "";
+        cr.value = amount;
+      });
+    }
+    refreshAccountOptions();
     lastVoucherType = now;
     recalcTotals();
     fillDefaultBank();
@@ -984,6 +1106,12 @@
       return;
     }
 
+    // Contra: Cash / Bank ledgers only, on every line (checked on the server too).
+    if (type === "CONTRA" && lines.some((l) => !isCashOrBankLedger(l.account_name))) {
+      voyagerAlert("A Contra voucher can only use ledgers under Bank Accounts or Cash-in-Hand.");
+      return;
+    }
+
     // Receipt vouchers: any number of lines, but the money must be received
     // into Cash / Bank - at least one DEBIT line on a Cash-in-Hand or Bank
     // Accounts ledger, or the voucher can't be saved (checked on the server too).
@@ -1016,6 +1144,16 @@
       resolvedLines.push(line);
     }
 
+    // The date must be inside the company's financial year (the FY badge) -
+    // the server checks the same rule.
+    const fy = window.VoyagerShell.financialYear && window.VoyagerShell.financialYear();
+    const vDate = document.getElementById("voucher_date").value;
+    if (fy && vDate && (vDate < fy.start || vDate > fy.end)) {
+      const dmy = (iso) => iso.split("-").reverse().join("/");
+      voyagerAlert(`Voucher Date ${dmy(vDate)} is outside the financial year ${dmy(fy.start)} to ${dmy(fy.end)}. Choose a date within this financial year.`, { icon: "warning" });
+      return;
+    }
+
     const payload = {
       company_id: activeCompanyId,
       voucher_type: VOUCHER_TYPE_LABELS[type] || type,
@@ -1046,6 +1184,8 @@
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Could not post this voucher.");
+      // Remember this voucher type - the next New Voucher opens with it.
+      try { localStorage.setItem(`voyager_last_voucher_type_${activeCompanyId}`, document.getElementById("voucher_type").value); } catch (_) {}
       showToast(editId ? "Voucher updated." : "Voucher posted.", returnTo);
     } catch (err) {
       voyagerAlert(err.message || "Could not post this voucher. Is the Django backend running?", { icon: "error" });
@@ -1057,13 +1197,21 @@
   try {
     active = await VoyagerShell.init({
       activeKey: ticketId ? "tickets" : "vouchers",
-      onCompanyChange: async (id, country) => { activeCompanyId = Number(id); activeCountry = country; await populateRefs(activeCompanyId); await showNextVoucherNo(); },
+      onCompanyChange: async (id, country) => { activeCompanyId = Number(id); activeCountry = country; if (!ticketId) applyFyLimits(); await populateRefs(activeCompanyId); await showNextVoucherNo(); },
     });
   } catch (err) {
     console.error("Shell init failed", err);
   }
+  // Voucher Date calendar limited to the company's financial year.
+  function applyFyLimits() {
+    const fy = window.VoyagerShell.financialYear && window.VoyagerShell.financialYear();
+    const inp = document.getElementById("voucher_date");
+    inp.min = fy ? fy.start : "";
+    inp.max = fy ? fy.end : "";
+  }
   if (active) {
     activeCompanyId = Number(active.id); activeCountry = active.country;
+    if (!ticketId) applyFyLimits();
     if (ticketId) {
       await enterTicketVoucherViewMode(ticketId);
     } else {
@@ -1083,6 +1231,15 @@
       } else {
         addLine(); addLine();
         recalcTotals();
+        // A new voucher opens with the voucher type last saved (this company)
+        // - e.g. after posting a Receipt, the next one starts as Receipt.
+        let lastType = null;
+        try { lastType = localStorage.getItem(`voyager_last_voucher_type_${activeCompanyId}`); } catch (_) {}
+        const typeSel = document.getElementById("voucher_type");
+        if (lastType && lastType !== typeSel.value && Array.from(typeSel.options).some((o) => o.value === lastType)) {
+          typeSel.value = lastType;
+          typeSel.dispatchEvent(new Event("change"));
+        }
         await showNextVoucherNo();
       }
     }

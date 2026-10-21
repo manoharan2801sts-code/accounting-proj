@@ -86,7 +86,7 @@
   // Booking / Reschedule) - Journal / Payment / Receipt ... types belong to
   // the Voucher screen, Credit Note types to Cancellation.
   $("invoice_type").innerHTML = `<option value="">Select...</option>` +
-    voucherTypes.filter((v) => v.is_active && v.voucher_category === "General")
+    voucherTypes.filter((v) => v.is_active && v.voucher_category === "Airline")
       .map((v) => `<option value="${esc(v.name)}">${esc(v.name)}</option>`).join("");
   // A saved SSR's own type stays visible even if it's not in that list.
   const setInvoiceType = (name) => {
@@ -460,7 +460,6 @@
     try {
       const res = await fetch(`${API}customers/?company_id=${activeCompanyId}`);
       const c = (res.ok ? await res.json() : []).find((x) => x.name === h.customer_name);
-      $("customer_code").textContent = (c && c.code) || "—";
       $("customer_agent_id").textContent = (c && c.agent_id) || "—";
       $("customer_address").textContent = (c && c.address) || "—";
       $("customer_gst").textContent = (c && c.gst_no) || "—";
@@ -523,7 +522,7 @@
     $("ssr-print-btn").style.display = on && savedId ? "" : "none";
     // Opened from a report row (Day Book / Ledger) -> Back returns there,
     // same as the ticket screen's own Back link.
-    const fromReport = [["report-day-book.html", "Day Book"], ["report-ledger-book.html", "Ledger"], ["customers.html", "Receivables"], ["suppliers.html", "Payables"], ["report-dsr-airline-booking.html", "DSR"]]
+    const fromReport = [["report-day-book.html", "Day Book"], ["report-ledger-book.html", "Ledger"], ["customers.html", "Receivables"], ["suppliers.html", "Payables"], ["report-dsr-airline-booking.html", "Returns"], ["report-dsr.html", "DSR"]]
       .find(([page]) => document.referrer.includes(page));
     $("ssr-discard-btn").textContent = on ? `<- Back to ${fromReport ? fromReport[1] : "SSR"}` : "Discard";
     $("ssr-discard-btn").setAttribute("href", on
@@ -595,7 +594,7 @@
       ? found.map((r) => `<tr class="ssr-result-row" data-id="${r.ssr_ticket_id}">
           <td style="padding:5px 8px;">${esc(r.invoice_number)}</td><td style="padding:5px 8px;">${esc(r.booking_reference) || "-"}</td>
           <td style="padding:5px 8px;">${esc(r.airline_pnr) || "-"}</td><td style="padding:5px 8px;">${esc(r.ticket_no) || "-"}</td>
-          <td style="padding:5px 8px;">${esc(r.passenger_name) || "-"}</td><td style="padding:5px 8px;">${esc(r.ssr_details) || "-"}</td>
+          <td style="padding:5px 8px;">${esc(r.passenger_name) || "-"}</td><td class="ssr-cut" style="padding:5px 8px;" title="${esc(r.ssr_details)}">${esc(r.ssr_details) || "-"}</td>
           <td style="padding:5px 8px; text-align:right;">${f2(r.total_billed)}</td></tr>`).join("")
       : `<tr><td colspan="7" style="text-align:center; padding:14px; color:#64748B;">No saved SSR Updation found.</td></tr>`;
     body.querySelectorAll(".ssr-result-row").forEach((tr) => tr.addEventListener("click", () => {

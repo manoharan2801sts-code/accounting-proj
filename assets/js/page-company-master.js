@@ -239,6 +239,7 @@
         <div class="voyager-alert-actions" style="flex-direction:column; padding:20px 18px;">
           <button type="button" class="dom-nav-btn btn-primary" id="cm-fy-jan-dec" style="width:100%; padding:14px; font-size:1rem;">January to December</button>
           <button type="button" class="dom-nav-btn btn-primary" id="cm-fy-apr-mar" style="width:100%; padding:14px; font-size:1rem;">April to March</button>
+          <button type="button" class="dom-nav-btn" id="cm-fy-back" style="width:100%; padding:8px;">Back (Esc)</button>
         </div>
       </div>
     `;
@@ -246,23 +247,35 @@
     fyConventionModalEl = modal;
     return modal;
   }
+  // Resolves to "jan-dec" / "apr-mar", or null on Back / Esc.
   function askFyConvention() {
     const modal = ensureFyConventionModal();
     modal.classList.add("open");
     return new Promise((resolve) => {
-      const settle = (choice) => { modal.classList.remove("open"); resolve(choice); };
+      const onKey = (e) => { if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); settle(null); } };
+      const settle = (choice) => { modal.classList.remove("open"); document.removeEventListener("keydown", onKey, true); resolve(choice); };
       modal.querySelector("#cm-fy-jan-dec").onclick = () => settle("jan-dec");
       modal.querySelector("#cm-fy-apr-mar").onclick = () => settle("apr-mar");
+      modal.querySelector("#cm-fy-back").onclick = () => settle(null);
+      document.addEventListener("keydown", onKey, true);
+      setTimeout(() => modal.querySelector("#cm-fy-jan-dec").focus(), 0);
     });
   }
-  document.getElementById("cm-country").addEventListener("change", async () => {
-    const country = document.getElementById("cm-country").value;
+  // Country before the current pick - Back / Esc on the Financial Year popup
+  // puts it back, with nothing else changed.
+  const countrySel = document.getElementById("cm-country");
+  let prevCountry = countrySel.value;
+  ["focus", "mousedown"].forEach((ev) => countrySel.addEventListener(ev, () => { prevCountry = countrySel.value; }));
+  countrySel.addEventListener("change", async () => {
+    const country = countrySel.value;
     if (country !== "India") {
       const choice = await askFyConvention();
+      if (!choice) { countrySel.value = prevCountry; countrySel.focus(); return; }
       applyCountryCurrencyDefaults(choice);
     } else {
       applyCountryCurrencyDefaults();
     }
+    prevCountry = country;
   });
 
   function clearForm() {

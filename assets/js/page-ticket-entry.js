@@ -36,6 +36,11 @@
   const rescheduleActiveKey = (rescheduleTicketId || rescheduleSavedId || rescheduleNew)
     ? "trans-airline-reschedule" : ((cancellationNew || cancellationSavedId) ? "trans-airline-cancellation" : "tickets");
   let activeCompanyId, activeCountry, allCustomers = [], allSuppliers = [], existingTickets = [];
+  // Set when the saved Booking / Reschedule on screen already has a later
+  // process (Reschedule, Cancellation, SSR Updation) built on it - Edit is
+  // refused with this message (server: dbo.fn_TicketChainLock).
+  let editLockMessage = null;
+  let editLockBypass = false; // Super Admin - may edit anyway, after a warning
   let voucherTypes = []; // active Voucher Types for the active company - drives the Invoice Type dropdown + Invoice Number auto-numbering
   const VOUCHER_TYPE_API = "http://localhost:8000/api/voucher-type/";
   let fopMasterCards = []; // active FOP Master cards for the active company, refreshed by populateFopOptions
@@ -453,7 +458,7 @@
     // "Type of Voucher": Booking / Reschedule -> General only; Cancellation
     // -> Credit Note only. (Journal / Payment / Receipt / Contra / Debit Note
     // types belong to the Voucher screen, never here.)
-    const category = cancellationMode ? "Credit Note" : "General";
+    const category = cancellationMode ? "Credit Note" : "Airline";
     const activeNames = voucherTypes
       .filter((vt) => vt.is_active && vt.voucher_category === category)
       .map((vt) => vt.name);
@@ -551,7 +556,6 @@
   document.getElementById("modal-fop").addEventListener("change", () => updateCardNumberField());
   document.getElementById("customer").addEventListener("input", (e) => {
     const c = allCustomers.find((c) => c.name === e.target.value);
-    document.getElementById("customer_code").textContent = c ? c.code : "-";
     document.getElementById("customer_agent_id").textContent = c && c.agent_id ? c.agent_id : "-";
     document.getElementById("customer_address").textContent = c && c.address ? c.address : "-";
     document.getElementById("customer_gst").textContent = c && c.gst_no ? c.gst_no : "-";
@@ -2636,13 +2640,15 @@
       const balanced = Math.abs(jv.total_debit - jv.total_credit) < 0.01;
       if (!balanced) {
         verifyBox.innerHTML = `<span style="color:#DC2626;">X Unbalanced - Debit ${fmtN(jv.total_debit)} != Credit ${fmtN(jv.total_credit)}</span>`;
+      } else if (jv.editing_saved) {
+        verifyBox.innerHTML = `<span style="color:#D97706;">Balanced - live preview of your unsaved changes (Posted ${jv.voucher_no || "-"} updates on Save)</span>`;
       } else if (jv.posted) {
         verifyBox.innerHTML = `<span>OK Double-Entry Verification: Balanced (Posted ${jv.voucher_no})</span>`;
       } else {
         verifyBox.innerHTML = `<span style="color:#D97706;">Computed - not yet posted (live preview)</span>`;
       }
     }
-    renderFopPaymentTab(jv);
+    await renderFopPaymentTab(jv);
     await renderPgReceiptsTab(jv);
   }
 
@@ -2682,7 +2688,21 @@
   // (the client's own card was charged directly, not an internal card).
   // Amount is the same supplier total already computed for the JV's
   // Supplier row(s).
-  function renderFopPaymentTab(jv) {
+  // The Own Card's Card Master ledger IN FORCE on this document's Invoice
+  // Date (FOP Master Effective From history) - same as the posted J.V.
+  const fopAsOfCache = {};
+  async function fopCardAsOf(cardNumber) {
+    const asOf = toISOFromDDMMYYYY(getDateGroupValue(document.getElementById("invoice_date"))) || "";
+    if (!(asOf in fopAsOfCache)) {
+      try {
+        const r = await fetch(`${FOP_MASTER_API}?company_id=${activeCompanyId}${asOf ? `&as_of=${asOf}` : ""}`);
+        fopAsOfCache[asOf] = r.ok ? await r.json() : fopMasterCards;
+      } catch (_) { fopAsOfCache[asOf] = fopMasterCards; }
+    }
+    return fopAsOfCache[asOf].find((c) => c.card_number === cardNumber);
+  }
+
+  async function renderFopPaymentTab(jv) {
     const table = document.getElementById("jv-tab-panel-fop").querySelector("table").parentElement;
     const empty = document.getElementById("jv-fop-empty");
     const p = passengers[0];
@@ -2702,7 +2722,7 @@
     let creditLedgerName;
     if (fopType === "Own Card") {
       const cardNumber = p.card_number || "";
-      const card = fopMasterCards.find((c) => c.card_number === cardNumber);
+      const card = await fopCardAsOf(cardNumber);
       creditLedgerName = card ? (card.card_master_ledger_name || cardNumber) : (cardNumber || "FOP Card");
     } else {
       const customerRow = (jv.accounts || []).find((a) => a.role === "customer");
@@ -2838,7 +2858,28 @@
     document.getElementById("jv-meta-currency").textContent = document.getElementById("currency").textContent;
   }
 
+  // J.V source: a saved document in VIEW mode shows its posted voucher
+  // (from the DB); while creating or editing, the J.V is always built live
+  // from the fields on screen (draft endpoints) - after Save it's the DB
+  // again. Only the LATEST request is drawn (jvLoadSeq), so a slower,
+  // older response can never overwrite newer on-screen values.
+  let jvLoadSeq = 0;
+  const savedVoucherNoCache = {};
+  // Posted voucher no. of the saved document being edited - kept on the
+  // live preview so it still says which voucher Save will update.
+  async function savedVoucherNo(url) {
+    if (!(url in savedVoucherNoCache)) {
+      try {
+        const r = await fetch(url);
+        const j = await r.json();
+        savedVoucherNoCache[url] = r.ok ? (j.voucher_no || null) : null;
+      } catch (_) { savedVoucherNoCache[url] = null; }
+    }
+    return savedVoucherNoCache[url];
+  }
+
   async function loadJvPreview(showLoading) {
+    const seq = ++jvLoadSeq;
     primeJvHeaderFromInvoice();
     if (showLoading) {
       document.getElementById("jv-table-body").innerHTML = `<tr><td colspan="4" style="padding:10px;">Loading...</td></tr>`;
@@ -2858,6 +2899,11 @@
       }
       const jv = await res.json();
       if (!res.ok) throw new Error(jv.error || "Could not compute JV.");
+      if (editId && !viewMode) {
+        jv.editing_saved = true;
+        jv.voucher_no = await savedVoucherNo(`http://localhost:8000/api/tickets/${editId}/jv-preview/?company_id=${activeCompanyId}`);
+      }
+      if (seq !== jvLoadSeq) return; // a newer preview is on its way
       await renderJvPreview(jv);
     } catch (err) {
       document.getElementById("jv-table-body").innerHTML = `<tr><td colspan="4" style="padding:10px; color:#DC2626;">${err.message}</td></tr>`;
@@ -2913,6 +2959,8 @@
       const balanced = Math.abs(jv.total_debit - jv.total_credit) < 0.01;
       if (!balanced) {
         verifyBox.innerHTML = `<span style="color:#DC2626;">X Unbalanced - Debit ${fmtN(jv.total_debit)} != Credit ${fmtN(jv.total_credit)}</span>`;
+      } else if (jv.editing_saved) {
+        verifyBox.innerHTML = `<span style="color:#D97706;">Balanced - live preview of your unsaved changes (Posted ${jv.voucher_no || "-"} updates on Save)</span>`;
       } else if (jv.posted) {
         verifyBox.innerHTML = `<span>OK Double-Entry Verification: Balanced (Posted ${jv.voucher_no})</span>`;
       } else {
@@ -2926,7 +2974,7 @@
     const tab = jvTabForPaymentFop(paymentMode, fop);
     if (tab === "fop") {
       setJvTabVisible("pg", false);
-      renderRescheduleFopPaymentTab(jv, fop, p);
+      await renderRescheduleFopPaymentTab(jv, fop, p);
       setJvTabVisible("fop", true);
     } else if (tab === "pg") {
       setJvTabVisible("fop", false);
@@ -2943,12 +2991,12 @@
   // _compute_reschedule_jv_lines' own supplier formula), reused as-is via
   // jv.accounts' "supplier" role rows. JV-3 credits the FOP Card's own
   // ledger; JV-4 credits Customer instead - both per spec.
-  function renderRescheduleFopPaymentTab(jv, fopType, p) {
+  async function renderRescheduleFopPaymentTab(jv, fopType, p) {
     const supplierRows = (jv.accounts || []).filter((a) => a.role === "supplier");
     let creditLedgerName;
     if (fopType === "Own Card") {
       const cardNumber = (p && p.card_number) || "";
-      const card = fopMasterCards.find((c) => c.card_number === cardNumber);
+      const card = await fopCardAsOf(cardNumber);
       creditLedgerName = card ? (card.card_master_ledger_name || cardNumber) : (cardNumber || "FOP Card");
     } else {
       const customerRow = (jv.accounts || []).find((a) => a.role === "customer");
@@ -3000,6 +3048,7 @@
   }
 
   async function loadRescheduleJvPreview(showLoading) {
+    const seq = ++jvLoadSeq;
     primeJvHeaderFromInvoice();
     if (showLoading) {
       document.getElementById("jv-table-body").innerHTML = `<tr><td colspan="4" style="padding:10px;">Loading...</td></tr>`;
@@ -3017,6 +3066,11 @@
       }
       const jv = await res.json();
       if (!res.ok) throw new Error(jv.error || "Could not compute JV.");
+      if (editingRescheduleId && !viewMode) {
+        jv.editing_saved = true;
+        jv.voucher_no = await savedVoucherNo(`http://localhost:8000/api/reschedule-tickets/${editingRescheduleId}/jv-preview/?company_id=${activeCompanyId}`);
+      }
+      if (seq !== jvLoadSeq) return; // a newer preview is on its way
       await renderRescheduleJvPreview(jv);
     } catch (err) {
       document.getElementById("jv-table-body").innerHTML = `<tr><td colspan="4" style="padding:10px; color:#DC2626;">${err.message}</td></tr>`;
@@ -3044,6 +3098,7 @@
     };
   }
   async function loadCancellationJvPreview(showLoading) {
+    const seq = ++jvLoadSeq;
     primeJvHeaderFromInvoice();
     if (showLoading) {
       document.getElementById("jv-table-body").innerHTML = `<tr><td colspan="4" style="padding:10px;">Loading...</td></tr>`;
@@ -3061,6 +3116,11 @@
       }
       const jv = await res.json();
       if (!res.ok) throw new Error(jv.error || "Could not compute JV.");
+      if (cxEditSavedCancellationId && !viewMode) {
+        jv.editing_saved = true;
+        jv.voucher_no = await savedVoucherNo(`http://localhost:8000/api/cancellation-tickets/${cxEditSavedCancellationId}/jv-preview/?company_id=${activeCompanyId}`);
+      }
+      if (seq !== jvLoadSeq) return; // a newer preview is on its way
       await renderCancellationJvPreview(jv);
     } catch (err) {
       document.getElementById("jv-table-body").innerHTML = `<tr><td colspan="4" style="padding:10px; color:#DC2626;">${err.message}</td></tr>`;
@@ -3094,6 +3154,8 @@
       const balanced = Math.abs(jv.total_debit - jv.total_credit) < 0.01;
       if (!balanced) {
         verifyBox.innerHTML = `<span style="color:#DC2626;">X Unbalanced - Debit ${fmtN(jv.total_debit)} != Credit ${fmtN(jv.total_credit)}</span>`;
+      } else if (jv.editing_saved) {
+        verifyBox.innerHTML = `<span style="color:#D97706;">Balanced - live preview of your unsaved changes (Posted ${jv.voucher_no || "-"} updates on Save)</span>`;
       } else if (jv.posted) {
         verifyBox.innerHTML = `<span>OK Double-Entry Verification: Balanced (Posted ${jv.voucher_no})</span>`;
       } else {
@@ -3104,7 +3166,7 @@
     setJvTabVisible("pg", false); // Cancellation never has a PG Receipts tab - payment_mode is always Top-up here
     const fop = jv.fop || "Cash";
     if (fop === "Own Card" || fop === "Client Card") {
-      renderCancellationFopPaymentTab(jv, fop, passengers[0]);
+      await renderCancellationFopPaymentTab(jv, fop, passengers[0]);
       setJvTabVisible("fop", true);
     } else {
       setJvTabVisible("fop", false);
@@ -3119,12 +3181,12 @@
   // (netting the Main's own Debit to zero), while the FOP Card's own ledger
   // (Own Card) or Customer (Client Card) is DEBITED for the same total -
   // the exact mirror of renderRescheduleFopPaymentTab's Dr/Cr placement.
-  function renderCancellationFopPaymentTab(jv, fopType, p) {
+  async function renderCancellationFopPaymentTab(jv, fopType, p) {
     const supplierRows = (jv.accounts || []).filter((a) => a.role === "supplier");
     let debitLedgerName;
     if (fopType === "Own Card") {
       const cardNumber = (p && p.card_number) || "";
-      const card = fopMasterCards.find((c) => c.card_number === cardNumber);
+      const card = await fopCardAsOf(cardNumber);
       debitLedgerName = card ? (card.card_master_ledger_name || cardNumber) : (cardNumber || "FOP Card");
     } else {
       const customerRow = (jv.accounts || []).find((a) => a.role === "customer");
@@ -3409,6 +3471,8 @@
   // View mode - load a saved ticket read-only
   // ============================================================
   async function enterViewMode(t) {
+    editLockMessage = t.edit_lock_message || null;
+    editLockBypass = !!t.edit_lock_bypass;
     viewMode = true;
     document.getElementById("page-title").textContent = `View Airline Ticket - ${t.lines[0]?.ticket_no || t.invoice_number} (${t.lines[0]?.passenger_name || ""})`;
     document.getElementById("invoice_number").value = t.invoice_number;
@@ -3432,6 +3496,10 @@
     document.getElementById("customer").dispatchEvent(new Event("input"));
 
     passengers = t.lines.map((l) => ({
+      // The saved line's own id - sent back on Save so the server updates
+      // this same line even when its Ticket No. is edited (otherwise a
+      // changed Ticket No. looked like a removed passenger + a new one).
+      id: l.id,
       // Status column (renderPaxTable) - this explicit field list never
       // included these two, so they were always undefined here even
       // though views.ticket_detail has sent them correctly all along -
@@ -3478,7 +3546,8 @@
   const REPORT_BACK_TARGETS = [
     { match: "report-day-book.html", label: "Day Book" },
     { match: "report-ledger-book.html", label: "Ledger" },
-    { match: "report-dsr-airline-booking.html", label: "DSR" },
+    { match: "report-dsr-airline-booking.html", label: "Returns" },
+    { match: "report-dsr.html", label: "DSR" },
     { match: "customers.html", label: "Receivables" },
     { match: "suppliers.html", label: "Payables" },
   ];
@@ -3713,7 +3782,25 @@
     const anyPax = document.querySelectorAll(".cx-pax-check:checked").length > 0;
     const anySector = document.querySelectorAll(".cx-sector-check:checked").length > 0;
     document.getElementById("cx-cancel-btn").disabled = !(anyPax && anySector);
+    // Each header "select all" box mirrors its own list's rows: ticked only
+    // when every row is ticked, half-ticked when only some are (same as the
+    // Reschedule picker).
+    [["cx-pax-check-all", ".cx-pax-check"], ["cx-sector-check-all", ".cx-sector-check"]].forEach(([boxId, rowSel]) => {
+      const total = document.querySelectorAll(rowSel).length;
+      const checked = document.querySelectorAll(`${rowSel}:checked`).length;
+      const allBox = document.getElementById(boxId);
+      allBox.checked = total > 0 && checked === total;
+      allBox.indeterminate = checked > 0 && checked < total;
+    });
   }
+  // Selects (or clears) every row of its own list only - Passengers' box
+  // never touches Sectors, and vice versa.
+  [["cx-pax-check-all", ".cx-pax-check"], ["cx-sector-check-all", ".cx-sector-check"]].forEach(([boxId, rowSel]) => {
+    document.getElementById(boxId).addEventListener("change", (e) => {
+      document.querySelectorAll(rowSel).forEach((cb) => { cb.checked = e.target.checked; });
+      updateCxCancelButtonState();
+    });
+  });
   document.getElementById("cx-cancel-btn").addEventListener("click", async () => {
     const checkedPax = Array.from(document.querySelectorAll(".cx-pax-check:checked"))
       .map((cb) => cxLookupPassengers[Number(cb.dataset.idx)]);
@@ -4476,6 +4563,8 @@
   // blank, and Save Ticket goes on to UPDATE this same record (see
   // editingRescheduleId) instead of creating a new one.
   async function enterSavedRescheduleMode(rt, originalTicket) {
+    editLockMessage = rt.edit_lock_message || null;
+    editLockBypass = !!rt.edit_lock_bypass;
     rescheduleMode = true;
     editingRescheduleId = rt.id;
     rescheduleTicketId = rt.original_ticket_id;
@@ -4568,7 +4657,20 @@
   // field, brings back Save Ticket, and re-renders the passenger table so
   // rows show Edit/Del again instead of View-only. Save Ticket then hits
   // tickets/<id>/update/ instead of tickets/create/ since editId is set.
-  document.getElementById("edit-ticket-btn").addEventListener("click", () => {
+  document.getElementById("edit-ticket-btn").addEventListener("click", async () => {
+    if (editLockMessage && !cancellationMode) {
+      if (!editLockBypass) {
+        voyagerAlert(editLockMessage, { title: "Cannot Edit", icon: "warning" });
+        return;
+      }
+      // Super Admin: allowed, after a warning - the server carries the
+      // changed customer / references / passenger details down the chain.
+      const used = editLockMessage.replace(/^.*already used in /, "").replace(/\. A ticket that.*$/, "");
+      const ok = await voyagerConfirm(
+        `This ${/^This Reschedule/.test(editLockMessage) ? "Reschedule" : "Booking"} is already used in ${used}. As Super Admin you can still edit it - changes to the Customer, Booking Reference, PNRs, Ticket No., Pax Name and Pax Type are carried into those documents too (their own amounts are not changed). Continue editing?`,
+        { title: "Edit Chained Ticket", confirmLabel: "Edit", icon: "warning" });
+      if (!ok) return;
+    }
     viewMode = false;
     // Cancellation only unlocks the SAME fields that were editable at
     // creation time (Invoice Date/Type, User Name, Payment Mode/Gateway

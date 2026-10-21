@@ -354,7 +354,8 @@ def _fop_payment_lines(ticket, lines):
     result = [(g["ledger"].id, g["amount"], 0) for g in supplier_groups.values() if g["ledger"]]
     if fop == "Own Card":
         card_number = lines[0].card_number or ""
-        card = sp_client.fop_master_get_by_card_number(ticket.company_id, card_number)
+        # The card's ledger in force on the ticket's own date (FOP Master Effective From).
+        card = sp_client.fop_master_get_by_card_number(ticket.company_id, card_number, as_of=document_date(ticket))
         if card:
             result.append((card["card_master_ledger_id"], 0, total_amount))
     else:  # Client Card
@@ -561,6 +562,11 @@ def _ledger_balance_deltas(company_id, as_of_date=None, from_date=None):
 
     # SSR Updations - their own JV (ALS-n), same live-recompute convention.
     for entry in _ssr_report_entries(company_id, jv_mapping_cache, jv_company_state, from_date=from_date, to_date=as_of_date):
+        for a in entry["accounts"]:
+            add(a.get("ledger_id"), a.get("debit"), a.get("credit"))
+
+    # Miscellaneous transactions - their own JV (MSC-n), same convention.
+    for entry in _misc_report_entries(company_id, jv_mapping_cache, jv_company_state, from_date=from_date, to_date=as_of_date):
         for a in entry["accounts"]:
             add(a.get("ledger_id"), a.get("debit"), a.get("credit"))
 
@@ -882,6 +888,28 @@ def _ledger_transactions(company_id, ledger, from_date=None, to_date=None):
             "ticket_no": ", ".join(sorted({l["ticket_no"] for l in lines if l.get("ticket_no")})) or "-",
             "opposite": ", ".join(others) or "-", "debit": debit, "credit": credit,
             "ticket_id": None, "reschedule_ticket_id": None, "cancellation_ticket_id": None, "ssr_ticket_id": st.id,
+        })
+
+    # Miscellaneous transactions - their own JV (MSC-n). Rows carry
+    # misc_id so the frontend links to trans-misc.html?misc_saved_id=...
+    for entry in _misc_report_entries(company_id, jv_mapping_cache, jv_company_state, from_date=from_date, to_date=to_date):
+        v, m = entry["voucher"], entry["m"]
+        accounts = [{**a, "ledger_name": a.get("ledger_name") or ledger_names.get(a.get("ledger_id"), "-")} for a in entry["accounts"]]
+        mine = [a for a in accounts if a.get("ledger_id") == ledger_id]
+        if not mine:
+            continue
+        debit = round(sum(float(a.get("debit") or 0) for a in mine), 2)
+        credit = round(sum(float(a.get("credit") or 0) for a in mine), 2)
+        if debit == 0 and credit == 0:
+            continue
+        others = sorted({a.get("ledger_name") for a in accounts if a.get("ledger_id") != ledger_id and a.get("ledger_name")})
+        txns.append({
+            "date": v.voucher_date.isoformat() if v.voucher_date else None,
+            "voucher_type": m.invoice_type or "Miscellaneous", "voucher_no": m.invoice_number or v.voucher_no,
+            "particulars": opposite_ledger(accounts) or "Miscellaneous",
+            "s_pnr": m.reference or "-", "air_pnr": "-", "ticket_no": "-",
+            "opposite": ", ".join(others) or "-", "debit": debit, "credit": credit,
+            "ticket_id": None, "reschedule_ticket_id": None, "cancellation_ticket_id": None, "ssr_ticket_id": None, "misc_id": m.id,
         })
 
     txns.sort(key=lambda x: x["date"] or "")
@@ -1275,6 +1303,21 @@ def day_book_report(request):
             "invoice_number": st.invoice_number or "-",  # Day Book's Vch No column (the invoice number; a manual voucher's own number)
             "debit": (customer_row or {}).get("debit") or 0.0, "credit": 0.0,
             "ticket_id": None, "reschedule_ticket_id": None, "cancellation_ticket_id": None, "ssr_ticket_id": st.id,
+        })
+
+    # Miscellaneous transactions' own JV (MSC-n) - the customer is billed, so Debit only.
+    for entry in _misc_report_entries(company_id, mapping_cache, company_state, from_date=from_date, to_date=to_date):
+        v, m = entry["voucher"], entry["m"]
+        customer_row = next((a for a in entry["accounts"] if a.get("role") == "customer"), None)
+        txns.append({
+            "date": v.voucher_date.isoformat() if v.voucher_date else None,
+            "particulars": m.customer.name if m.customer else "-",
+            "voucher_type": m.invoice_type or "Miscellaneous",
+            "s_pnr": m.reference or "-", "air_pnr": "-", "ticket_no": "-",
+            "voucher_no": v.voucher_no or "-",
+            "invoice_number": m.invoice_number or "-",
+            "debit": (customer_row or {}).get("debit") or 0.0, "credit": 0.0,
+            "ticket_id": None, "reschedule_ticket_id": None, "cancellation_ticket_id": None, "ssr_ticket_id": None, "misc_id": m.id,
         })
 
     txns.sort(key=lambda x: x["date"] or "")
@@ -2131,6 +2174,12 @@ def _build_ticket_lines(company_id, customer_row, lines_in):
         line_objs.append(line)
 
         line_json = dict(line_kwargs)
+        # A saved line's own id - dbo.sp_Ticket matches on it (a changed
+        # Ticket No. then updates the same line instead of replacing it).
+        try:
+            line_json["line_id"] = int(line_in.get("id")) if line_in.get("id") else None
+        except (TypeError, ValueError):
+            line_json["line_id"] = None
         line_json["total_billed"] = line.total_billed
         line_json["supplier_name"] = supplier_name
         lines_json.append(line_json)
@@ -2316,7 +2365,7 @@ def ticket_update(request, ticket_id):
     try:
         result = sp_client.ticket_save(
             company_id, body["customer_name"], header_kwargs, lines_json, narration, total_debit, total_credit,
-            ticket_id=ticket_id,
+            ticket_id=ticket_id, allow_chain_edit=_is_super_admin(request),
         )
     except sp_client.StoredProcedureError as err:
         msg = str(err)
@@ -2631,7 +2680,7 @@ def reschedule_ticket_update(request, reschedule_ticket_id):
     try:
         result = sp_client.reschedule_ticket_save(
             company_id, body["customer_name"], header_kwargs, lines_json, narration, total_debit, total_credit,
-            reschedule_ticket_id=reschedule_ticket_id,
+            reschedule_ticket_id=reschedule_ticket_id, allow_chain_edit=_is_super_admin(request),
         )
     except sp_client.StoredProcedureError as err:
         msg = str(err)
@@ -2951,6 +3000,9 @@ def reschedule_ticket_detail(request, reschedule_ticket_id):
     } for l in rt.lines.select_related("supplier").all()]
 
     return JsonResponse({
+        # Edit is refused up front when a later process is built on it.
+        "edit_lock_message": sp_client.ticket_chain_lock_message(company_id, reschedule_id=rt.id),
+        "edit_lock_bypass": _is_super_admin(request),  # Super Admin may still edit (changes follow the chain)
         "id": rt.id, "original_ticket_id": rt.original_ticket_id,
         "invoice_number": rt.invoice_number, "invoice_date": rt.invoice_date.isoformat() if rt.invoice_date else None,
         "invoice_type": rt.invoice_type, "booking_mode": rt.booking_mode, "booking_type": rt.booking_type,
@@ -3184,7 +3236,7 @@ def _reschedule_fop_payment_lines(resched_ticket, lines):
     result = [(g["ledger"].id, g["amount"], 0) for g in supplier_groups.values() if g["ledger"]]
     if fop == "Own Card":
         card_number = lines[0].card_number or ""
-        card = sp_client.fop_master_get_by_card_number(resched_ticket.company_id, card_number)
+        card = sp_client.fop_master_get_by_card_number(resched_ticket.company_id, card_number, as_of=document_date(resched_ticket))
         if card:
             result.append((card["card_master_ledger_id"], 0, total_amount))
     else:  # Client Card
@@ -3342,6 +3394,12 @@ def reschedule_jv_preview_draft(request):
     })
 
 
+def _is_super_admin(request):
+    """True when the signed-in user (set by permissions.MenuPermissionMiddleware) is a Super Admin."""
+    u = getattr(request, "app_user", None)
+    return bool(u and u.get("is_super_admin"))
+
+
 def ticket_detail(request, ticket_id):
     """
     GET /api/tickets/<id>/?company_id=1
@@ -3393,6 +3451,9 @@ def ticket_detail(request, ticket_id):
     } for l in sp_lines]
 
     return JsonResponse({
+        # Edit is refused up front when a later process is built on it.
+        "edit_lock_message": sp_client.ticket_chain_lock_message(company_id, ticket_id=header["id"]),
+        "edit_lock_bypass": _is_super_admin(request),  # Super Admin may still edit (changes follow the chain)
         "id": header["id"], "invoice_number": header["invoice_number"],
         "invoice_date": header["invoice_date"].isoformat() if header["invoice_date"] else None,
         "invoice_type": header["invoice_type"], "booking_mode": header["booking_mode"], "booking_type": header["booking_type"],
@@ -3514,6 +3575,40 @@ def tickets_list(request):
     return JsonResponse(rows, safe=False)
 
 
+def _live_pnr_lines(lines):
+    """
+    Where each of these passenger lines (TicketLine or RescheduleAirlineTicketLine
+    - the ones the user searched by an OLD PNR / Ticket No) lives NOW: follows
+    each passenger's reschedule chain to its newest line, then reports
+      - still live -> its current S PNR, Airline PNR and Ticket No, or
+      - cancelled  -> the Credit Note that cancelled it.
+    One text line per passenger, for the lookup error popups (Reschedule /
+    Cancellation / SSR Updation New) so the user can search the right ticket.
+    """
+    out = []
+    for l in lines:
+        node, hops = l, 0
+        while getattr(node, "rescheduled", False) and hops < 50:
+            if isinstance(node, TicketLine):
+                nxt = RescheduleAirlineTicketLine.objects.filter(original_ticket_line_id=node.id, based_on_reschedule_line__isnull=True)                     .select_related("reschedule_ticket").order_by("-id").first()
+            else:
+                nxt = RescheduleAirlineTicketLine.objects.filter(based_on_reschedule_line_id=node.id)                     .select_related("reschedule_ticket").order_by("-id").first()
+            if nxt is None:
+                break
+            node, hops = nxt, hops + 1
+        name = node.passenger_name or l.passenger_name or "Passenger"
+        if getattr(node, "canceled", False):
+            original_id = node.id if isinstance(node, TicketLine) else node.original_ticket_line_id
+            cx = CancellationAirlineTicketLine.objects.filter(original_ticket_line_id=original_id)                 .select_related("cancellation_ticket").order_by("-id").first()
+            where = f"Credit Note {cx.cancellation_ticket.invoice_number}" if cx else "a Cancellation"
+            out.append(f"• {name} - cancelled ({where}), Ticket No. {node.ticket_no or '-'}")
+        else:
+            head = node.reschedule_ticket if isinstance(node, RescheduleAirlineTicketLine) else node.ticket
+            out.append(f"• {name} - live PNR: S PNR {head.booking_reference or '-'}, Airline PNR {head.airline_pnr or '-'}, "
+                       f"Ticket No. {node.ticket_no or '-'} (Invoice {head.invoice_number})")
+    return "\n".join(out)
+
+
 def ticket_lookup_for_reschedule(request):
     """
     GET /api/tickets/lookup-for-reschedule/?company_id=1&s_pnr=..&airline_pnr=..&ticket_no=..
@@ -3609,8 +3704,9 @@ def ticket_lookup_for_reschedule(request):
         else (matched_line is not None and matched_line.rescheduled)
     )
     if already_rescheduled:
+        live = _live_pnr_lines([resched_source_line if resched_source_line is not None else matched_line])
         return JsonResponse({
-            "error": "This ticket has already been rescheduled and cannot be rescheduled again."
+            "error": "This ticket has already been rescheduled and cannot be rescheduled again. Its current ticket:\n" + live
         }, status=409)
 
     def split_sectors(l):
@@ -3635,8 +3731,10 @@ def ticket_lookup_for_reschedule(request):
     else:
         eligible_lines = [l for l in ticket.lines.all() if not l.rescheduled and not l.canceled]
     if not eligible_lines:
+        searched = list(resched_source.lines.all()) if resched_source is not None else list(ticket.lines.all())
         return JsonResponse({
-            "error": "No passenger on this booking is left to reschedule - each one has already been rescheduled or cancelled."
+            "error": "No passenger on this booking is left to reschedule - each one has already been rescheduled or cancelled. "
+                     "Where each passenger is now:\n" + _live_pnr_lines(searched)
         }, status=409)
 
     passengers = [{
@@ -3758,8 +3856,9 @@ def ticket_lookup_for_cancellation(request):
         else (matched_line is not None and matched_line.rescheduled)
     )
     if already_rescheduled:
+        live = _live_pnr_lines([resched_source_line if resched_source_line is not None else matched_line])
         return JsonResponse({
-            "error": "This ticket has already been rescheduled - search using its new PNR/Ticket No instead."
+            "error": "This ticket has already been rescheduled - search using its current PNR / Ticket No:\n" + live
         }, status=409)
 
     def split_sectors(l):
@@ -3785,8 +3884,10 @@ def ticket_lookup_for_cancellation(request):
     else:
         current_lines = [l for l in ticket.lines.all() if not l.rescheduled and not l.canceled]
     if not current_lines:
+        searched = list(resched_source.lines.all()) if resched_source is not None else list(ticket.lines.all())
         return JsonResponse({
-            "error": "No passenger on this booking is left to cancel - each one has already been cancelled or rescheduled (search a rescheduled passenger by their new PNR/Ticket No)."
+            "error": "No passenger on this booking is left to cancel - each one has already been cancelled or rescheduled. "
+                     "Where each passenger is now:\n" + _live_pnr_lines(searched)
         }, status=409)
 
     passengers = [{
@@ -4087,7 +4188,8 @@ def _cancellation_fop_payment_lines(cancel_ticket, lines):
         if l.fop == "Own Card":
             card_number = l.card_number or ""
             if card_number not in card_cache:
-                card_cache[card_number] = sp_client.fop_master_get_by_card_number(cancel_ticket.company_id, card_number)
+                card_cache[card_number] = sp_client.fop_master_get_by_card_number(cancel_ticket.company_id, card_number,
+                                                                                  as_of=document_date(cancel_ticket))
             card = card_cache[card_number]
             if not card or not card.get("card_master_ledger_id"):
                 raise ValueError(
@@ -5042,11 +5144,18 @@ def _cash_bank_voucher_error(body):
     message, or None if it's fine / another voucher type.
     """
     vtype = body.get("voucher_type") or ""
+    company_id = body.get("company_id")
+    target_keys = {_normalize_group_name(n) for n in CASH_BANK_BOOK_GROUP_NAMES}
+    if vtype == "Contra":
+        # Contra moves money between Cash / Bank only - EVERY line (By and
+        # To) must be a ledger under Bank Accounts or Cash-in-Hand.
+        group_ids = [g.id for g in LedgerGroup.objects.filter(company_id=company_id) if _normalize_group_name(g.name) in target_keys]
+        line_ids = {l.get("ledger_id") for l in (body.get("lines") or []) if l.get("ledger_id")}
+        ok = set(Ledger.objects.filter(company_id=company_id, id__in=line_ids, group_id__in=group_ids).values_list("id", flat=True))
+        return None if line_ids <= ok else "A Contra voucher can only use ledgers under Bank Accounts or Cash-in-Hand."
     side = {"Receipt": "debit", "Payment": "credit"}.get(vtype)
     if not side:
         return None
-    company_id = body.get("company_id")
-    target_keys = {_normalize_group_name(n) for n in CASH_BANK_BOOK_GROUP_NAMES}
     group_ids = [g.id for g in LedgerGroup.objects.filter(company_id=company_id) if _normalize_group_name(g.name) in target_keys]
     side_ledger_ids = [l.get("ledger_id") for l in (body.get("lines") or []) if float(l.get(side) or 0) > 0]
     if group_ids and Ledger.objects.filter(company_id=company_id, id__in=side_ledger_ids, group_id__in=group_ids).exists():
@@ -5212,7 +5321,7 @@ def voucher_type_save(request):
     """
     POST /api/voucher-type/save/
     Body: { "id": 1 (optional - update if present), "company_id": 1,
-            "name": "...", "alias_name": "...", "voucher_category": "General",
+            "name": "...", "alias_name": "...", "voucher_category": "Airline",
             "is_active": true, "number_method": "Automatic", "numbering_behaviour": "Keep Original Numbers",
             "allow_additional_numbering": false, "allow_effective_dates": false,
             "allow_narration": true,
@@ -5240,7 +5349,7 @@ def voucher_type_save(request):
     fields = {
         "name": name,
         "alias_name": (body.get("alias_name") or "").strip() or None,
-        "voucher_category": body.get("voucher_category") or "General",
+        "voucher_category": body.get("voucher_category") or "Airline",
         "is_active": bool(body.get("is_active", True)),
         "number_method": body.get("number_method") or "Automatic",
         "numbering_behaviour": body.get("numbering_behaviour") or None,  # Automatic only - see sp_VoucherType
@@ -5604,6 +5713,7 @@ def _fop_master_dict(f):
     return {
         "id": f["id"], "card_type": f["card_type"], "card_number": f["card_number"], "bank_name": f["bank_name"],
         "card_master_ledger_id": f["card_master_ledger_id"], "card_master_ledger_name": f["card_master_ledger_name"],
+        "effective_from": f["effective_from"].isoformat() if f.get("effective_from") else None,
         "is_active": f["is_active"],
     }
 
@@ -5617,7 +5727,8 @@ def fop_master_list(request):
     if not company_id:
         return JsonResponse({"error": "company_id is required"}, status=400)
 
-    rows = sp_client.fop_master_list(company_id, card_type=request.GET.get("card_type"))
+    # ?as_of=YYYY-MM-DD -> each card's Card Master ledger in force on that date.
+    rows = sp_client.fop_master_list(company_id, card_type=request.GET.get("card_type"), as_of=_parse_date(request.GET.get("as_of")))
     return JsonResponse([_fop_master_dict(f) for f in rows], safe=False)
 
 
@@ -5645,6 +5756,12 @@ def fop_master_save(request):
     if not company_id or not card_type or not card_number:
         return JsonResponse({"error": "company_id, card_type and card_number are required"}, status=400)
 
+    # Own Card: the Card Master ledger's Effective From date is required
+    # (same rule as Ledger Mapping).
+    effective_from = _parse_date(body.get("effective_from"))
+    if card_type == "Own Card" and not effective_from:
+        return JsonResponse({"error": "Pick the Effective From date for the Card Master ledger."}, status=400)
+
     card_id = body.get("id")
     try:
         card = sp_client.fop_master_save(
@@ -5652,7 +5769,7 @@ def fop_master_save(request):
             bank_name=(body.get("bank_name") or "").strip() or None,
             card_master_ledger_id=ledger_id,
             is_active=bool(body.get("is_active", True)),
-            card_id=card_id,
+            card_id=card_id, effective_from=effective_from,
         )
     except sp_client.StoredProcedureError as err:
         msg = str(err)
@@ -5827,6 +5944,9 @@ def _company_master_dict(c):
         "bank_swift": c.get("bank_swift") or "",
         "bank_name": c.get("bank_name") or "",
         "bank_branch": c.get("bank_branch") or "",
+        "last_entry_date": c["last_entry_date"].isoformat() if c.get("last_entry_date") else None,
+        "fy_start": c["fy_start"].isoformat() if c.get("fy_start") else None,
+        "fy_end": c["fy_end"].isoformat() if c.get("fy_end") else None,
     }
 
 
@@ -6508,6 +6628,179 @@ def ssr_dsr_rows(request):
     return JsonResponse(rows, safe=False)
 
 
+# ============================================================================
+# DSR (report-dsr.html) - one row per passenger line, every column of the
+# agreed "DSR format" sheet: Booking, Reschedule, Cancellation and SSR
+# Updation lines, each computed with the SAME formulas as its own screen /
+# J.V (TicketLine.compute_total, computed_* properties,
+# _cancellation_line_amounts, _ssr_line_amounts).
+#   Gross Amount = Purchase Cost total (what the supplier is owed)
+#   Net Amount   = Sales Cost total (what the customer pays)
+# Reschedule rows carry their markups in the "(While Reschedule)" columns,
+# Cancellation rows in the "(While Cancellation)" columns; a Cancellation
+# (Credit Note) shows its fare amounts and Gross / Net as negatives.
+# ============================================================================
+DSR_AMOUNT_KEYS = (
+    "basic_fare", "yq", "yr", "k3", "other_taxes", "ssr_amount", "other_ssr", "supplier_penalty", "commission", "tds_com",
+    "sup_markup", "sup_addl_markup", "sup_ssr_markup", "sup_service_fee", "sup_addl_service_fee", "sup_ssr_service_fee", "sup_gst",
+    "sup_resc_markup", "sup_addl_resc_markup", "sup_resc_ssr_markup", "sup_can_markup", "sup_addl_can_markup", "sup_can_ssr_markup",
+    "penalty_amount", "gross_amount", "discount", "tds_disc",
+    "cust_markup", "cust_addl_markup", "cust_ssr_markup", "cust_service_fee", "cust_addl_service_fee", "cust_ssr_service_fee", "cust_gst",
+    "cust_resc_markup", "cust_addl_resc_markup", "cust_ssr_resc_markup", "cust_can_markup", "cust_addl_can_markup", "cust_ssr_can_markup",
+    "agent_penalty", "net_amount", "seat", "meal", "baggage", "oktbd", "fastforward", "wchr",
+)
+
+
+def _dsr_trip_type(sector):
+    """One Way / Round Trip / Multi City from the sector list (not stored anywhere):
+    one leg = One Way; two legs back to the first origin = Round Trip; else Multi City."""
+    legs = [s.strip() for s in str(sector or "").split(",") if s.strip()]
+    if len(legs) <= 1:
+        return "One Way" if legs else ""
+    first, last = legs[0].split("-"), legs[-1].split("-")
+    if len(legs) == 2 and first[0] and last[-1] and first[0].strip() == last[-1].strip():
+        return "Round Trip"
+    return "Multi City"
+
+
+def _dsr_fare_line_amounts(l, kind):
+    """Booking ("booking") / Reschedule ("reschedule") line -> DSR amount columns."""
+    f = lambda k: float(getattr(l, k, 0) or 0)
+    supp_markups = f("supp_markup") + f("supp_addl_markup") + f("supp_ssr_markup")
+    supp_fees = f("supp_service_fee") + f("supp_addl_service_fee") + f("supp_ssr_service_fee")
+    commission, comm_tds, supp_gst = float(l.computed_supp_commission), float(l.computed_supp_tds), float(l.computed_supp_gst)
+    penalty = f("reschedule_penalty")
+    # Same totals as the ticket screen's summary (recalcSummary):
+    #   Purchase = fares - commission + TDS + supplier markups / fees / GST + penalties
+    #   Sales    = line total + Agent Penalty + Penalty Amount + Supplier Penalty
+    purchase = float(l.supplier_cost) - commission + comm_tds + supp_markups + supp_fees + supp_gst + penalty + f("supplier_penalty")
+    sales = float(l.compute_total()) + f("agent_penalty") + penalty + f("supplier_penalty")
+    resc = kind == "reschedule"
+    return {
+        "basic_fare": f("basic_fare"), "yq": f("yq"), "yr": f("yr"), "k3": f("k3_tax"), "other_taxes": f("tax_others"),
+        "ssr_amount": f("seat") + f("meal") + f("baggage"), "other_ssr": f("other_ssr"),
+        "supplier_penalty": f("supplier_penalty"), "commission": commission, "tds_com": comm_tds,
+        "sup_markup": 0 if resc else f("supp_markup"), "sup_addl_markup": 0 if resc else f("supp_addl_markup"),
+        "sup_ssr_markup": 0 if resc else f("supp_ssr_markup"),
+        "sup_service_fee": f("supp_service_fee"), "sup_addl_service_fee": f("supp_addl_service_fee"),
+        "sup_ssr_service_fee": f("supp_ssr_service_fee"), "sup_gst": supp_gst,
+        "sup_resc_markup": f("supp_markup") if resc else 0, "sup_addl_resc_markup": f("supp_addl_markup") if resc else 0,
+        "sup_resc_ssr_markup": f("supp_ssr_markup") if resc else 0,
+        "penalty_amount": penalty, "gross_amount": purchase,
+        "discount": float(l.computed_discount), "tds_disc": float(l.computed_tds),
+        "cust_markup": 0 if resc else f("markup"), "cust_addl_markup": 0 if resc else f("addl_markup"),
+        "cust_ssr_markup": 0 if resc else f("ssr_markup"),
+        "cust_service_fee": f("service_fee"), "cust_addl_service_fee": f("addl_service_fee"),
+        "cust_ssr_service_fee": f("ssr_service_fee"), "cust_gst": float(l.computed_gst),
+        "cust_resc_markup": f("markup") if resc else 0, "cust_addl_resc_markup": f("addl_markup") if resc else 0,
+        "cust_ssr_resc_markup": f("ssr_markup") if resc else 0,
+        "agent_penalty": f("agent_penalty"), "net_amount": sales,
+        "seat": f("seat"), "meal": f("meal"), "baggage": f("baggage"),
+    }
+
+
+def _dsr_row(header, l, kind, amounts, doc_ids, **extra):
+    """One DSR row - the text columns from the document / line, the amount columns from `amounts`."""
+    g = lambda o, k: getattr(o, k, None) if o is not None else None
+    supplier = g(l, "supplier") or g(header, "supplier")
+    row = {
+        "invoice_date": header.invoice_date.isoformat() if header.invoice_date else None,
+        "invoice_number": header.invoice_number, "invoice_type": header.invoice_type,
+        "customer_name": header.customer.name if header.customer_id else None,
+        "airline_name": g(l, "airline_name"), "airline_code": g(l, "airline_code"),
+        "airline_category": g(l, "airline_category") or g(header, "airline_category"),
+        "spnr": g(header, "booking_reference") or g(header, "cancellation_reference") or g(header, "ssr_reference"),
+        "airline_pnr": g(header, "airline_pnr"), "gds_pnr": g(header, "gds_pnr"),
+        "ticket_no": g(l, "ticket_no"), "status": g(header, "booking_status"),
+        "booking_type": g(header, "booking_type") or kind, "user_name": g(header, "user_name"),
+        "pax_type": g(l, "pax_type"), "passenger_name": g(l, "passenger_name"), "sector": g(l, "sector"),
+        "travel_date": g(l, "travel_date"), "flight_no": g(l, "flight_no"), "trip_type": _dsr_trip_type(g(l, "sector")),
+        "travel_type": g(header, "travel_type"), "payment_mode": g(header, "payment_mode"),
+        "travel_class": g(l, "travel_class"), "supplier_name": supplier.name if supplier else None,
+        "office_id": g(l, "office_id") or g(header, "office_id"), "document": kind,
+        **doc_ids, **extra,
+    }
+    # (+ 0.0 turns a negated zero, -0.0, into 0.0 - never shown as "-0.00".)
+    row.update({k: round(float(amounts.get(k, 0) or 0), 2) + 0.0 for k in DSR_AMOUNT_KEYS})
+    return row
+
+
+def dsr_detailed_rows(request):
+    """GET /api/dsr/detailed/?company_id=1 - every DSR column, one row per passenger line (see above)."""
+    if request.method != "GET":
+        return HttpResponseNotAllowed(["GET"])
+    company_id = request.GET.get("company_id")
+    if not company_id:
+        return JsonResponse({"error": "company_id is required"}, status=400)
+    from .models import SSRAirlineTicket, SSRAirlineTicketLine
+    _jv_prep(company_id)  # seeds the per-field GST % caches the computed_* properties read
+    no_ids = {"ticket_id": None, "reschedule_ticket_id": None, "cancellation_ticket_id": None, "ssr_ticket_id": None}
+    rows = []
+
+    for t in Ticket.objects.filter(company_id=company_id).select_related("customer", "supplier").prefetch_related(
+            Prefetch("lines", queryset=TicketLine.objects.select_related("supplier"))):
+        for l in t.lines.all():
+            rows.append(_dsr_row(t, l, "Booking", _dsr_fare_line_amounts(l, "booking"), {**no_ids, "ticket_id": t.id}))
+
+    for rt in RescheduleAirlineTicket.objects.filter(company_id=company_id).select_related("customer", "supplier").prefetch_related(
+            Prefetch("lines", queryset=RescheduleAirlineTicketLine.objects.select_related("supplier"))):
+        for l in rt.lines.all():
+            rows.append(_dsr_row(rt, l, "Reschedule", _dsr_fare_line_amounts(l, "reschedule"), {**no_ids, "reschedule_ticket_id": rt.id}))
+
+    for ct in CancellationAirlineTicket.objects.filter(company_id=company_id).select_related("customer", "supplier").prefetch_related(
+            Prefetch("lines", queryset=CancellationAirlineTicketLine.objects.select_related("supplier"))):
+        for l in ct.lines.all():
+            a = _cancellation_line_amounts(l)
+            f = lambda k: float(getattr(l, k, 0) or 0)
+            neg = lambda v: -round(float(v or 0), 2)
+            amounts = {
+                # Credit Note - the fare refunded is a negative sale.
+                "basic_fare": neg(l.basic_fare), "yq": neg(l.yq), "yr": neg(l.yr), "k3": neg(l.k3_tax), "other_taxes": neg(l.tax_others),
+                "ssr_amount": neg(f("seat") + f("meal") + f("baggage")), "other_ssr": neg(l.other_ssr),
+                "seat": neg(l.seat), "meal": neg(l.meal), "baggage": neg(l.baggage),
+                # Commission / Discount and their TDS are given back on a
+                # Credit Note - shown negative.
+                "supplier_penalty": a["supplier_penalty"], "commission": -a["commission"], "tds_com": -a["commission_tds"],
+                # Markup reversals - in the normal markup columns, negative
+                # (supplier reversals under Sup Markup..., customer under Cust Markup...).
+                "sup_markup": -a["supp_markup_reversal"], "sup_addl_markup": -a["supp_addl_markup_reversal"],
+                "sup_ssr_markup": -a["supp_ssr_markup_reversal"],
+                "cust_markup": -a["cust_markup_reversal"], "cust_addl_markup": -a["cust_addl_markup_reversal"],
+                "cust_ssr_markup": -a["cust_ssr_markup_reversal"],
+                "sup_service_fee": a["supp_service_fee"], "sup_addl_service_fee": a["supp_addl_service_fee"], "sup_gst": a["supp_gst"],
+                "sup_can_markup": a["supp_markup"], "sup_addl_can_markup": a["supp_addl_markup"], "sup_can_ssr_markup": f("supp_ssr_markup"),
+                "penalty_amount": a["cancellation_penalty"], "gross_amount": -a["supplier_amount"],
+                "discount": -a["discount"], "tds_disc": -a["discount_tds"],
+                "cust_service_fee": a["service_fee"], "cust_addl_service_fee": a["addl_service_fee"], "cust_gst": a["gst"],
+                "cust_can_markup": a["markup"], "cust_addl_can_markup": a["addl_markup"], "cust_ssr_can_markup": f("ssr_markup"),
+                "agent_penalty": a["agent_penalty"], "net_amount": -a["customer_amount"],
+            }
+            rows.append(_dsr_row(ct, l, "Cancellation", amounts, {**no_ids, "cancellation_ticket_id": ct.id}))
+
+    for st in SSRAirlineTicket.objects.filter(company_id=company_id).select_related("customer").prefetch_related(
+            Prefetch("lines", queryset=SSRAirlineTicketLine.objects.select_related("supplier", "original_ticket_line", "reschedule_line"))):
+        for l in st.lines.all():
+            a = _ssr_line_amounts(company_id, {k: getattr(l, k) for k in SSR_AMOUNT_FIELDS}, st.invoice_date)
+            src = l.reschedule_line or l.original_ticket_line  # airline / flight details come from the ticket it was sold on
+            amounts = {
+                "ssr_amount": a["seat"] + a["meal"] + a["baggage"], "other_ssr": a["other_ssr"],
+                "seat": a["seat"], "meal": a["meal"], "baggage": a["baggage"],
+                "sup_ssr_markup": a["supp_markup"], "sup_ssr_service_fee": a["supp_service_fee"], "sup_gst": a["supp_gst"],
+                "gross_amount": a["purchase"],
+                "cust_ssr_markup": a["markup"], "cust_ssr_service_fee": a["service_fee"], "cust_gst": a["gst"],
+                "net_amount": a["sales"],
+            }
+            row = _dsr_row(st, l, "SSR Updation", amounts, {**no_ids, "ssr_ticket_id": st.id})
+            row.update({"airline_name": getattr(src, "airline_name", None), "airline_code": getattr(src, "airline_code", None),
+                        "flight_no": getattr(src, "flight_no", None), "travel_date": getattr(src, "travel_date", None),
+                        "travel_class": getattr(src, "travel_class", None), "booking_type": "SSR Updation",
+                        "status": st.booking_status or "SSR Updated"})
+            rows.append(row)
+
+    rows.sort(key=lambda r: (r["invoice_date"] or "", r["invoice_number"] or ""))
+    return JsonResponse(rows, safe=False)
+
+
 def _ssr_report_entries(company_id, mapping_cache, company_state, from_date=None, to_date=None):
     """
     Every posted SSR Updation JV (ALS-n) for the reports (Ledger balances /
@@ -6536,6 +6829,264 @@ def _ssr_report_entries(company_id, mapping_cache, company_state, from_date=None
         customer = {"id": st.customer_id, "name": st.customer.name, "state_name": st.customer.state_name}
         accounts, _td, _tc = _compute_ssr_jv_lines(company_id, customer, lines, mapping_cache, company_state, as_of=st.invoice_date)
         yield {"voucher": v, "st": st, "lines": lines, "accounts": accounts}
+
+
+# ============================================================================
+# Miscellaneous transactions (trans-misc.html) - dbo.sp_MiscTransaction.
+# One Description + Base Amount billed to a customer and bought from a
+# supplier; customer / supplier Markup + Service Fee, GST on each Service Fee
+# from Ledger Mapping. A Confirmed one posts its own JV (MSC-n).
+# ============================================================================
+MISC_PRODUCT = "Miscellaneous"  # Ledger Mapping product the Misc ledgers are mapped under
+MISC_AMOUNT_FIELDS = ("base_amount", "other_taxes", "markup", "service_fee", "supp_markup", "supp_service_fee")
+MISC_FIELD = {
+    "markup": "Misc Markup A/c", "service_fee": "Misc Service Fee A/c",
+    "consolidator_markup": "Consolidator Misc Markup A/c", "consolidator_service_fee": "Consolidator Misc Service Fee A/c",
+    "supp_markup": "Supplier Misc Markup A/c", "supp_service_fee": "Supplier Misc Service Fee A/c",
+}
+
+
+def _misc_amounts(company_id, m, as_of=None):
+    """
+    One transaction's figures - same convention as an SSR line:
+      purchase (Purchase Cost, what the supplier is owed)
+        = Base Amount + Other Taxes + Supplier Markup + Supplier Service Fee + its GST
+      sales (Sales Cost, what the customer pays)
+        = purchase + Customer Markup + Customer Service Fee + its GST
+    GST % = the ledger mapped (on as_of, Ledger Mapping product
+    Miscellaneous) to "Misc Service Fee A/c" (customer) / "Supplier Misc
+    Service Fee A/c" (supplier).
+    """
+    v = {k: float(m.get(k) or 0) for k in MISC_AMOUNT_FIELDS}
+    gst = v["service_fee"] * mapped_gst_pct(company_id, MISC_FIELD["service_fee"], as_of, MISC_PRODUCT) / 100
+    supp_gst = v["supp_service_fee"] * mapped_gst_pct(company_id, MISC_FIELD["supp_service_fee"], as_of, MISC_PRODUCT) / 100
+    purchase = v["base_amount"] + v["other_taxes"] + v["supp_markup"] + v["supp_service_fee"] + supp_gst
+    return {**v, "gst": gst, "supp_gst": supp_gst, "purchase": purchase,
+            "sales": purchase + v["markup"] + v["service_fee"] + gst}
+
+
+def _compute_misc_jv_lines(company_id, customer, supplier, m, mapping_cache, company_state, as_of=None):
+    """
+    Miscellaneous JV (MSC-n), ledgers from Ledger Mapping:
+      Dr Customer                            Sales Cost
+      Cr Supplier                            Purchase Cost
+      Cr Misc Markup A/c                     customer Markup
+      Cr Misc Service Fee A/c                customer Service Fee
+      Cr Consolidator Misc Markup A/c        supplier Markup (billed on to the customer)
+      Cr Consolidator Misc Service Fee A/c   supplier Service Fee (billed on to the customer)
+      Cr Output CGST+SGST / Output IGST      customer GST + supplier GST (customer State vs Company State)
+      Dr Supplier Misc Markup A/c            supplier Markup
+      Dr Supplier Misc Service Fee A/c       supplier Service Fee
+      Dr Input CGST+SGST / Input IGST        supplier GST (supplier State vs Company State)
+    Same structure as the SSR Updation JV - Base Amount + Other Taxes pass straight
+    from customer to supplier, so Debit always equals Credit. Zero rows are
+    left out. customer / supplier: {"id", "name", "state_name"}.
+    """
+    def mapped_row(dr_cr, field_name, amount):
+        amount = round(amount, 2)
+        # Ledger Mapping product Miscellaneous; the Output / Input GST
+        # ledgers fall back to the Airline ones when not mapped there.
+        r = resolve_mapping(company_id, field_name, as_of, MISC_PRODUCT) or (
+            resolve_mapping(company_id, field_name, as_of) if field_name.startswith(("Output ", "Input ")) else None)
+        ledger_id, ledger_name = (r["ledger_id"], r["ledger_name"]) if r else (None, f"{field_name} (not mapped in Ledger Mapping - Miscellaneous)")
+        return {"role": field_name, "ledger_id": ledger_id, "ledger_name": ledger_name,
+                "debit": amount if dr_cr == "Debit" else 0, "credit": amount if dr_cr == "Credit" else 0}
+
+    a = _misc_amounts(company_id, m, as_of)
+    accounts = [
+        {"role": "customer", "ledger_id": customer["id"], "ledger_name": customer["name"], "debit": round(a["sales"], 2), "credit": 0},
+        {"role": "supplier", "ledger_id": supplier["id"], "ledger_name": supplier["name"], "debit": 0, "credit": round(a["purchase"], 2)},
+        mapped_row("Credit", MISC_FIELD["markup"], a["markup"]),
+        mapped_row("Credit", MISC_FIELD["service_fee"], a["service_fee"]),
+        mapped_row("Credit", MISC_FIELD["consolidator_markup"], a["supp_markup"]),
+        mapped_row("Credit", MISC_FIELD["consolidator_service_fee"], a["supp_service_fee"]),
+    ]
+    # One combined Output GST (customer + supplier), same as the SSR / Booking JV.
+    customer_state = (customer.get("state_name") or "").strip().lower()
+    gst = round(a["gst"] + a["supp_gst"], 2)
+    if company_state and customer_state and company_state == customer_state:
+        half = round(gst / 2, 2)
+        accounts.append(mapped_row("Credit", "Output CGST A/c", half))
+        accounts.append(mapped_row("Credit", "Output SGST A/c", round(gst - half, 2)))
+    else:
+        accounts.append(mapped_row("Credit", "Output IGST A/c", gst))
+    accounts.append(mapped_row("Debit", MISC_FIELD["supp_markup"], a["supp_markup"]))
+    accounts.append(mapped_row("Debit", MISC_FIELD["supp_service_fee"], a["supp_service_fee"]))
+    mapping_cache.setdefault(("__supplier_state__", supplier["id"]), (supplier.get("state_name") or "").strip().lower())
+    accounts.extend(_input_gst_rows(lambda dr_cr, _cat, field, amt: mapped_row(dr_cr, field, amt),
+                                    {supplier["id"]: a["supp_gst"]}, company_state, mapping_cache))
+
+    accounts = [r for r in accounts if r["role"] in ("customer", "supplier") or r["debit"] or r["credit"]]
+    total_debit = round(sum(r["debit"] for r in accounts), 2)
+    total_credit = round(sum(r["credit"] for r in accounts), 2)
+    return accounts, total_debit, total_credit
+
+
+def _misc_build(company_id, body):
+    """Validates a Miscellaneous create / update / preview body -> (fields, customer, supplier, error)."""
+    customer_row = sp_client.ledger_get_by_name(company_id, (body.get("customer_name") or "").strip(), "DEBTOR")
+    if not customer_row:
+        return None, None, None, f"\"{body.get('customer_name') or ''}\" is not a real customer ledger (Sundry Debtors)."
+    supplier_row = sp_client.ledger_get_by_name(company_id, (body.get("supplier_name") or "").strip(), "CREDITOR")
+    if not supplier_row:
+        return None, None, None, f"\"{body.get('supplier_name') or ''}\" is not a real supplier ledger (Sundry Creditors)."
+    customer = {"id": customer_row["id"], "name": customer_row["name"], "state_name": customer_row.get("state_name")}
+    supplier = {"id": supplier_row["id"], "name": supplier_row["name"], "state_name": supplier_row.get("state_name")}
+    status = body.get("status") or "Confirmed"
+    if status not in ("Confirmed", "Cancelled"):
+        return None, None, None, "Status must be Confirmed or Cancelled."
+    fields = {
+        "branch_name": body.get("branch_name"),
+        "invoice_number": (body.get("invoice_number") or "").strip(), "invoice_date": _parse_date(body.get("invoice_date")),
+        "invoice_type": body.get("invoice_type"), "status": status, "user_name": body.get("user_name"),
+        "reference": (body.get("reference") or "").strip(), "ref_date": _parse_date(body.get("ref_date")),
+        "payment_mode": body.get("payment_mode"),
+        # Gateway Ref only applies to Payment Gateway - never stored otherwise.
+        "payment_gateway_ref": (body.get("payment_gateway_ref") or None) if body.get("payment_mode") == "Payment Gateway" else None,
+        "currency": body.get("currency") or "INR",
+        "customer_name": customer["name"], "supplier_name": supplier["name"],
+        "description": (body.get("description") or "").strip(),
+    }
+    fields.update({k: float(_safe_decimal(body.get(k))) for k in MISC_AMOUNT_FIELDS})
+    fields["total_billed"] = round(_misc_amounts(company_id, fields, fields["invoice_date"])["sales"], 2)
+    return fields, customer, supplier, None
+
+
+def _misc_narration(fields):
+    return " / ".join(p for p in ["Misc", fields.get("reference"), (fields.get("description") or "")[:80]] if p)
+
+
+def _misc_save(request, misc_id=None):
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    try:
+        body = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON body"}, status=400)
+    try:
+        company_id = int(body.get("company_id"))
+    except (TypeError, ValueError):
+        return JsonResponse({"error": "company_id is required."}, status=400)
+    missing = [label for key, label in [("invoice_number", "Invoice Number"), ("invoice_date", "Invoice Date"),
+                                        ("invoice_type", "Invoice Type"), ("reference", "Reference"),
+                                        ("customer_name", "Customer"), ("supplier_name", "Supplier"),
+                                        ("description", "Description")] if not str(body.get(key) or "").strip()]
+    if missing:
+        return JsonResponse({"error": f"{', '.join(missing)} {'is' if len(missing) == 1 else 'are'} required."}, status=400)
+
+    mapping_cache, company_state = _jv_prep(company_id)
+    fields, customer, supplier, error = _misc_build(company_id, body)
+    if error:
+        return JsonResponse({"error": error}, status=400)
+    accounts, total_debit, total_credit = _compute_misc_jv_lines(company_id, customer, supplier, fields, mapping_cache, company_state, as_of=fields["invoice_date"])
+    if fields["status"] == "Confirmed" and total_debit == 0 and total_credit == 0:
+        return JsonResponse({"error": "This transaction's GL entry total is zero - enter the Base Amount / Markup / Service Fee."}, status=400)
+    try:
+        result = sp_client.misc_save(company_id, fields, _misc_narration(fields), total_debit, total_credit, misc_id=misc_id)
+    except sp_client.StoredProcedureError as err:
+        msg = str(err)
+        return JsonResponse({"error": msg}, status=409 if "already exists" in msg else 400)
+    message = (f"Miscellaneous transaction saved and GL entry {result['voucher_no']} posted (Debit {total_debit:.2f} = Credit {total_credit:.2f})."
+               if result.get("voucher_no") else "Miscellaneous transaction saved as Cancelled - no GL entry posted.")
+    return JsonResponse({"id": result["id"], "voucher_id": result["voucher_id"], "voucher_no": result["voucher_no"], "message": message},
+                        status=201 if misc_id is None else 200)
+
+
+@csrf_exempt
+def misc_create(request):
+    """POST /api/misc/create/ - new Miscellaneous transaction + its MSC-n JV."""
+    return _misc_save(request)
+
+
+@csrf_exempt
+def misc_update(request, misc_id):
+    """POST /api/misc/<id>/update/ - edits a saved Miscellaneous transaction; its JV is recomputed in place."""
+    return _misc_save(request, misc_id=misc_id)
+
+
+@csrf_exempt
+def misc_jv_preview_draft(request):
+    """POST /api/misc/jv-preview-draft/ - the JV for the transaction currently on screen (nothing saved)."""
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    try:
+        body = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON body"}, status=400)
+    try:
+        company_id = int(body.get("company_id"))
+    except (TypeError, ValueError):
+        return JsonResponse({"error": "company_id is required."}, status=400)
+    mapping_cache, company_state = _jv_prep(company_id)
+    fields, customer, supplier, error = _misc_build(company_id, body)
+    if error:
+        return JsonResponse({"error": error}, status=400)
+    accounts, total_debit, total_credit = _compute_misc_jv_lines(company_id, customer, supplier, fields, mapping_cache, company_state, as_of=fields["invoice_date"])
+    return JsonResponse({"accounts": accounts, "total_debit": total_debit, "total_credit": total_credit,
+                         "narration": _misc_narration(fields), "voucher_date": body.get("invoice_date"),
+                         "cancelled": fields["status"] == "Cancelled"})
+
+
+def misc_detail(request, misc_id):
+    """GET /api/misc/<id>/?company_id=1 - one saved Miscellaneous transaction."""
+    if request.method != "GET":
+        return HttpResponseNotAllowed(["GET"])
+    try:
+        company_id = int(request.GET.get("company_id"))
+    except (TypeError, ValueError):
+        return JsonResponse({"error": "company_id is required"}, status=400)
+    m = sp_client.misc_get(misc_id, company_id)
+    if not m:
+        return JsonResponse({"error": "Miscellaneous transaction not found."}, status=404)
+    iso = lambda d: d.isoformat() if d else None
+    data = {k: m.get(k) for k in ("id", "invoice_number", "invoice_type", "user_name", "reference", "payment_mode",
+                                   "payment_gateway_ref", "currency", "customer_name", "supplier_name", "description",
+                                   "voucher_id", "voucher_no")}
+    data.update({"status": m.get("misc_status"), "invoice_date": iso(m.get("invoice_date")), "ref_date": iso(m.get("ref_date"))})
+    data.update({k: float(m.get(k) or 0) for k in MISC_AMOUNT_FIELDS + ("total_billed",)})
+    return JsonResponse(data)
+
+
+def misc_list(request):
+    """GET /api/misc/list/?company_id=1 - every saved Miscellaneous transaction, for the Find popup."""
+    if request.method != "GET":
+        return HttpResponseNotAllowed(["GET"])
+    company_id = request.GET.get("company_id")
+    if not company_id:
+        return JsonResponse({"error": "company_id is required"}, status=400)
+    iso = lambda d: d.isoformat() if d else None
+    return JsonResponse([{
+        "id": r["id"], "invoice_number": r["invoice_number"], "invoice_date": iso(r.get("invoice_date")),
+        "invoice_type": r.get("invoice_type"), "status": r.get("status"), "reference": r.get("reference"),
+        "ref_date": iso(r.get("ref_date")), "customer_name": r.get("customer_name"), "supplier_name": r.get("supplier_name"),
+        "description": r.get("description") or "", "total_billed": float(r.get("total_billed") or 0),
+    } for r in sp_client.misc_list(company_id)], safe=False)
+
+
+def _misc_report_entries(company_id, mapping_cache, company_state, from_date=None, to_date=None):
+    """
+    Every posted Miscellaneous JV (MSC-n) for the reports (Ledger balances /
+    Trial Balance / Ledger report / Day Book / Receivables-Payables),
+    recomputed live from the saved transaction - same convention as the SSR
+    JVs. Cancelled transactions have no JV, so they never appear.
+    Yields {"voucher", "m", "accounts"}.
+    """
+    vouchers = JournalVoucher.objects.filter(
+        company_id=company_id, source_misc_ticket__isnull=False
+    ).select_related("source_misc_ticket", "source_misc_ticket__customer", "source_misc_ticket__supplier").order_by("id")
+    if from_date:
+        vouchers = vouchers.filter(voucher_date__gte=from_date)
+    if to_date:
+        vouchers = vouchers.filter(voucher_date__lte=to_date)
+    for v in vouchers:
+        m = v.source_misc_ticket
+        if not m or m.status != "Confirmed":
+            continue
+        fields = {k: getattr(m, k) for k in MISC_AMOUNT_FIELDS}
+        customer = {"id": m.customer_id, "name": m.customer.name, "state_name": m.customer.state_name}
+        supplier = {"id": m.supplier_id, "name": m.supplier.name, "state_name": m.supplier.state_name}
+        accounts, _td, _tc = _compute_misc_jv_lines(company_id, customer, supplier, fields, mapping_cache, company_state, as_of=m.invoice_date)
+        yield {"voucher": v, "m": m, "accounts": accounts}
 
 
 # ============================================================================
@@ -6688,6 +7239,12 @@ def _party_bills(company_id, side, as_of_date=None, exclude_voucher_id=None, onl
         st = entry["st"]
         post(entry["accounts"], st.invoice_number, iso(st.invoice_date), "SSR Updation", st.ssr_reference or "",
              {"kind": "ssr", "id": st.id})
+
+    # Miscellaneous transactions
+    for entry in _misc_report_entries(company_id, mapping_cache, company_state, to_date=as_of_date):
+        m = entry["m"]
+        post(entry["accounts"], m.invoice_number, iso(m.invoice_date), "Miscellaneous", m.reference or "",
+             {"kind": "misc", "id": m.id})
 
     # Cancellations - adjusted against the original booking's invoice
     for entry in _cancellation_report_entries(company_id, mapping_cache, company_state, to_date=as_of_date):

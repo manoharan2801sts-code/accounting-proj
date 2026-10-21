@@ -1,0 +1,922 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <title>DSR — Airline Ticket Booking — TRAVEL AGENCY</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
+  <link href="assets/css/design-system.css" rel="stylesheet" />
+  <link href="assets/css/app.css?v=7" rel="stylesheet" />
+  <link rel="icon" type="image/png" href="assets/img/favicon.png" />
+  <style>
+    /* Locked to the viewport - only the grid body scrolls, not the whole
+       page (same pattern as ticket-entry.html/company-master.html). */
+    html, body { height: 100%; overflow: hidden; margin: 0; }
+    .dsr-main {
+      display: flex; flex-direction: column;
+      height: calc(100vh - var(--topnav-height) - var(--menubar-height, 0px));
+      padding: 1.5rem 2rem; box-sizing: border-box;
+    }
+    /* A single compact toolbar row - date/product/category/travel-type
+       fields sized/aligned to match the plain Print/Export CSV buttons (no
+       stacked label-above-input block, no 34px-tall oversized controls),
+       Print/Export pushed to the far right via the margin-left:auto spacer -
+       same pattern as report-trial-balance.html/report-cash-bank-book.html.
+       Customer/Supplier chip pickers can grow tall once a few chips are
+       picked, so they stay on their own row directly underneath instead of
+       wrapping into the same line as the short one-line fields above. */
+    .page-header-row { display: flex; flex-direction: column; gap: 0.6rem; margin-bottom: 1.25rem; flex-shrink: 0; position: relative; }
+    /* Floats over the table as a real dropdown instead of pushing it down
+       the page when opened/closed - anchored to the toolbar row itself so
+       it drops down right under the "Advanced Filter" button. */
+    #dsr-advanced-panel {
+      position: absolute; top: 100%; left: 0; margin-top: 6px; z-index: 30;
+      background: #EEF5FF; border: 1px solid #C7DBF5; border-radius: var(--radius-md);
+      box-shadow: var(--shadow-md); padding: 0.75rem 1rem;
+      /* Never wider than the page - extra filters wrap onto a 2nd row. */
+      max-width: 100%; box-sizing: border-box;
+    }
+    #dsr-airline-only-filters { display: inline-flex; gap: 0.5rem; flex-wrap: wrap; }
+    .dsr-toolbar-text { height: 26px; width: 190px; padding: 0 8px; font-size: 12px; box-sizing: border-box; }
+    .dsr-toolbar { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; width: 100%; }
+    /* Customer/Supplier chip pickers grow taller as chips are added (each
+       wraps onto its own line below the search box) - align everything
+       in this row to the top instead of centering, so Product/Category/
+       Type/the "+ ..." button don't visually drift out of line with a
+       picker that's grown taller than them. */
+    #dsr-advanced-panel .dsr-toolbar { align-items: flex-start; }
+    .dsr-toolbar-label { font-size: 11px; font-weight: 700; color: var(--color-text-muted); letter-spacing: 0.03em; }
+    .dsr-toolbar-date, .dsr-toolbar-select { height: 26px; padding: 0 6px; font-size: 12px; box-sizing: border-box; }
+    .dsr-toolbar-date { width: 116px; }
+    .dsr-toolbar-select { width: 150px; }
+    #dsr-advanced-chevron { transition: transform var(--t-fast); }
+    #dsr-advanced-toggle-btn.is-open #dsr-advanced-chevron { transform: rotate(180deg); }
+    #dsr-clear-filters-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    /* Customer/Supplier sit inline in the same toolbar row as Product/
+       Category/Type now (no separate toggle/row) - narrowed down from
+       the chip-picker's usual 320px so they fit alongside everything
+       else; chips still wrap onto their own line underneath once picked. */
+    .dsr-inline-picker .chip-picker-input-wrap { max-width: 150px; }
+    .dsr-inline-picker .chip-chips { max-width: 150px; }
+
+    /* Chip picker (used for both Customer and Supplier) - starts as an
+       empty search box; typing (or just focusing it) opens a dropdown of
+       matching names below, click to add one as a removable chip. Multiple
+       values can be picked. */
+    .chip-picker-input-wrap { position: relative; max-width: 320px; }
+    .chip-picker-input-wrap input { width: 100% !important; }
+    .chip-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; max-width: 220px; }
+    .chip-chips:empty { display: none; }
+    .chip {
+      display: inline-flex; align-items: center; gap: 6px;
+      border: 1px solid var(--color-primary-light); border-radius: 3px; background: var(--color-primary-tint);
+      padding: 0.25rem 0.5rem; font-size: 12px; font-weight: 700; color: var(--color-primary);
+    }
+    .chip .chip-remove { cursor: pointer; font-weight: 700; line-height: 1; }
+    .chip .chip-remove:hover { color: var(--color-danger); }
+    .chip-dropdown {
+      /* Anchored to the input's own wrapper only (not the whole picker),
+         so it always sits directly under the search box instead of
+         drifting further down as more chips get added below. */
+      display: none; position: absolute; top: 100%; left: 0; margin-top: 2px; width: 220px; z-index: 20;
+      background: var(--color-white); border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+      box-shadow: var(--shadow-md); max-height: 180px; overflow-y: auto;
+    }
+    .chip-picker.open .chip-dropdown { display: block; }
+    .chip-option { padding: 0.45rem 0.7rem; font-size: 12.5px; font-weight: 600; color: var(--color-text-dark); cursor: pointer; }
+    .chip-option:hover { background: var(--color-primary); color: #FFFFFF; }
+    .chip-option.is-selected { color: var(--color-text-faint); background: var(--color-bg-subtle); }
+    .chip-option.is-selected:hover { background: var(--color-primary); color: #FFFFFF; }
+    .chip-dropdown-empty { padding: 0.5rem 0.7rem; font-size: 12px; color: var(--color-text-muted); }
+
+    .table-container {
+      background: var(--color-white); border: 1px solid var(--color-border);
+      border-radius: var(--radius-md); overflow: hidden;
+      flex: 1; min-height: 0; display: flex; flex-direction: column;
+    }
+    .table-toolbar {
+      padding: 0.5rem 1rem; display: flex; align-items: center; justify-content: space-between;
+      border-bottom: 1px solid var(--color-border); gap: 1rem; flex-wrap: wrap; background: #FAFBFD;
+    }
+    .table-search { max-width: 220px; width: 100%; height: 26px; font-size: 11.5px; padding: 0 0.5rem; }
+    /* Scrolls inside the grid both ways - with the Earnings columns the
+       table can be wider than the screen, so it scrolls sideways within
+       its own box (never the page). The Total row below follows the same
+       horizontal scroll (see the scroll sync in syncTotalColumnWidths). */
+    .table-scroll { flex: 1; min-height: 0; overflow-y: auto; overflow-x: auto; }
+    .table-custom { width: 100%; border-collapse: collapse; text-align: left; }
+    .table-custom th { padding: 0.35rem 0.75rem; background: #F8FAFC; border-bottom: 1px solid var(--color-border);
+      font-size: 10.5px; font-weight: 700; color: var(--color-text-muted); letter-spacing: 0.03em;
+      position: sticky; top: 0; z-index: 1; white-space: nowrap; }
+    .table-custom td {
+      padding: 0.2rem 0.75rem; border-bottom: 1px solid var(--color-border-subtle);
+      font-size: 12px; color: var(--color-text); vertical-align: middle; line-height: 1.3;
+    }
+    /* No column ever wraps - every row stays exactly one line tall.
+       Short columns (dates/PNR/amounts) just grow to fit; the few that
+       can carry long text (Sector/Airline/Pax Name/Supplier/Customer)
+       additionally get .truncate-cell (capped width + ellipsis), with
+       the untruncated value shown via the title tooltip on hover. */
+    .table-custom td { white-space: nowrap; }
+    .table-custom td.truncate-cell {
+      max-width: 130px; overflow: hidden; text-overflow: ellipsis;
+    }
+    .table-custom tbody tr.dsr-data-row.dsr-row-selected td { background: var(--color-primary); color: #FFFFFF; }
+    .table-custom tbody tr:last-child td { border-bottom: none; }
+    .table-custom tbody tr.dsr-data-row { cursor: pointer; }
+    
+    .amt { font-family: var(--font-mono); font-weight: 600; text-align: right; }
+    th.amt-header { text-align: right; }
+
+    /* Total is a separate, non-scrolling table pinned below .table-scroll
+       (not a sticky row inside it) so it sits flush at the bottom of the
+       grid even when there are too few rows to fill the scroll area, and
+       still never scrolls away when there are many. Column widths are
+       synced to the main table's header via JS (syncTotalColumnWidths). */
+    .lb-total-wrap { flex-shrink: 0; overflow: hidden; }
+    #lb-total-table { table-layout: fixed; width: auto; }
+    .lb-total-row td { border-top: 2px solid var(--color-border); font-weight: 700; background: #FAFBFD; }
+  </style>
+</head>
+<body>
+  <header class="app-topnav" id="shell-topnav"></header>
+  <div class="app-body">
+    <main class="app-main dsr-main" style="max-width: 100%;">
+      <div class="page-header-row">
+        <div style="font-weight:700; font-size:0.78rem; color:var(--color-text-dark);">DSR</div>
+        <div class="dsr-toolbar">
+          <span class="dsr-toolbar-label">From</span>
+          <input type="date" class="form-control-custom dsr-toolbar-date" id="filter-from" />
+          <span class="dsr-toolbar-label">To</span>
+          <input type="date" class="form-control-custom dsr-toolbar-date" id="filter-to" />
+          <button type="button" class="dom-nav-btn" id="dsr-advanced-toggle-btn" onclick="toggleAdvancedFilter()">
+            Advanced Filter
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" id="dsr-advanced-chevron"><polyline points="6 9 12 15 18 9"/></svg>
+          </button>
+          <button type="button" class="dom-nav-btn btn-primary" onclick="applyFiltersAndRender()">Apply</button>
+          <span style="margin-left:auto;"></span>
+          <!-- Moved here from the grid's own toolbar (table-toolbar), right
+               before Print, per request - search still targets the same
+               table via filterTable(), only its position changed. -->
+          <input type="text" class="form-control-custom table-search" id="dsr-search-input" placeholder="Search records..." oninput="filterTable(this.value)" style="height:26px; width:200px;" />
+          <button type="button" class="dom-nav-btn" onclick="window.print()">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9V2h12v7M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2m-12 0v4h12v-4"/></svg>
+            Print
+          </button>
+          <button type="button" class="dom-nav-btn btn-primary" onclick="exportCSV()">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4m14-7l-5 5-5-5m5 5V3"/></svg>
+            Export CSV
+          </button>
+        </div>
+
+        <div id="dsr-advanced-panel" style="display:none;">
+          <div class="dsr-toolbar">
+            <select class="form-control-custom dsr-toolbar-select" id="filter-product" onchange="toggleAirlineOnlyFilters(); updateClearFiltersState();" data-options="dsrProducts">
+              <option value="">All Products</option>
+            </select>
+            <span id="dsr-airline-only-filters" style="display:inline-flex; gap:0.5rem;">
+              <select class="form-control-custom dsr-toolbar-select" id="filter-airline-category" onchange="updateClearFiltersState()" data-options="airlineCategories">
+                <option value="">All Categories</option>
+              </select>
+              <select class="form-control-custom dsr-toolbar-select" id="filter-travel-type" onchange="updateClearFiltersState()" data-options="travelTypes">
+                <option value="">All Types</option>
+              </select>
+              <select class="form-control-custom dsr-toolbar-select" id="filter-status" onchange="updateClearFiltersState()" data-options="dsrStatuses">
+                <option value="">All Status</option>
+              </select>
+              <select class="form-control-custom dsr-toolbar-select" id="filter-payment-mode" onchange="updateClearFiltersState()" data-options="paymentModes">
+                <option value="">All Payment Modes</option>
+              </select>
+              <select class="form-control-custom dsr-toolbar-select" id="filter-booking-type" onchange="updateClearFiltersState()" data-options="bookingTypes">
+                <option value="">All Booking Types</option>
+              </select>
+              <!-- One box for both: shows a row when its Invoice No OR its S PNR contains the text. -->
+              <input type="text" class="form-control-custom dsr-toolbar-text" id="filter-inv-spnr" placeholder="Invoice No / S PNR..." autocomplete="off"
+                     oninput="updateClearFiltersState()" onkeydown="if (event.key === 'Enter') { event.preventDefault(); applyFiltersAndRender(); }" />
+            </span>
+            <div class="chip-picker dsr-inline-picker" id="customer-picker">
+              <div class="chip-picker-input-wrap">
+                <input type="text" class="form-control-custom" id="customer-search" placeholder="Search customer..." autocomplete="off" style="height:26px;" />
+                <div class="chip-dropdown" id="customer-dropdown"></div>
+              </div>
+              <div class="chip-chips" id="customer-chips"></div>
+            </div>
+            <div class="chip-picker dsr-inline-picker" id="supplier-picker">
+              <div class="chip-picker-input-wrap">
+                <input type="text" class="form-control-custom" id="supplier-search" placeholder="Search supplier..." autocomplete="off" style="height:26px;" />
+                <div class="chip-dropdown" id="supplier-dropdown"></div>
+              </div>
+              <div class="chip-chips" id="supplier-chips"></div>
+            </div>
+            <button type="button" class="dom-nav-btn" id="dsr-clear-filters-btn" onclick="clearAdvancedFilters()" disabled title="Clear all Advanced Filter values">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+              Clear
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="table-container">
+        <div class="table-scroll">
+          <table class="table-custom" id="main-data-table">
+            <thead><tr id="dsr-head-row"></tr></thead>
+            <tbody id="main-data-tbody">
+              <tr><td colspan="73" style="text-align:left; padding:2rem; color:var(--color-text-muted);">Loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="lb-total-wrap">
+          <table class="table-custom" id="lb-total-table">
+            <tbody>
+              <tr class="lb-total-row" id="lb-total-row"></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script src="assets/js/hardcode.js?v=6"></script>
+  <script src="assets/js/mock-data.js"></script>
+  <script src="assets/js/api.js?v=4"></script>
+  <script src="assets/js/util.js?v=5"></script>
+  <script src="assets/js/entry-common.js"></script>
+  <script src="assets/js/shell.js?v=36"></script>
+  <script>
+    // Not gated on DOMContentLoaded - when this page is opened via the
+    // app's SPA navigation (shell.js's navigateTo), its <script> tags are
+    // injected into a document that already finished loading long ago, so
+    // DOMContentLoaded has already fired and never fires again. Gating
+    // init on it meant loadReport() silently never ran except on a hard
+    // refresh, matching every other page's plain top-level async IIFE.
+    //
+    // Wrapped in an IIFE (unlike a naive top-level script) because
+    // shell.js re-executes this exact block every time this page is
+    // navigated to - a second execution's top-level `let`/`const` in the
+    // SAME document throws "Identifier has already been declared" (a
+    // classic-script global lexical environment persists across separately
+    // executed <script> tags), which silently aborts the whole block and
+    // leaves the page stuck on its static "Loading..." forever until a
+    // hard refresh starts the document fresh. Functions the page's own
+    // onclick="..." attributes call are exposed on window explicitly,
+    // since they're no longer implicitly global once wrapped.
+    (function () {
+    let activeCompanyId;
+    (async function initDsrPage() {
+      try {
+        const active = await VoyagerShell.init({ activeKey: "rep-dsr-report" });
+        if (active) activeCompanyId = Number(active.id);
+        await VoyagerUtil.loadDecimalPlaces(activeCompanyId);
+      } catch (err) {
+        console.error("Shell init failed", err);
+      }
+      // Defaults to today, not a wide static range - this project posts a
+      // lot of tickets per day, so a multi-week default window would be
+      // slow/overwhelming to load on first open. But if we got here via
+      // "Back" from a ticket opened off this report (ticket-entry.js's
+      // Back link is just document.referrer, which syncUrlWithFilters()
+      // below keeps up to date), restore whatever From/To was actually
+      // showing instead of silently resetting to today.
+      const urlParams = new URLSearchParams(window.location.search);
+      const todayStr = new Date().toISOString().slice(0, 10);
+      document.getElementById("filter-from").value = urlParams.get("from") || todayStr;
+      document.getElementById("filter-to").value = urlParams.get("to") || todayStr;
+      // Restore the Advanced Filter fields too (same reasoning as From/To
+      // above) - without this, Back from a ticket opened off this report
+      // kept the date range but silently dropped Product/Category/Travel
+      // Type/Status/Customer/Supplier back to their defaults.
+      document.getElementById("filter-product").value = urlParams.get("product") || "Airline";
+      document.getElementById("filter-airline-category").value = urlParams.get("category") || "";
+      document.getElementById("filter-travel-type").value = urlParams.get("travelType") || "";
+      document.getElementById("filter-status").value = urlParams.get("status") || "";
+      document.getElementById("filter-payment-mode").value = urlParams.get("paymentMode") || "";
+      document.getElementById("filter-booking-type").value = urlParams.get("bookingType") || "";
+      document.getElementById("filter-inv-spnr").value = urlParams.get("invSpnr") || "";
+      const urlCustomers = urlParams.get("customers");
+      const urlSuppliers = urlParams.get("suppliers");
+      if (urlCustomers) customerPicker.setSelected(urlCustomers.split("|"));
+      if (urlSuppliers) supplierPicker.setSelected(urlSuppliers.split("|"));
+      toggleAirlineOnlyFilters();
+      updateClearFiltersState();
+      // Back from a ticket -> also the same search text and scroll position
+      // (the filters themselves already come back from the URL above).
+      const rs = VoyagerShell.reportState.consume();
+      VoyagerShell.reportState.applyInputs(rs);
+      await loadReport();
+      VoyagerShell.reportState.restoreAfterLoad(rs);
+    })();
+
+    // Double-click a row to open that ticket in ticket-entry.html - a
+    // normal ticket opens read-only (view mode) via ?id=<ticket id>; a
+    // Reschedule ticket (no real Ticket behind it) opens via
+    // ?reschedule_saved_id=<reschedule ticket id> instead.
+    function navigateToTicket(row) {
+      if (row.dataset.cancellationId) {
+        window.location.href = `ticket-entry.html?cancellation_saved_id=${row.dataset.cancellationId}`;
+        return;
+      }
+      if (row.dataset.ssrId) {
+        window.location.href = `trans-airline-ssr.html?ssr_saved_id=${row.dataset.ssrId}`;
+        return;
+      }
+      window.location.href = row.dataset.rescheduleId
+        ? `ticket-entry.html?reschedule_saved_id=${row.dataset.rescheduleId}`
+        : `ticket-entry.html?id=${row.dataset.id}`;
+    }
+    document.getElementById("main-data-tbody").addEventListener("dblclick", (e) => {
+      const row = e.target.closest(".dsr-data-row");
+      if (!row) return;
+      navigateToTicket(row);
+    });
+
+    // ============================================================
+    // Keyboard row navigation - Up/Down moves a highlighted "current
+    // row" (same look as mouse hover), Enter opens it, same as a
+    // double-click. Ignored while typing in any filter/search field so
+    // arrow keys there still move the text cursor as normal.
+    // ============================================================
+    let selectedRowIndex = -1;
+    function visibleDataRows() {
+      return Array.from(document.querySelectorAll("#main-data-tbody tr.dsr-data-row")).filter((r) => r.style.display !== "none");
+    }
+    function selectRow(index) {
+      const rows = visibleDataRows();
+      rows.forEach((r) => r.classList.remove("dsr-row-selected"));
+      if (!rows.length) { selectedRowIndex = -1; return; }
+      selectedRowIndex = Math.max(0, Math.min(index, rows.length - 1));
+      const row = rows[selectedRowIndex];
+      row.classList.add("dsr-row-selected");
+      row.scrollIntoView({ block: "nearest" });
+    }
+    // Keeps the keyboard-selected row in sync with whatever the mouse is
+    // actually over - without this, moving the mouse to hover a different
+    // row while an old keyboard selection is still stuck elsewhere made it
+    // look like hover had stopped working (two rows lit up at once).
+    document.getElementById("main-data-tbody").addEventListener("mouseover", (e) => {
+      const row = e.target.closest("tr.dsr-data-row");
+      if (!row) return;
+      const idx = visibleDataRows().indexOf(row);
+      if (idx !== -1) selectRow(idx);
+    });
+    document.addEventListener("keydown", (e) => {
+      if (!["ArrowDown", "ArrowUp", "Enter"].includes(e.key)) return;
+      const tag = document.activeElement && document.activeElement.tagName;
+      if (["INPUT", "SELECT", "TEXTAREA"].includes(tag)) return;
+      const rows = visibleDataRows();
+      if (!rows.length) return;
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        selectRow(selectedRowIndex < rows.length - 1 ? selectedRowIndex + 1 : 0);
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        selectRow(selectedRowIndex > 0 ? selectedRowIndex - 1 : rows.length - 1);
+      } else if (e.key === "Enter" && selectedRowIndex >= 0) {
+        e.preventDefault();
+        navigateToTicket(rows[selectedRowIndex]);
+      }
+    });
+
+    // ============================================================
+    // Real report data - one row per Airline TicketLine, pulled straight
+    // from the Django backend (same /api/tickets/ endpoint ticket-entry.js
+    // and tickets.html already use).
+    // ============================================================
+    const TICKETS_API = "http://localhost:8000/api/tickets/";
+    const RESCHEDULE_TICKETS_API = "http://localhost:8000/api/reschedule-tickets/list/";
+    const CANCELLATION_DSR_API = "http://localhost:8000/api/cancellation-tickets/dsr/";
+    const SSR_DSR_API = "http://localhost:8000/api/ssr-tickets/dsr/";
+    // DSR page: every column of the agreed format, one row per passenger line.
+    const DSR_DETAILED_API = "http://localhost:8000/api/dsr/detailed/";
+    let allRows = [];
+
+    function fmtAmt(n) {
+      const d = VoyagerUtil.getDecimalPlaces();
+      return "₹" + (Number(n) || 0).toLocaleString("en-IN", { minimumFractionDigits: d, maximumFractionDigits: d });
+    }
+
+    function populateReferenceFilters() {
+      CUSTOMER_OPTIONS = [...new Set(allRows.map((r) => r.customer_name).filter(Boolean))].sort();
+      SUPPLIER_OPTIONS = [...new Set(allRows.map((r) => r.supplier_name).filter(Boolean))].sort();
+    }
+
+    // dd/mm/yyyy, like every other date shown in the app.
+    function fmtDateDMY(iso) {
+      const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso || "");
+      return m ? `${m[3]}/${m[2]}/${m[1]}` : (iso || "-");
+    }
+
+    function escAttr(str) {
+      return String(str).replace(/&/g, "&amp;").replace(/"/g, "&quot;");
+    }
+
+    function statusBadgeHtml(status) {
+      if (!status) return "-";
+      return escAttr(status);
+    }
+
+    // One row per Invoice/Ticket, not per passenger - allRows is still
+    // one row per TicketLine (straight from /api/tickets/), so multi-
+    // passenger tickets get folded here: Pax Name shows the lead (first)
+    // passenger, Airline/Supplier show every distinct value across that
+    // ticket's passengers, and the amount columns are summed across all
+    // of them.
+    // Supplier Commission AMOUNT of one Booking / Reschedule line - same
+    // formula as the ticket screen's computeSuppLine and the JV
+    // (TicketLine.computed_supp_commission): Percentage = the chosen base x
+    // rate, Flat = the amount itself. SSR lines carry none (0).
+    function supplierCommission(r) {
+      const n = (k) => Number(r[k]) || 0;
+      const gross = n("basic_fare") + n("yq") + n("yr") + n("k3_tax") + n("tax_others") + n("seat") + n("meal") + n("baggage") + n("other_ssr");
+      const base = { "Basic": n("basic_fare"), "Basic + YQ": n("basic_fare") + n("yq"), "Basic + YR": n("basic_fare") + n("yr"),
+        "Basic + YQ + YR": n("basic_fare") + n("yq") + n("yr"), "Gross": gross }[r.supp_comm_on] || 0;
+      if (r.supp_comm_type === "Percentage") return base * n("supp_comm_value") / 100;
+      if (r.supp_comm_type === "Flat") return n("supp_comm_value");
+      return 0;
+    }
+
+    function groupRowsByTicket(rows) {
+      const byTicket = new Map();
+      rows.forEach((r) => {
+        // Reschedule rows all carry ticket_id: null (no real Ticket behind
+        // them) - grouping by that alone would collapse every Reschedule
+        // booking into one single row, so the key also folds in
+        // reschedule_ticket_id for those.
+        // Cancellations (cancellation_ticket_id) are their own Credit Note
+        // rows - never folded into the booking/reschedule they cancelled.
+        // SSR Updations (ssr_ticket_id) likewise - one row per SSR invoice.
+        const groupKey = r.cancellation_ticket_id != null ? `c${r.cancellation_ticket_id}`
+          : r.ssr_ticket_id != null ? `s${r.ssr_ticket_id}`
+          : (r.ticket_id != null ? `t${r.ticket_id}` : `r${r.reschedule_ticket_id}`);
+        let g = byTicket.get(groupKey);
+        if (!g) {
+          g = {
+            ticket_id: r.ticket_id, reschedule_ticket_id: r.reschedule_ticket_id, cancellation_ticket_id: r.cancellation_ticket_id, ssr_ticket_id: r.ssr_ticket_id,
+            invoice_date: r.invoice_date, invoice_number: r.invoice_number,
+            customer_name: r.customer_name, booking_reference: r.booking_reference, airline_pnr: r.airline_pnr,
+            lead_passenger_name: r.passenger_name, airline_names: [], supplier_names: [], sectors: [],
+            booking_status: r.booking_status,
+            basic_fare: 0, other_tax: 0, net_amount: 0,
+            commission_earnings: 0, other_earnings: 0,
+          };
+          byTicket.set(groupKey, g);
+        }
+        const airline = r.airline_name || r.airline_code;
+        if (airline && !g.airline_names.includes(airline)) g.airline_names.push(airline);
+        if (r.supplier_name && !g.supplier_names.includes(r.supplier_name)) g.supplier_names.push(r.supplier_name);
+        // A multi-city passenger's own sector is already comma-joined
+        // (e.g. "BOM-DXB,DXB-COK") - split those out too so each leg only
+        // ever appears once across the whole ticket, same de-dup as Airline/Supplier.
+        (r.sector || "").split(",").map((s) => s.trim()).filter(Boolean).forEach((s) => {
+          if (!g.sectors.includes(s)) g.sectors.push(s);
+        });
+        // Same 3 columns as ticket-entry.html's Passenger & Segment Details
+        // grid (Basic Fare / YQ / K3 / SSR / Other Taxes / Total), pax-wise
+        // summed across every line on this ticket - DSR-specific formula
+        // (2026-10-08 explicit spec, DSR report only, not the grid itself):
+        // Base Fare = Basic Fare.
+        // Net Amount = Total (total_billed, same stored per-line total the
+        // grid's own Total column shows, plus the 3 Reschedule-only penalty
+        // fields renderPaxTable() also folds into that column - absent/0
+        // on a plain Ticket row).
+        // Other Taxes = YQ + K3 + SSR + Other Taxes (the grid's own Other
+        // Taxes column) added together - equivalently Net Amount minus
+        // Base Fare, since Basic+YQ+K3+SSR+Other Taxes always equals Total
+        // exactly (renderPaxTable's own invariant).
+        const lineBasic = Number(r.basic_fare) || 0;
+        const lineNet = (Number(r.total_billed) || 0)
+          + (Number(r.agent_penalty) || 0) + (Number(r.reschedule_penalty) || 0) + (Number(r.supplier_penalty) || 0);
+        g.basic_fare += lineBasic;
+        g.net_amount += lineNet;
+        g.other_tax += lineNet - lineBasic;
+        // Earnings - Booking / Reschedule / SSR Updation:
+        //   Commission Earnings = Supplier Commission Amount - Customer Commission (Discount) Amount
+        //   Other Earnings      = Customer Markup + Addl Markup + SSR Markup + Service Fee
+        //                         + Addl Service Fee + SSR Service Fee (+ Agent Penalty - Reschedule)
+        //   Total Earnings      = Commission Earnings + Other Earnings
+        const n = (k) => Number(r[k]) || 0;
+        if (r.cancellation_ticket_id == null) {
+          g.commission_earnings += supplierCommission(r) - n("computed_discount");
+          g.other_earnings += n("markup") + n("addl_markup") + n("ssr_markup")
+            + n("service_fee") + n("addl_service_fee") + n("ssr_service_fee") + n("agent_penalty");
+        } else {
+          // Cancellation (its own formula, nothing else changes):
+          //   Commission Earnings = -(Supplier Commission - Customer Commission)
+          //     - the commission earned is given back, so a positive result
+          //     shows with "-" and a negative one shows positive
+          //   Other Earnings = Customer Markup + Addl Markup + SSR Markup +
+          //     Service Fee + Addl Service Fee + SSR Service Fee + Agent Penalty
+          //     - Customer Markup Reversal
+          //   Total Earnings = Commission Earnings + Other Earnings
+          g.commission_earnings += -(n("supp_commission_amount") - n("cust_commission_amount"));
+          g.other_earnings += n("markup") + n("addl_markup") + n("ssr_markup")
+            + n("service_fee") + n("addl_service_fee") + n("ssr_service_fee") + n("agent_penalty")
+            - n("cust_markup_reversal_total");
+        }
+      });
+      byTicket.forEach((g) => {
+        g.basic_fare = Math.round(g.basic_fare * 100) / 100;
+        g.net_amount = Math.round(g.net_amount * 100) / 100;
+        g.other_tax = Math.round(g.other_tax * 100) / 100;
+        g.commission_earnings = Math.round(g.commission_earnings * 100) / 100;
+        g.other_earnings = Math.round(g.other_earnings * 100) / 100;
+        g.total_earnings = Math.round((g.commission_earnings + g.other_earnings) * 100) / 100;
+      });
+      return Array.from(byTicket.values());
+    }
+
+    // ============================================================
+    // DSR columns - exactly the "DSR format" sheet (73 columns, same order).
+    // Text columns come from the document / passenger line; every amount is
+    // computed on the server (views.dsr_detailed_rows) with the same
+    // formulas as the ticket screens / J.V:
+    //   Gross Amount = Purchase Cost total, Net Amount = Sales Cost total.
+    // ============================================================
+    const DSR_TEXT_COLS = [
+      ["Date", (r) => fmtDateDMY(r.invoice_date)], ["Invoice No.", "invoice_number"], ["Invoice Type", "invoice_type"],
+      ["Customer", "customer_name", true], ["Airline Name", "airline_name", true], ["Airline Code", "airline_code"],
+      ["Airline Category", "airline_category"], ["SPNR", "spnr"], ["Airline PNR", "airline_pnr"], ["GDS PNR", "gds_pnr"],
+      ["Ticket No", "ticket_no"], ["Status", "status"], ["Booking Type", "booking_type"], ["Username", "user_name"],
+      ["Pax Type", "pax_type"], ["Pax Name", "passenger_name", true], ["Sector", "sector", true], ["Travel Date", "travel_date"],
+      ["Flight No", "flight_no"], ["Trip Type", "trip_type"], ["Travel Type", "travel_type"], ["Payment Mode", "payment_mode"],
+      ["Class", "travel_class"], ["Supplier", "supplier_name", true], ["Office ID", "office_id"],
+    ];
+    const DSR_AMOUNT_COLS = [
+      ["Basic Fare", "basic_fare"], ["YQ", "yq"], ["YR", "yr"], ["K3", "k3"], ["Other Taxes", "other_taxes"],
+      ["SSR Amount", "ssr_amount"], ["Other SSR", "other_ssr"], ["Supplier Penalty", "supplier_penalty"],
+      ["Commission", "commission"], ["TDS (Com)", "tds_com"], ["Sup Markup", "sup_markup"], ["Sup Addl Markup", "sup_addl_markup"],
+      ["Sup SSR Markup", "sup_ssr_markup"], ["Sup Service Fee", "sup_service_fee"], ["Sup Addl Service Fee", "sup_addl_service_fee"],
+      ["Sup SSR Service Fee", "sup_ssr_service_fee"], ["Sup GST", "sup_gst"], ["Sup Resc Markup", "sup_resc_markup"],
+      ["Sup Addl Resc Markup", "sup_addl_resc_markup"], ["Sup Resc SSR Markup", "sup_resc_ssr_markup"],
+      ["Sup Can Markup", "sup_can_markup"], ["Sup Addl Can Markup", "sup_addl_can_markup"], ["Sup Can SSR Markup", "sup_can_ssr_markup"],
+      ["Penalty Amount", "penalty_amount"], ["Gross Amount", "gross_amount"], ["Discount", "discount"], ["TDS (Disc)", "tds_disc"],
+      ["Cust Markup", "cust_markup"], ["Cust Addl Markup", "cust_addl_markup"], ["Cust SSR Markup", "cust_ssr_markup"],
+      ["Cust Service Fee", "cust_service_fee"], ["Cust Addl Service Fee", "cust_addl_service_fee"],
+      ["Cust SSR Service Fee", "cust_ssr_service_fee"], ["Cust GST Amt", "cust_gst"], ["Cust Resc Markup", "cust_resc_markup"],
+      ["Cust Addl Resc Markup", "cust_addl_resc_markup"], ["Cust SSR Resc Markup", "cust_ssr_resc_markup"],
+      ["Cust Can Markup", "cust_can_markup"], ["Cust Addl Can Markup", "cust_addl_can_markup"], ["Cust SSR Can Markup", "cust_ssr_can_markup"],
+      ["Agent Penalty", "agent_penalty"], ["Net Amount", "net_amount"], ["Seat", "seat"], ["Meal", "meal"], ["Baggage", "baggage"],
+      ["OKTBD", "oktbd"], ["Fastforward", "fastforward"], ["WCHR Amount", "wchr"],
+    ];
+    const DSR_COL_COUNT = DSR_TEXT_COLS.length + DSR_AMOUNT_COLS.length;
+    document.getElementById("dsr-head-row").innerHTML =
+      DSR_TEXT_COLS.map(([h]) => `<th>${h}</th>`).join("") +
+      DSR_AMOUNT_COLS.map(([h, k]) => `<th class="amt-header"${k === "gross_amount" || k === "net_amount" ? ' style="color:var(--color-primary);"' : ""}>${h}</th>`).join("");
+
+    function renderTable(rows) {
+      const tbody = document.getElementById("main-data-tbody");
+      const totalRow = document.getElementById("lb-total-row");
+      selectedRowIndex = -1; // stale after a full re-render - rows are new DOM nodes
+      if (!rows.length) {
+        tbody.innerHTML = `<tr><td colspan="${DSR_COL_COUNT}" style="text-align:left; padding:2rem; color:var(--color-text-muted);">No records found for the selected filters.</td></tr>`;
+        totalRow.innerHTML = "";
+        return;
+      }
+      const text = (r, [, key, cut]) => {
+        const v = typeof key === "function" ? key(r) : (r[key] == null || r[key] === "" ? "-" : r[key]);
+        return cut ? `<td class="truncate-cell" title="${escAttr(v)}">${v}</td>` : `<td>${v}</td>`;
+      };
+      tbody.innerHTML = rows.map((r) => `
+        <tr class="dsr-data-row" data-id="${r.ticket_id || ""}" data-reschedule-id="${r.reschedule_ticket_id || ""}" data-cancellation-id="${r.cancellation_ticket_id || ""}" data-ssr-id="${r.ssr_ticket_id || ""}" title="Double-click to view this ${r.document || "ticket"}">
+          ${DSR_TEXT_COLS.map((c) => text(r, c)).join("")}
+          ${DSR_AMOUNT_COLS.map(([, k]) => `<td class="amt"${k === "gross_amount" || k === "net_amount" ? ' style="font-weight:700;"' : ""}>${fmtAmt(r[k])}</td>`).join("")}
+        </tr>`).join("");
+
+      totalRow.innerHTML = `<td colspan="${DSR_TEXT_COLS.length}" style="text-align:right;">Total (${rows.length} line${rows.length === 1 ? "" : "s"}) :</td>` +
+        DSR_AMOUNT_COLS.map(([, k]) => `<td class="amt">${fmtAmt(rows.reduce((s, r) => s + (Number(r[k]) || 0), 0))}</td>`).join("");
+      syncTotalColumnWidths();
+    }
+
+    // Keeps the separate (non-scrolling) total table's columns aligned with
+    // the main table's header, since both tables size their columns
+    // independently (table-layout differs per table's own content).
+    function syncTotalColumnWidths() {
+      const headerCells = document.querySelectorAll("#main-data-table thead th");
+      const totalCells = document.querySelectorAll("#lb-total-row td");
+      if (!headerCells.length || !totalCells.length) return;
+      // Same overall width as the main table (it can be wider than the
+      // screen), kept at the same horizontal scroll position.
+      const mainTable = document.getElementById("main-data-table");
+      document.getElementById("lb-total-table").style.width = mainTable.getBoundingClientRect().width + "px";
+      const scroller = document.querySelector(".table-scroll");
+      const totalWrap = document.querySelector(".lb-total-wrap");
+      if (!scroller.dataset.totalSync) {
+        scroller.dataset.totalSync = "1";
+        scroller.addEventListener("scroll", () => { totalWrap.scrollLeft = scroller.scrollLeft; });
+      }
+      totalWrap.scrollLeft = scroller.scrollLeft;
+      const widths = Array.from(headerCells).map((th) => th.getBoundingClientRect().width);
+      let i = 0;
+      totalCells.forEach((td) => {
+        const span = td.colSpan || 1;
+        const w = widths.slice(i, i + span).reduce((a, b) => a + b, 0);
+        td.style.width = w + "px";
+        i += span;
+      });
+    }
+    window.addEventListener("resize", () => syncTotalColumnWidths());
+
+    // Keeps the address bar's From/To in sync with the toolbar, so
+    // document.referrer (what ticket-entry.js's "Back" link uses when you
+    // open a ticket from here) always points back to this exact filtered
+    // view instead of a bare URL that resets to today on return.
+    function syncUrlWithFilters() {
+      const params = new URLSearchParams();
+      const fromDate = document.getElementById("filter-from").value;
+      const toDate = document.getElementById("filter-to").value;
+      if (fromDate) params.set("from", fromDate);
+      if (toDate) params.set("to", toDate);
+      // Advanced Filter fields (Product/Category/Travel Type/Status/
+      // Customer/Supplier) - kept in the URL the same way From/To already
+      // are, so Back from a ticket opened off this report restores the
+      // exact filtered view instead of resetting to defaults.
+      const product = document.getElementById("filter-product").value;
+      const category = document.getElementById("filter-airline-category").value;
+      const travelType = document.getElementById("filter-travel-type").value;
+      const status = document.getElementById("filter-status").value;
+      const customers = customerPicker.getSelected();
+      const suppliers = supplierPicker.getSelected();
+      if (product && product !== "Airline") params.set("product", product);
+      if (category) params.set("category", category);
+      if (travelType) params.set("travelType", travelType);
+      if (status) params.set("status", status);
+      const paymentMode = document.getElementById("filter-payment-mode").value;
+      const bookingType = document.getElementById("filter-booking-type").value;
+      const invSpnr = document.getElementById("filter-inv-spnr").value.trim();
+      if (paymentMode) params.set("paymentMode", paymentMode);
+      if (bookingType) params.set("bookingType", bookingType);
+      if (invSpnr) params.set("invSpnr", invSpnr);
+      if (customers.length) params.set("customers", customers.join("|"));
+      if (suppliers.length) params.set("suppliers", suppliers.join("|"));
+      const qs = params.toString();
+      history.replaceState(null, "", qs ? `${window.location.pathname}?${qs}` : window.location.pathname);
+    }
+
+    function applyFiltersAndRender() {
+      syncUrlWithFilters();
+      const fromDate = document.getElementById("filter-from").value;
+      const toDate = document.getElementById("filter-to").value;
+      const product = document.getElementById("filter-product").value;
+      const category = document.getElementById("filter-airline-category").value;
+      const travelType = document.getElementById("filter-travel-type").value;
+      const status = document.getElementById("filter-status").value;
+      const pickedCustomers = customerPicker.getSelected();
+      const pickedSuppliers = supplierPicker.getSelected();
+      const paymentMode = document.getElementById("filter-payment-mode").value;
+      const bookingType = document.getElementById("filter-booking-type").value;
+      const invSpnr = document.getElementById("filter-inv-spnr").value.trim().toLowerCase();
+
+      // This report only has Airline ticket line data - any other Product
+      // selection has nothing to show here.
+      if (product && product !== "Airline") {
+        renderTable([]);
+        return;
+      }
+
+      const rows = allRows.filter((r) => {
+        if (fromDate && r.invoice_date && r.invoice_date < fromDate) return false;
+        if (toDate && r.invoice_date && r.invoice_date > toDate) return false;
+        if (pickedCustomers.length && !pickedCustomers.includes(r.customer_name)) return false;
+        if (pickedSuppliers.length && !pickedSuppliers.includes(r.supplier_name)) return false;
+        if (category && r.airline_category !== category) return false;
+        if (travelType && r.travel_type !== travelType) return false;
+        if (status && r.booking_status !== status) return false;
+        if (paymentMode && r.payment_mode !== paymentMode) return false;
+        if (bookingType && r.booking_type !== bookingType) return false;
+        // Invoice No OR S PNR - either one matching shows the row.
+        if (invSpnr && !String(r.invoice_number || "").toLowerCase().includes(invSpnr)
+            && !String(r.booking_reference || "").toLowerCase().includes(invSpnr)) return false;
+        return true;
+      });
+      renderTable(rows);
+    }
+
+    async function loadReport() {
+      const tbody = document.getElementById("main-data-tbody");
+      try {
+        const res = await fetch(`${DSR_DETAILED_API}?company_id=${activeCompanyId}`);
+        if (!res.ok) throw new Error(`Server returned ${res.status}`);
+        // Filters below still read booking_status / booking_reference.
+        allRows = (await res.json()).map((r) => ({ ...r, booking_status: r.status, booking_reference: r.spnr }));
+      } catch (err) {
+        console.error("Could not load tickets for the DSR report - is the Django backend running?", err);
+        allRows = [];
+        tbody.innerHTML = `<tr><td colspan="73" style="text-align:left; padding:2rem; color:var(--color-text-muted);">Could not load data. Is the Django backend running on localhost:8000?</td></tr>`;
+        return;
+      }
+      populateReferenceFilters();
+      applyFiltersAndRender();
+    }
+
+    // ============================================================
+    // Chip picker - reusable for both Customer and Supplier filters. An
+    // empty search box; typing/focusing opens a dropdown of matching names
+    // (loaded from the real report data above), click one to add it as a
+    // removable chip. Multiple values can be picked per field.
+    // ============================================================
+    let CUSTOMER_OPTIONS = [];
+    let SUPPLIER_OPTIONS = [];
+
+    function createChipPicker({ pickerEl, searchEl, chipsEl, dropdownEl, getOptions }) {
+      let selected = [];
+
+      function renderDropdown() {
+        const q = searchEl.value.trim().toLowerCase();
+        const matches = getOptions().filter((name) => name.toLowerCase().includes(q));
+        dropdownEl.innerHTML = matches.length
+          ? matches.map((name) => {
+              const isSelected = selected.includes(name);
+              return `<div class="chip-option ${isSelected ? "is-selected" : ""}" data-name="${name}">${name}</div>`;
+            }).join("")
+          : `<div class="chip-dropdown-empty">No matches</div>`;
+      }
+
+      function renderChips() {
+        chipsEl.innerHTML = selected.map((name) => `
+          <span class="chip" data-name="${name}">
+            ${name}<span class="chip-remove" title="Remove">&times;</span>
+          </span>
+        `).join("");
+      }
+
+      searchEl.addEventListener("focus", () => {
+        pickerEl.classList.add("open");
+        renderDropdown();
+      });
+      searchEl.addEventListener("input", renderDropdown);
+      // Enter is the deliberate "I'm done picking" action - stays open
+      // through any number of picks otherwise, closing only on Enter or
+      // an actual click outside (see the composedPath() listener below).
+      searchEl.addEventListener("keydown", (e) => {
+        if (e.key !== "Enter") return;
+        e.preventDefault();
+        pickerEl.classList.remove("open");
+        searchEl.blur();
+      });
+
+      dropdownEl.addEventListener("click", (e) => {
+        const opt = e.target.closest(".chip-option");
+        if (!opt || opt.classList.contains("is-selected")) return;
+        selected.push(opt.dataset.name);
+        renderChips();
+        // Keep whatever was typed so the remaining matches for that search
+        // stay visible - clearing it made the list look empty right after
+        // picking one, instead of showing the other matches still available.
+        renderDropdown();
+        searchEl.focus();
+        updateClearFiltersState();
+      });
+
+      chipsEl.addEventListener("click", (e) => {
+        const remove = e.target.closest(".chip-remove");
+        if (!remove) return;
+        const name = remove.closest(".chip").dataset.name;
+        selected = selected.filter((n) => n !== name);
+        renderChips();
+        renderDropdown();
+        updateClearFiltersState();
+      });
+
+      document.addEventListener("click", (e) => {
+        // composedPath(), not pickerEl.contains(e.target) - picking an
+        // option calls renderDropdown() first (replacing dropdownEl's
+        // innerHTML, including the very .chip-option node just clicked)
+        // and THEN this bubbles up here. By then e.target is already a
+        // detached node, so .contains() always says "outside" and
+        // immediately closed the dropdown right after each pick -
+        // meaning only one customer/supplier could ever be picked before
+        // having to click back into the search box. composedPath()
+        // captures the real ancestor chain at dispatch time, unaffected
+        // by that DOM replacement.
+        if (!e.composedPath().includes(pickerEl)) pickerEl.classList.remove("open");
+      });
+
+      return {
+        getSelected: () => selected,
+        setSelected: (names) => { selected = [...names]; renderChips(); renderDropdown(); },
+        clear: () => { selected = []; renderChips(); renderDropdown(); },
+      };
+    }
+
+    const customerPicker = createChipPicker({
+      pickerEl: document.getElementById("customer-picker"),
+      searchEl: document.getElementById("customer-search"),
+      chipsEl: document.getElementById("customer-chips"),
+      dropdownEl: document.getElementById("customer-dropdown"),
+      getOptions: () => CUSTOMER_OPTIONS,
+    });
+    const supplierPicker = createChipPicker({
+      pickerEl: document.getElementById("supplier-picker"),
+      searchEl: document.getElementById("supplier-search"),
+      chipsEl: document.getElementById("supplier-chips"),
+      dropdownEl: document.getElementById("supplier-dropdown"),
+      getOptions: () => SUPPLIER_OPTIONS,
+    });
+
+    // Advanced Filter's "Clear" button - disabled until something is
+    // actually different from the default (Product = Airline, everything
+    // else empty); resets all of it back to that default and re-renders.
+    function updateClearFiltersState() {
+      const btn = document.getElementById("dsr-clear-filters-btn");
+      if (!btn) return;
+      const anyActive = document.getElementById("filter-product").value !== "Airline"
+        || document.getElementById("filter-airline-category").value
+        || document.getElementById("filter-travel-type").value
+        || document.getElementById("filter-status").value
+        || document.getElementById("filter-payment-mode").value
+        || document.getElementById("filter-booking-type").value
+        || document.getElementById("filter-inv-spnr").value.trim()
+        || customerPicker.getSelected().length
+        || supplierPicker.getSelected().length;
+      btn.disabled = !anyActive;
+    }
+    function clearAdvancedFilters() {
+      document.getElementById("filter-product").value = "Airline";
+      document.getElementById("filter-airline-category").value = "";
+      document.getElementById("filter-travel-type").value = "";
+      document.getElementById("filter-status").value = "";
+      document.getElementById("filter-payment-mode").value = "";
+      document.getElementById("filter-booking-type").value = "";
+      document.getElementById("filter-inv-spnr").value = "";
+      customerPicker.clear();
+      supplierPicker.clear();
+      toggleAirlineOnlyFilters();
+      updateClearFiltersState();
+      applyFiltersAndRender();
+    }
+
+    function exportCSV() {
+      let csv = [];
+      const rows = document.querySelectorAll("#main-data-table tr, #lb-total-table tr");
+      rows.forEach(row => {
+        let cols = Array.from(row.querySelectorAll("th, td")).map(td => `"${td.innerText.replace(/"/g, '""')}"`);
+        csv.push(cols.join(","));
+      });
+      const blob = new Blob([csv.join("\n")], { type: "text/csv;charset=utf-8;" });
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = "dsr-airline-booking.csv";
+      link.click();
+    }
+
+    // Advanced Filter - two-step reveal. Step 1 (Advanced Filter button)
+    // shows Product/Category/Travel Type; step 2 (+ Customer/Supplier,
+    // only reachable once step 1 is open) shows the chip pickers. Both
+    // stay collapsed by default so the toolbar starts as just From/To.
+    // Airline Category/Travel Type only make sense for Product = Airline
+    // (every other product has neither) - hidden for any other pick,
+    // including "All Products".
+    function toggleAirlineOnlyFilters() {
+      const isAirline = document.getElementById("filter-product").value === "Airline";
+      document.getElementById("dsr-airline-only-filters").style.display = isAirline ? "" : "none";
+    }
+
+    function toggleAdvancedFilter() {
+      const panel = document.getElementById("dsr-advanced-panel");
+      const btn = document.getElementById("dsr-advanced-toggle-btn");
+      const isOpen = panel.style.display !== "none";
+      panel.style.display = isOpen ? "none" : "";
+      btn.classList.toggle("is-open", !isOpen);
+    }
+    // Click anywhere outside the (now floating, dropdown-style) panel
+    // closes it - same convention as the Customer/Supplier chip pickers.
+    document.addEventListener("click", (e) => {
+      const panel = document.getElementById("dsr-advanced-panel");
+      const btn = document.getElementById("dsr-advanced-toggle-btn");
+      if (!panel || panel.style.display === "none") return;
+      // composedPath(), not .contains(e.target) - picking a customer/
+      // supplier chip re-renders that dropdown's innerHTML (destroying
+      // the very option node just clicked) before this bubbles up here,
+      // so .contains() always saw it as "outside" and closed the WHOLE
+      // Advanced Filter panel on every single pick.
+      const path = e.composedPath();
+      if (path.includes(panel) || path.includes(btn)) return;
+      panel.style.display = "none";
+      btn.classList.remove("is-open");
+    });
+    // Table-toolbar search box - plain client-side text match over
+    // whatever applyFiltersAndRender() already rendered (same convention
+    // as report-trial-balance.html/report-cash-bank-book.html).
+    function filterTable(query) {
+      const q = query.toLowerCase();
+      const rows = document.querySelectorAll("#main-data-tbody tr");
+      rows.forEach((r) => {
+        r.style.display = r.textContent.toLowerCase().includes(q) ? "" : "none";
+      });
+    }
+
+    // Called from onclick="..." attributes above, which always run in the
+    // real global scope regardless of this IIFE.
+    window.exportCSV = exportCSV;
+    window.applyFiltersAndRender = applyFiltersAndRender;
+    window.filterTable = filterTable;
+    window.toggleAdvancedFilter = toggleAdvancedFilter;
+    window.toggleAirlineOnlyFilters = toggleAirlineOnlyFilters;
+    window.updateClearFiltersState = updateClearFiltersState;
+    window.clearAdvancedFilters = clearAdvancedFilters;
+    toggleAirlineOnlyFilters();
+    })();
+  </script>
+</body>
+</html>

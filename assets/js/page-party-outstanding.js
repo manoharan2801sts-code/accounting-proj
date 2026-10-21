@@ -10,9 +10,9 @@
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const n2 = (v) => Math.abs(Number(v) || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  // Adjusted column: shown as a deduction from Billed, with a minus sign
-  // (an adjustment that adds back to the bill shows without one).
-  const neg = (v) => (Number(v) > 0 ? `-${n2(v)}` : n2(v));
+  // Unadjusted column (bill, each adjustment line and the Total): the plain
+  // amount, never with a "-" sign in front.
+  const neg = (v) => n2(Math.abs(Number(v) || 0));
   // Receivable balance is a Debit, payable a Credit; the other side means an
   // advance / excess (e.g. a cancellation refund bigger than the bill).
   const drcr = (v) => {
@@ -30,6 +30,7 @@
     reschedule: (id) => `ticket-entry.html?reschedule_saved_id=${id}`,
     cancellation: (id) => `ticket-entry.html?cancellation_saved_id=${id}`,
     ssr: (id) => `trans-airline-ssr.html?ssr_saved_id=${id}`,
+    misc: (id) => `trans-misc.html?misc_saved_id=${id}`,
     voucher: (id) => `voucher-entry.html?id=${id}&returnTo=${encodeURIComponent(location.pathname.split("/").pop())}&view=1`,
   };
   const docAttr = (doc) => (doc && DOC_URL[doc.kind] ? ` data-url="${DOC_URL[doc.kind](doc.id)}"` : "");
@@ -38,7 +39,9 @@
   //   Ledger Wise - one group per customer / supplier, its bills under it.
   //   Bill Wise   - every bill on its own row, by date then invoice number
   //                 (no party grouping), with the party in its own column.
-  const BILLED_LABEL = RECEIVABLE ? "Billed" : "Payable";
+  // Column headings: the bill amount, what's adjusted against it, and what
+  // is still open. Receivables: Outstanding / Unadjusted / Net Outstanding.
+  const BILLED_LABEL = RECEIVABLE ? "Outstanding" : "Payable";
   const PARTY_LABEL = RECEIVABLE ? "Customer" : "Supplier";
   const VIEWS = {
     ledger: {
@@ -59,7 +62,7 @@
     const cols = v.widths.map((w) => `<col style="width:${w}%">`).join("");
     $("po-cols").innerHTML = cols;
     $("po-total-cols").innerHTML = cols;
-    $("po-thead").innerHTML = `<tr>${v.head.map((h) => `<th>${h}</th>`).join("")}<th class="amt">${BILLED_LABEL}</th><th class="amt">Adjusted</th><th class="amt">Outstanding</th></tr>`;
+    $("po-thead").innerHTML = `<tr>${v.head.map((h) => `<th>${h}</th>`).join("")}<th class="amt">${BILLED_LABEL}</th><th class="amt">Unadjusted</th><th class="amt">Net Outstanding</th></tr>`;
     // Grand Total row: label (2 columns wide in Bill Wise, where Date is
     // narrow) + one blank cell per remaining text column.
     const row = $("po-total-label").parentElement;
@@ -110,15 +113,24 @@
       $("po-total-outstanding").innerHTML = drcr(0);
       return;
     }
+    // Show Only Settled Bills: ONLY bills fully settled (nothing left
+    // outstanding) - no open bills and no On Account (Unadjusted) amounts;
+    // the vouchers that settled them show under each bill only when Detailed
+    // View is ticked, same as every other view. Otherwise as before: open
+    // bills, plus settled ones when Show Settled Bills is ticked.
+    const onlySettled = $("po-only-settled").checked;
     const detailed = $("po-detailed").checked;
     const showSettled = $("po-settled").checked;
+    const keep = (b) => (onlySettled
+      ? b.invoice_number !== ON_ACCOUNT && Math.abs(b.outstanding) < 0.005 && b.adjustments.length > 0
+      : (showSettled || Math.abs(b.outstanding) >= 0.005));
     const q = $("po-search").value.trim().toLowerCase();
     const matches = (p, b) => !q || [p.name, b.invoice_number, billLabel(b), b.type, b.ref].some((x) => String(x || "").toLowerCase().includes(q));
     let rows = "", count = 0, tBilled = 0, tAdjusted = 0, tOutstanding = 0;
 
     if (view === "ledger") {
       parties.forEach((p) => {
-        const shown = p.bills.filter((b) => (showSettled || Math.abs(b.outstanding) >= 0.005) && matches(p, b));
+        const shown = p.bills.filter((b) => keep(b) && matches(p, b));
         if (!shown.length) return;
         const sum = (k) => shown.reduce((s, b) => s + b[k], 0);
         const billed = sum("billed"), adjusted = sum("adjusted"), outstanding = sum("outstanding");
@@ -142,7 +154,7 @@
       // Bill Wise - flat list, oldest first; On Account (Unadjusted) rows last.
       const all = [];
       parties.forEach((p) => p.bills.forEach((b) => {
-        if ((showSettled || Math.abs(b.outstanding) >= 0.005) && matches(p, b)) all.push({ p, b });
+        if (keep(b) && matches(p, b)) all.push({ p, b });
       }));
       all.sort((x, y) => (x.b.invoice_number === ON_ACCOUNT) - (y.b.invoice_number === ON_ACCOUNT)
         || String(x.b.date || "").localeCompare(String(y.b.date || ""))
@@ -162,7 +174,7 @@
       });
     }
 
-    tbody.innerHTML = rows || `<tr><td colspan="${ncols}" class="po-empty">${q ? "No matching entries." : "Nothing outstanding as on this date."}</td></tr>`;
+    tbody.innerHTML = rows || `<tr><td colspan="${ncols}" class="po-empty">${q ? "No matching entries." : onlySettled ? "No fully settled bills as on this date." : "Nothing outstanding as on this date."}</td></tr>`;
     const word = view === "bill" ? "bill" : PARTY_LABEL.toLowerCase();
     $("po-total-label").textContent = `Grand Total${count ? ` (${count} ${word}${count === 1 ? "" : "s"})` : ""}`;
     $("po-total-billed").textContent = n2(tBilled);
@@ -277,6 +289,7 @@
   $("po-view-ledger").addEventListener("change", render);
   $("po-view-bill").addEventListener("change", render);
   $("po-settled").addEventListener("change", render);
+  $("po-only-settled").addEventListener("change", render);
   $("po-search").addEventListener("input", render);
   $("po-export").addEventListener("click", exportCSV);
   $("po-print").addEventListener("click", () => window.print());
@@ -305,6 +318,7 @@
     // until a Customer / Supplier (or All) is chosen in the filter popup.
     $("po-detailed").checked = false;
     $("po-settled").checked = false;
+    $("po-only-settled").checked = false;
     $("po-all").checked = false;
     $("po-party").value = "";
     syncPartyBox();

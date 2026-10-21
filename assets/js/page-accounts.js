@@ -62,10 +62,8 @@
     }
     document.getElementById("coa-empty").style.display = "none";
 
-    function renderLevel(parentKey, depth) {
-      return (byParent[parentKey] || [])
-        .filter((a) => !visibleIds || visibleIds.has(a.id))
-        .map((a) => {
+    // One row - a group (tree view only) or a ledger.
+    function rowHtml(a, depth) {
           const indent = 16 + depth * 20;
           const nameHtml = a.is_group
             ? highlight(a.name, trimmed)
@@ -86,11 +84,22 @@
               <div class="coa-type"><span class="pill pill-neutral">${a.account_type}</span></div>
               <div class="coa-balance">${balDisplay}</div>
               ${a.is_group ? '<div style="width:110px;"></div>' : actions}
-            </div>
-            ${renderLevel(a.id, depth + 1)}`;
-        }).join("");
+            </div>`;
     }
-    document.getElementById("coa-body").innerHTML = renderLevel("root", 0);
+    function renderLevel(parentKey, depth) {
+      return (byParent[parentKey] || [])
+        .filter((a) => !visibleIds || visibleIds.has(a.id))
+        .map((a) => rowHtml(a, depth) + renderLevel(a.id, depth + 1)).join("");
+    }
+    // Show Tree View unchecked (the default): just the ledgers, A-Z, no group
+    // rows (a search on a group name still lists that group's ledgers).
+    // Checked: the full group tree, unchanged.
+    const treeView = document.getElementById("coa-tree-view").checked;
+    document.getElementById("coa-body").innerHTML = treeView
+      ? renderLevel("root", 0)
+      : allAccounts.filter((a) => !a.is_group && (!visibleIds || visibleIds.has(a.id)))
+          .sort((x, y) => x.name.localeCompare(y.name, undefined, { sensitivity: "base" }))
+          .map((a) => rowHtml(a, 0)).join("");
 
     document.querySelectorAll(".coa-balance .drillable").forEach((el) => {
       el.addEventListener("click", () => VoyagerDrilldown.byLedger(el.dataset.ledger, currentCompanyId, currentCcy));
@@ -140,6 +149,7 @@
   }
 
   document.getElementById("coa-search").addEventListener("input", (e) => render(e.target.value));
+  document.getElementById("coa-tree-view").addEventListener("change", () => render(document.getElementById("coa-search").value));
 
   let active = null;
   try {

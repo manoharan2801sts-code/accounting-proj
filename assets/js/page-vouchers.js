@@ -30,6 +30,7 @@
         : 'No vouchers posted yet. Click "+ New Voucher" to create one.'}</p>`;
       return;
     }
+    selIdx = -1;
     el.innerHTML = list.map((v, i) => `
       <div class="v-card">
         <div class="v-head" data-idx="${i}" data-id="${v.id}" title="Double-click to open this voucher">
@@ -58,6 +59,34 @@
       });
     });
   }
+
+  // Keyboard row navigation, like the report pages - Up / Down moves the
+  // highlighted row (kept in step with the mouse), Enter opens it, same as a
+  // double-click. Ignored while typing in a field.
+  let selIdx = -1;
+  const heads = () => Array.from(document.querySelectorAll("#voucher-list .v-head"));
+  function selectRow(i) {
+    const rows = heads();
+    rows.forEach((r) => r.classList.remove("v-sel"));
+    if (!rows.length) { selIdx = -1; return; }
+    selIdx = Math.max(0, Math.min(i, rows.length - 1));
+    rows[selIdx].classList.add("v-sel");
+    rows[selIdx].scrollIntoView({ block: "nearest" });
+  }
+  document.getElementById("voucher-list").addEventListener("mouseover", (e) => {
+    const row = e.target.closest(".v-head");
+    if (row) { const i = heads().indexOf(row); if (i !== -1 && i !== selIdx) selectRow(i); }
+  });
+  document.addEventListener("keydown", (e) => {
+    if (!["ArrowDown", "ArrowUp", "Enter"].includes(e.key)) return;
+    const tag = document.activeElement && document.activeElement.tagName;
+    if (["INPUT", "SELECT", "TEXTAREA"].includes(tag)) return;
+    if (!heads().length) return;
+    e.preventDefault();
+    if (e.key === "ArrowDown") selectRow(selIdx + 1);
+    else if (e.key === "ArrowUp") selectRow(selIdx < 0 ? 0 : selIdx - 1);
+    else if (selIdx >= 0) heads()[selIdx].dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+  });
 
   async function load(companyId, country) {
     try {
