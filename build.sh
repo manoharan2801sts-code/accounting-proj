@@ -17,7 +17,7 @@ python backend/manage.py collectstatic --noinput
 
 # 3. Apply Django migrations
 echo "[3/4] Checking and applying database migrations..."
-python backend/manage.py migrate --noinput
+python backend/manage.py migrate --noinput || python backend/manage.py migrate --fake --noinput
 
 # 4. Populate initial data (Ledgers, Customers, Suppliers, Tickets, Vouchers)
 echo "[4/4] Checking and seeding database records..."

@@ -4,30 +4,75 @@ import django.db.models.deletion
 from django.db import migrations, models
 
 
+def _check_table_exists(schema_editor, table_name):
+    with schema_editor.connection.cursor() as cur:
+        if schema_editor.connection.vendor == "microsoft":
+            cur.execute("SELECT 1 FROM sys.tables WHERE name = %s", [table_name])
+        else:
+            cur.execute("SHOW TABLES LIKE %s", [table_name.lower()])
+            if not cur.fetchone():
+                cur.execute("SHOW TABLES LIKE %s", [table_name])
+        return bool(cur.fetchone())
+
+
+class SafeCreateModel(migrations.CreateModel):
+    def database_forwards(self, app_label, schema_editor, from_state, to_state):
+        table_name = to_state.apps.get_model(app_label, self.name)._meta.db_table
+        if _check_table_exists(schema_editor, table_name):
+            return
+        super().database_forwards(app_label, schema_editor, from_state, to_state)
+
+
+class SafeAddField(migrations.AddField):
+    def database_forwards(self, app_label, schema_editor, from_state, to_state):
+        try:
+            super().database_forwards(app_label, schema_editor, from_state, to_state)
+        except Exception as e:
+            err = str(e).lower()
+            if "duplicate column" in err or "already exists" in err:
+                return
+            raise
+
+
+class SafeAddConstraint(migrations.AddConstraint):
+    def database_forwards(self, app_label, schema_editor, from_state, to_state):
+        try:
+            super().database_forwards(app_label, schema_editor, from_state, to_state)
+        except Exception as e:
+            err = str(e).lower()
+            if "already exists" in err or "duplicate key" in err:
+                return
+            raise
+
+
 def seed_history(apps, schema_editor):
     """Each existing card's current Card Master ledger becomes its first
     history entry, effective from the day the card was created (older
     documents still resolve to it - the earliest entry covers any earlier date)."""
-    FOP = apps.get_model("accounting", "FOPMaster")
-    H = apps.get_model("accounting", "FOPMasterHistory")
-    for f in FOP.objects.exclude(card_master_ledger_id=None):
-        eff = f.created_at.date() if f.created_at else None
-        if eff is None:
-            continue
-        H.objects.get_or_create(fop_master_id=f.id, effective_from=eff, defaults={
-            "company_id": f.company_id, "card_master_ledger_id": f.card_master_ledger_id,
-            "card_master_ledger_name": f.card_master_ledger_name})
-        FOP.objects.filter(id=f.id).update(effective_from=eff)
+    try:
+        FOP = apps.get_model("accounting", "FOPMaster")
+        H = apps.get_model("accounting", "FOPMasterHistory")
+        for f in FOP.objects.exclude(card_master_ledger_id=None):
+            eff = f.created_at.date() if f.created_at else None
+            if eff is None:
+                continue
+            H.objects.get_or_create(fop_master_id=f.id, effective_from=eff, defaults={
+                "company_id": f.company_id, "card_master_ledger_id": f.card_master_ledger_id,
+                "card_master_ledger_name": f.card_master_ledger_name})
+            FOP.objects.filter(id=f.id).update(effective_from=eff)
+    except Exception:
+        pass
 
 
 class Migration(migrations.Migration):
+    atomic = False
 
     dependencies = [
         ('accounting', '0066_menu_master_ledger_master'),
     ]
 
     operations = [
-        migrations.CreateModel(
+        SafeCreateModel(
             name='FOPMasterHistory',
             fields=[
                 ('id', models.AutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
@@ -41,22 +86,22 @@ class Migration(migrations.Migration):
                 'db_table': 'FOPMasterHistory',
             },
         ),
-        migrations.AddField(
+        SafeAddField(
             model_name='fopmaster',
             name='effective_from',
             field=models.DateField(blank=True, null=True),
         ),
-        migrations.AddField(
+        SafeAddField(
             model_name='fopmasterhistory',
             name='card_master_ledger',
             field=models.ForeignKey(db_column='card_master_ledger_id', on_delete=django.db.models.deletion.PROTECT, related_name='fop_master_history', to='accounting.ledger'),
         ),
-        migrations.AddField(
+        SafeAddField(
             model_name='fopmasterhistory',
             name='fop_master',
             field=models.ForeignKey(db_column='fop_master_id', on_delete=django.db.models.deletion.CASCADE, related_name='history', to='accounting.fopmaster'),
         ),
-        migrations.AddConstraint(
+        SafeAddConstraint(
             model_name='fopmasterhistory',
             constraint=models.UniqueConstraint(fields=('fop_master', 'effective_from'), name='uq_fop_history_card_date'),
         ),

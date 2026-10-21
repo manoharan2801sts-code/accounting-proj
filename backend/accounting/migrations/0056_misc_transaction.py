@@ -4,14 +4,67 @@ import django.db.models.deletion
 from django.db import migrations, models
 
 
+def _check_table_exists(schema_editor, table_name):
+    with schema_editor.connection.cursor() as cur:
+        if schema_editor.connection.vendor == "microsoft":
+            cur.execute("SELECT 1 FROM sys.tables WHERE name = %s", [table_name])
+        else:
+            cur.execute("SHOW TABLES LIKE %s", [table_name.lower()])
+            if not cur.fetchone():
+                cur.execute("SHOW TABLES LIKE %s", [table_name])
+        return bool(cur.fetchone())
+
+
+class SafeCreateModel(migrations.CreateModel):
+    def database_forwards(self, app_label, schema_editor, from_state, to_state):
+        table_name = to_state.apps.get_model(app_label, self.name)._meta.db_table
+        if _check_table_exists(schema_editor, table_name):
+            return
+        super().database_forwards(app_label, schema_editor, from_state, to_state)
+
+
+class SafeAddField(migrations.AddField):
+    def database_forwards(self, app_label, schema_editor, from_state, to_state):
+        try:
+            super().database_forwards(app_label, schema_editor, from_state, to_state)
+        except Exception as e:
+            err = str(e).lower()
+            if "duplicate column" in err or "already exists" in err:
+                return
+            raise
+
+
+class SafeAddConstraint(migrations.AddConstraint):
+    def database_forwards(self, app_label, schema_editor, from_state, to_state):
+        try:
+            super().database_forwards(app_label, schema_editor, from_state, to_state)
+        except Exception as e:
+            err = str(e).lower()
+            if "already exists" in err or "duplicate key" in err:
+                return
+            raise
+
+
+class SafeAddIndex(migrations.AddIndex):
+    def database_forwards(self, app_label, schema_editor, from_state, to_state):
+        try:
+            super().database_forwards(app_label, schema_editor, from_state, to_state)
+        except Exception as e:
+            err = str(e).lower()
+            if "already exists" in err or "duplicate key" in err:
+                return
+            raise
+
+
 class Migration(migrations.Migration):
+    atomic = False
 
     dependencies = [
         ('accounting', '0055_voucher_category_airline'),
     ]
 
     operations = [
-        migrations.CreateModel(
+        SafeCreateModel(
             name='MiscTransaction',
             fields=[
                 ('id', models.AutoField(primary_key=True, serialize=False)),
@@ -41,30 +94,30 @@ class Migration(migrations.Migration):
                 'db_table': 'Misc_Transactions',
             },
         ),
-        migrations.AddField(
+        SafeAddField(
             model_name='misctransaction',
             name='customer',
             field=models.ForeignKey(db_column='customer_ledger_id', on_delete=django.db.models.deletion.PROTECT, related_name='misc_as_customer', to='accounting.ledger'),
         ),
-        migrations.AddField(
+        SafeAddField(
             model_name='misctransaction',
             name='supplier',
             field=models.ForeignKey(db_column='supplier_ledger_id', on_delete=django.db.models.deletion.PROTECT, related_name='misc_as_supplier', to='accounting.ledger'),
         ),
-        migrations.AddField(
+        SafeAddField(
             model_name='journalvoucher',
             name='source_misc_ticket',
             field=models.ForeignKey(blank=True, db_column='source_misc_ticket_id', null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='vouchers', to='accounting.misctransaction'),
         ),
-        migrations.AddIndex(
+        SafeAddIndex(
             model_name='misctransaction',
             index=models.Index(fields=['company_id'], name='misc_company_idx'),
         ),
-        migrations.AddConstraint(
+        SafeAddConstraint(
             model_name='misctransaction',
             constraint=models.UniqueConstraint(fields=('company_id', 'invoice_number'), name='uq_misc_company_invoice_no'),
         ),
-        migrations.AddConstraint(
+        SafeAddConstraint(
             model_name='misctransaction',
             constraint=models.UniqueConstraint(fields=('company_id', 'reference'), name='uq_misc_company_reference'),
         ),
