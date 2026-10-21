@@ -1,15 +1,15 @@
 -- ============================================================================
 -- TRAVEL AGENCY Accounting — TiDB & MySQL Clean Database Dump
--- Target Database: accounting_dep_db
+USE `accounting_dep_db`;
 -- ============================================================================
 SET FOREIGN_KEY_CHECKS = 0;
 SET SQL_MODE = 'NO_AUTO_VALUE_ON_ZERO';
 
-USE ccounting_dep_db;
+USE `accounting_dep_db`;
 
 -- MySQL dump 10.13  Distrib 8.0.46, for Win64 (x86_64)
 --
--- Host: localhost    Database: accounting_dep_db
+USE `accounting_dep_db`;
 -- ------------------------------------------------------
 -- Server version	8.0.46
 
