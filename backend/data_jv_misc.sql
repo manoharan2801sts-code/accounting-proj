@@ -1,6 +1,11 @@
 USE ccounting_dep_db;
 SET FOREIGN_KEY_CHECKS = 0;
 
+-- Ensure latest columns exist in JournalVoucher and FOPMaster
+ALTER TABLE JournalVoucher ADD COLUMN IF NOT EXISTS source_misc_ticket_id INT NULL;
+ALTER TABLE FOPMaster ADD COLUMN IF NOT EXISTS effective_from DATE NULL;
+
+
 -- Table: Misc_Transactions (1 rows)
 INSERT INTO `Misc_Transactions` (`id`, `company_id`, `branch_name`, `invoice_number`, `invoice_date`, `invoice_type`, `status`, `user_name`, `reference`, `ref_date`, `payment_mode`, `payment_gateway_ref`, `currency`, `description`, `base_amount`, `markup`, `service_fee`, `supp_markup`, `supp_service_fee`, `total_billed`, `created_at`, `updated_at`, `customer_ledger_id`, `supplier_ledger_id`, `other_taxes`) VALUES (7, 1, NULL, '1', '2026-10-16', 'Miscellaneous', 'Confirmed', 'Rahul Mehta', 'TEST', '2026-10-16', 'Top-up', NULL, 'INR', 'Visa Manual Accounting', 100.00, 70.00, 40.00, 50.00, 20.00, 310.80, '2026-10-16 10:34:35', '2026-10-16 10:34:35', 1089, 1068, 20.00);
 
