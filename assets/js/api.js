@@ -59,9 +59,7 @@
     }
     return nativeFetch(input, opts).then((res) => {
       if (res.status === 401 && !url.includes("/auth/login")) {
-        Store.clear();
-        try { sessionStorage.removeItem("voyager_permissions"); } catch (_) {}
-        window.location.href = "index.html";
+        console.warn("[API] 401 returned for", url);
       }
       if (cacheable && res.ok) {
         res.clone().text().then((body) => reportCache.set(url, { at: Date.now(), status: res.status, body })).catch(() => {});
@@ -121,8 +119,7 @@
       if (res.status === 401 && auth && retry) {
         const refreshed = await tryRefresh();
         if (refreshed) return request(path, { method, body, auth, retry: false });
-        Store.clear();
-        window.location.href = "index.html";
+        console.warn("[API] Session expired or refresh failed");
         return Promise.reject(new Error("Session expired"));
       }
 

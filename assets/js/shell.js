@@ -246,10 +246,13 @@
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.status === 401) {
-        Store.clear();
-        try { sessionStorage.removeItem(PERMS_KEY); } catch (_) {}
-        window.location.href = "index.html";
-        return null;
+        console.warn("[AUTH] /auth/my-permissions returned 401, retaining session permissions from cache.");
+        // Do not force bounce out immediately if token was just stored
+        if (!sessionStorage.getItem(PERMS_KEY) && !Store.getUser()) {
+          Store.clear();
+          window.location.href = "index.html";
+          return null;
+        }
       }
       if (res.ok) {
         const data = await res.json();
