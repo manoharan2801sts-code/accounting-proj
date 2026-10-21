@@ -13,7 +13,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 PROJECT_DIR = BASE_DIR.parent
 
 SECRET_KEY = config("DJANGO_SECRET_KEY", default="django-insecure-voyager-accounting-key-change-in-prod")
-DEBUG = config("DJANGO_DEBUG", default=False, cast=bool)
+DEBUG = config("DJANGO_DEBUG", default=True, cast=bool)
 
 # Render provides RENDER_EXTERNAL_HOSTNAME automatically
 allowed_hosts_default = "localhost,127.0.0.1,.onrender.com"
