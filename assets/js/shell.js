@@ -1185,7 +1185,7 @@
         try {
           const controller = new AbortController();
           const timeoutId = setTimeout(() => controller.abort(), 2500);
-          const res = await fetch("http://localhost:8000/api/company-master/", { signal: controller.signal });
+          const res = await fetch(`${window.VoyagerAPI ? window.VoyagerAPI.API_BASE : "/api"}/company-master/`, { signal: controller.signal });
           clearTimeout(timeoutId);
           const rows = res.ok ? await res.json() : [];
           companies = rows.map((c) => ({ id: c.id, name: c.company_name, country_code: countryCodeFromText(c.country),
