@@ -10,7 +10,8 @@
   async function loadDecimalPlaces(companyId) {
     if (!companyId) return decimalPlaces;
     try {
-      const res = await fetch(`http://localhost:8000/api/company-master/?id=${companyId}`);
+      const apiBase = window.VoyagerAPI ? window.VoyagerAPI.API_BASE : "/api";
+      const res = await fetch(`${apiBase}/company-master/?id=${companyId}`);
       if (res.ok) {
         const data = await res.json();
         if (data.decimal_places != null) decimalPlaces = Number(data.decimal_places);

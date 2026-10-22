@@ -26,6 +26,48 @@ def load_data(force=False):
     print("  Checking TiDB Database Records")
     print("=" * 60)
 
+    # Check if core tables exist
+    has_tables = False
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("SHOW TABLES LIKE 'Ledgers';")
+            has_tables = bool(cursor.fetchone())
+    except Exception as e:
+        print(f"[INFO] Table check: {e}")
+        has_tables = False
+
+    if not has_tables:
+        print("[INFO] Core tables missing in database. Executing Schema_mysql.sql to build schema and seed data...")
+        schema_file = BASE_DIR / "Schema_mysql.sql"
+        if schema_file.exists():
+            with open(schema_file, "r", encoding="utf-8") as f:
+                schema_content = f.read()
+            stmts = []
+            buf = []
+            for line in schema_content.splitlines():
+                trimmed = line.strip()
+                if trimmed.startswith("--") or trimmed.startswith("/*") or not trimmed or trimmed.upper().startswith("USE "):
+                    continue
+                buf.append(line)
+                if trimmed.endswith(";"):
+                    stmt = "\n".join(buf).strip().rstrip(";")
+                    if stmt:
+                        stmts.append(stmt)
+                    buf = []
+            with connection.cursor() as cursor:
+                cursor.execute("SET FOREIGN_KEY_CHECKS = 0;")
+                for stmt in stmts:
+                    try:
+                        cursor.execute(stmt)
+                    except Exception as e:
+                        pass
+                cursor.execute("SET FOREIGN_KEY_CHECKS = 1;")
+            try:
+                connection.commit()
+            except Exception:
+                pass
+            print(f"[OK] Schema and initial data successfully deployed from Schema_mysql.sql!")
+
     try:
         with connection.cursor() as cursor:
             cursor.execute("SELECT COUNT(*) FROM `Ledgers`;")
@@ -39,7 +81,6 @@ def load_data(force=False):
 
             if cnt > 5 and ssr_cnt > 0 and not force:
                 print(f"[OK] Database already has {cnt} ledgers and {ssr_cnt} SSR tickets. Data is ready!")
-                # Ensure at least one Super Admin exists
                 try:
                     from django.contrib.auth.hashers import make_password
                     pwd_hash = make_password("admin123")

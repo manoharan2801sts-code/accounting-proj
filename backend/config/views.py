@@ -28,6 +28,10 @@ def serve_frontend_page(request, path="index.html"):
         raise Http404("Not found")
 
     if file_path.exists() and file_path.is_file():
-        return FileResponse(open(file_path, "rb"), content_type="text/html")
+        response = FileResponse(open(file_path, "rb"), content_type="text/html")
+        response["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response["Pragma"] = "no-cache"
+        response["Expires"] = "0"
+        return response
 
     raise Http404(f"Page '{clean_name}' not found")
