@@ -1011,7 +1011,8 @@
   async function applyCompanyLogo(companyId) {
     let logo = null;
     try {
-      const res = await fetch(`http://localhost:8000/api/company-master/?id=${companyId}&images=logo`);
+      const apiBase = window.VoyagerAPI ? window.VoyagerAPI.API_BASE : "/api";
+      const res = await fetch(`${apiBase}/company-master/?id=${companyId}&images=logo`);
       if (res.ok) logo = (await res.json()).logo_base64 || null;
     } catch (err) {
       console.error("Could not load the company logo", err);

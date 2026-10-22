@@ -50,7 +50,16 @@
     }
     const token = localStorage.getItem(TOKEN_KEY);
     const isApi = API_PREFIXES.some((p) => url.startsWith(p)) || url.startsWith(API_BASE);
-    if (!isApi || !token || token === "demo-token") return nativeFetch(url || input, init);
+    if (!isApi) return nativeFetch(url || input, init);
+    if (!token || token === "demo-token") {
+      if (!url.includes("/auth/login")) {
+        console.warn("[API] No token for API call, redirecting to login:", url);
+        Store.clear();
+        window.location.href = "index.html";
+        return new Promise(() => {});
+      }
+      return nativeFetch(url || input, init);
+    }
     const opts = { ...(init || {}) };
     const headers = new Headers(opts.headers || (typeof input !== "string" && input.headers) || {});
     if (!headers.has("Authorization")) headers.set("Authorization", `Bearer ${token}`);
@@ -65,9 +74,11 @@
         return Promise.resolve(new Response(hit.body, { status: hit.status, headers: { "Content-Type": "application/json" } }));
       }
     }
-    return nativeFetch(input, opts).then((res) => {
+    return nativeFetch(url, opts).then((res) => {
       if (res.status === 401 && !url.includes("/auth/login")) {
-        console.warn("[API] 401 returned for", url);
+        console.warn("[API] 401 returned for", url, "- redirecting to login.");
+        Store.clear();
+        window.location.href = "index.html";
       }
       if (cacheable && res.ok) {
         res.clone().text().then((body) => reportCache.set(url, { at: Date.now(), status: res.status, body })).catch(() => {});
