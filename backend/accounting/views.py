@@ -591,38 +591,42 @@ def accounts_list(request):
     if not company_id:
         return JsonResponse({"error": "company_id is required"}, status=400)
 
-    rows = []
-    for g in LedgerGroup.objects.filter(company_id=company_id):
-        rows.append({
-            "id": f"g{g.id}", "code": g.code or "", "name": g.name,
-            "account_type": g.account_type, "is_group": True,
-            "parent_id": f"g{g.parent_id}" if g.parent_id else None,
-            "balance": None,
-        })
-    deltas = _ledger_balance_deltas(company_id)
-    # Was 2 queries PER ledger (Ticket.objects.filter(customer_id=...).exists()
-    # / supplier_id) - with 50+ ledgers that's 100+ extra round trips on
-    # every single page load. Two queries total instead, building a set to
-    # check membership against inside the loop.
-    used_customer_ids = set(Ticket.objects.filter(company_id=company_id).values_list("customer_id", flat=True))
-    used_supplier_ids = set(Ticket.objects.filter(company_id=company_id, supplier_id__isnull=False).values_list("supplier_id", flat=True))
-    # Reschedule tickets use ledgers too - a ledger used ONLY by a
-    # reschedule (never by a plain Ticket) must still count as in-use.
-    used_customer_ids |= set(RescheduleAirlineTicket.objects.filter(company_id=company_id).values_list("customer_id", flat=True))
-    used_supplier_ids |= set(RescheduleAirlineTicket.objects.filter(company_id=company_id, supplier_id__isnull=False).values_list("supplier_id", flat=True))
-    used_ledger_ids = used_customer_ids | used_supplier_ids
-    for l in Ledger.objects.filter(company_id=company_id).select_related("group"):
-        in_use = l.id in used_ledger_ids
-        rows.append({
-            "id": l.id, "code": l.group.code or "", "name": l.name,
-            "account_type": l.account_type, "is_group": False,
-            "parent_id": f"g{l.group_id}",
-            "balance": float(l.signed_balance) + deltas.get(l.id, 0.0),
-            "is_in_use": in_use,
-            # Ledger entry's Default Bank field asks before replacing this one.
-            "is_default_bank": bool(l.is_default_bank),
-        })
-    return JsonResponse(rows, safe=False)
+    try:
+        rows = []
+        for g in LedgerGroup.objects.filter(company_id=company_id):
+            rows.append({
+                "id": f"g{g.id}", "code": g.code or "", "name": g.name,
+                "account_type": g.account_type, "is_group": True,
+                "parent_id": f"g{g.parent_id}" if g.parent_id else None,
+                "balance": None,
+            })
+        deltas = _ledger_balance_deltas(company_id)
+        # Was 2 queries PER ledger (Ticket.objects.filter(customer_id=...).exists()
+        # / supplier_id) - with 50+ ledgers that's 100+ extra round trips on
+        # every single page load. Two queries total instead, building a set to
+        # check membership against inside the loop.
+        used_customer_ids = set(Ticket.objects.filter(company_id=company_id).values_list("customer_id", flat=True))
+        used_supplier_ids = set(Ticket.objects.filter(company_id=company_id, supplier_id__isnull=False).values_list("supplier_id", flat=True))
+        # Reschedule tickets use ledgers too - a ledger used ONLY by a
+        # reschedule (never by a plain Ticket) must still count as in-use.
+        used_customer_ids |= set(RescheduleAirlineTicket.objects.filter(company_id=company_id).values_list("customer_id", flat=True))
+        used_supplier_ids |= set(RescheduleAirlineTicket.objects.filter(company_id=company_id, supplier_id__isnull=False).values_list("supplier_id", flat=True))
+        used_ledger_ids = used_customer_ids | used_supplier_ids
+        for l in Ledger.objects.filter(company_id=company_id).select_related("group"):
+            in_use = l.id in used_ledger_ids
+            rows.append({
+                "id": l.id, "code": l.group.code or "", "name": l.name,
+                "account_type": l.account_type, "is_group": False,
+                "parent_id": f"g{l.group_id}",
+                "balance": float(l.signed_balance) + deltas.get(l.id, 0.0),
+                "is_in_use": in_use,
+                # Ledger entry's Default Bank field asks before replacing this one.
+                "is_default_bank": bool(l.is_default_bank),
+            })
+        return JsonResponse(rows, safe=False)
+    except Exception as exc:
+        import traceback
+        return JsonResponse({"error": str(exc), "traceback": traceback.format_exc()}, status=500)
 
 
 def _invoice_ref_map(company_id):
@@ -7718,6 +7722,15 @@ def dashboard_summary(request):
     company_id = request.GET.get("company_id")
     if not company_id:
         return JsonResponse({"error": "company_id is required"}, status=400)
+
+    try:
+        return _dashboard_summary_impl(request, company_id)
+    except Exception as exc:
+        import traceback
+        return JsonResponse({"error": str(exc), "traceback": traceback.format_exc()}, status=500)
+
+
+def _dashboard_summary_impl(request, company_id):
 
     today = datetime.now().date()
     fy_start = date(today.year if today.month >= 4 else today.year - 1, 4, 1)
