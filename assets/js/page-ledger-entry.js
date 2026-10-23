@@ -9,7 +9,7 @@
   // time Yes is clicked. null result = the lookup failed.
   let defaultBankLookup = null;
   function loadDefaultBank() {
-    defaultBankLookup = fetch(`http://localhost:8000/api/ledgers/default-bank/?company_id=${activeCompanyId}`)
+    defaultBankLookup = fetch(`http://127.0.0.1:8000/api/ledgers/default-bank/?company_id=${activeCompanyId}`)
       .then((res) => (res.ok ? res.json() : null))
       .catch(() => null);
     return defaultBankLookup;
@@ -35,7 +35,7 @@
     );
     if (!ok) { document.getElementById("is_default_bank_no").checked = true; return; }
     const setDefault = async (id, value) => {
-      const res = await fetch(`http://localhost:8000/api/ledgers/${id}/update/?company_id=${activeCompanyId}`, {
+      const res = await fetch(`http://127.0.0.1:8000/api/ledgers/${id}/update/?company_id=${activeCompanyId}`, {
         method: "PUT", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ is_default_bank: value }),
       });
@@ -81,7 +81,7 @@
   await loadStatesFromXml();
   document.getElementById("cancel-link").href = returnTo;
 
-  const API = "http://localhost:8000/api";
+  const API = "http://127.0.0.1:8000/api";
 
   const SECTIONS = ["section-bank", "section-debtor-in", "section-debtor-ae", "section-creditor", "section-taxledger", "section-duties-taxes"];
   function hideAllSections() { SECTIONS.forEach((id) => (document.getElementById(id).style.display = "none")); }
@@ -292,7 +292,7 @@
       if (!res.ok) throw new Error(`Ledger groups API returned ${res.status}`);
       groupsFlat = await res.json();
     } catch (err) {
-      console.error("Could not load ledger groups from the Django API - is it running on localhost:8000?", err);
+      console.error("Could not load ledger groups from the Django API - is it running on 127.0.0.1:8000?", err);
       voyagerAlert("Could not load account groups from the database. Is the Django backend running?", { icon: "error" });
       groupsFlat = [];
     }
@@ -432,7 +432,7 @@
         showToast("Ledger created and saved to the database.", returnTo);
       }
     } catch (err) {
-      voyagerAlert(err.message || "Could not save this ledger. Is the Django backend running on localhost:8000?", { icon: "error" });
+      voyagerAlert(err.message || "Could not save this ledger. Is the Django backend running on 127.0.0.1:8000?", { icon: "error" });
     }
   });
 

@@ -246,13 +246,13 @@
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.status === 401) {
-        console.warn("[AUTH] /auth/my-permissions returned 401, retaining session permissions from cache.");
-        // Do not force bounce out immediately if token was just stored
         if (!sessionStorage.getItem(PERMS_KEY) && !Store.getUser()) {
           Store.clear();
+          try { sessionStorage.removeItem(PERMS_KEY); } catch (_) {}
           window.location.href = "index.html";
           return null;
         }
+        return null;
       }
       if (res.ok) {
         const data = await res.json();
@@ -572,6 +572,10 @@
   }
 
   function updateActiveNav(activeKey, url) {
+    // maintenance.html?key=<menu key> - the switched-off menu that was opened.
+    if (!activeKey && url && /(^|\/)maintenance\.html\?/.test(url)) {
+      activeKey = new URLSearchParams(url.split("?")[1]).get("key");
+    }
     const baseName = url ? url.split("?")[0].replace(/^.*[\\/]/, "") : (window.location.pathname.split("/").pop() || "dashboard.html");
     document.querySelectorAll(".menubar-link, .menubar-dropdown a, .menubar-subdropdown a, .menubar-trigger, .menubar-submenu-trigger").forEach((el) => {
       el.classList.remove("active");
@@ -581,7 +585,10 @@
     document.querySelectorAll(".menubar-link[href], .menubar-dropdown a[href], .menubar-subdropdown a[href]").forEach((item) => {
       const itemHref = item.getAttribute("href") || "";
       const itemKey = item.getAttribute("data-key");
-      const isMatch = (activeKey && itemKey === activeKey) || (baseName && itemHref.split("?")[0] === baseName);
+      // maintenance.html is shared by every switched-off menu - match it by
+      // its menu key only, not by file name.
+      const isMatch = (activeKey && itemKey === activeKey)
+        || (baseName && baseName !== "maintenance.html" && itemHref.split("?")[0] === baseName);
       if (isMatch) {
         item.classList.add("active");
         let parent = item.parentElement;
@@ -994,6 +1001,20 @@
     if (!isHtmlTarget) return;
 
     e.preventDefault();
+    // An entry / edit popup is open (one with a usable Save / Apply button -
+    // not Find, J.V or a view-only popup) and a menu link was clicked:
+    // confirm before leaving, its unsaved entries would be lost.
+    const fromMenu = link.closest(".app-menubar, .app-topnav, .app-sidebar");
+    const isEntryPopup = (m) => Array.from(m.querySelectorAll("button"))
+      .some((b) => !b.disabled && b.offsetParent !== null && /^(save\b|apply$)/i.test(b.textContent.trim()));
+    const openEntryPopup = Array.from(document.querySelectorAll(".dom-modal-backdrop.open"))
+      .some((m) => m.id !== "voyager-alert-modal" && m.id !== "voyager-confirm-modal" && isEntryPopup(m));
+    if (fromMenu && openEntryPopup && window.voyagerConfirm) {
+      window.voyagerConfirm("You have unsaved changes. Do you want to leave this page without saving?",
+        { title: "Unsaved Changes", confirmLabel: "Leave", icon: "exit" })
+        .then((ok) => { if (ok) navigateTo(href, true); });
+      return;
+    }
     navigateTo(href, true);
   });
 
@@ -1011,8 +1032,7 @@
   async function applyCompanyLogo(companyId) {
     let logo = null;
     try {
-      const apiBase = window.VoyagerAPI ? window.VoyagerAPI.API_BASE : "/api";
-      const res = await fetch(`${apiBase}/company-master/?id=${companyId}&images=logo`);
+      const res = await fetch(`http://127.0.0.1:8000/api/company-master/?id=${companyId}&images=logo`);
       if (res.ok) logo = (await res.json()).logo_base64 || null;
     } catch (err) {
       console.error("Could not load the company logo", err);
@@ -1189,7 +1209,7 @@
         try {
           const controller = new AbortController();
           const timeoutId = setTimeout(() => controller.abort(), 2500);
-          const res = await fetch(`${window.VoyagerAPI ? window.VoyagerAPI.API_BASE : "/api"}/company-master/`, { signal: controller.signal });
+          const res = await fetch("http://127.0.0.1:8000/api/company-master/", { signal: controller.signal });
           clearTimeout(timeoutId);
           const rows = res.ok ? await res.json() : [];
           companies = rows.map((c) => ({ id: c.id, name: c.company_name, country_code: countryCodeFromText(c.country),
@@ -1421,6 +1441,217 @@
   document.addEventListener("scroll", syncAllDateOverlays, true);
   setInterval(syncAllDateOverlays, 400);
   syncAllDateOverlays();
+
+  // ============================================================
+  // Search dropdown - replaces the browser's own <datalist> popup on EVERY
+  // "type to search" field (<input list="...">: Customer, User Name, Office
+  // ID, Supplier ID ...) with one clean, consistent list: letters typed
+  // filter it (names that START with them first), about 5 rows show and the
+  // rest scroll, blue highlight on hover / Up-Down keys, Enter or click
+  // picks, Esc closes. The input keeps its normal value and the page gets
+  // the usual input + change events, so no page needs to change. Options
+  // are read from the <datalist> each time it opens, so lists filled later
+  // by a page's own script are always current.
+  // ============================================================
+  function ensureSearchDropdownStyle() {
+    if (document.getElementById("vdl-style")) return;
+    const st = document.createElement("style");
+    st.id = "vdl-style";
+    st.textContent = `
+      input.vdl-input {
+        background-image: url("data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#64748B" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>')}") !important;
+        background-repeat: no-repeat !important; background-position: right 9px center !important; background-size: 10px 10px !important;
+        padding-right: 26px !important;
+      }
+      .vdl-pop {
+        position: fixed; z-index: 2147483500; display: none; box-sizing: border-box;
+        background: #FFFFFF; border: 1px solid var(--color-border, #CBD5E1); border-radius: 6px;
+        box-shadow: 0 10px 28px rgba(15, 23, 42, 0.16); overflow: hidden; font-family: inherit;
+      }
+      .vdl-list { max-height: 166px; overflow-y: auto; padding: 4px 0; }
+      .vdl-item {
+        display: flex; align-items: center; justify-content: space-between; gap: 10px;
+        height: 31px; padding: 0 12px; font-size: 12.5px; color: var(--color-text-dark, #0F172A);
+        cursor: pointer; white-space: nowrap; overflow: hidden;
+      }
+      .vdl-item .vdl-main { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+      .vdl-item .vdl-sub { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: 11px; color: var(--color-text-muted, #64748B); }
+      .vdl-item mark { background: transparent; color: inherit; font-weight: 700; padding: 0; }
+      .vdl-item.vdl-active { background: var(--color-primary, #3B6DB5); color: #FFFFFF; }
+      .vdl-item.vdl-active .vdl-sub { color: rgba(255, 255, 255, 0.85); }
+      .vdl-item.vdl-selected:not(.vdl-active) { background: var(--color-primary-tint, #EEF3FB); font-weight: 600; }
+      .vdl-empty { padding: 9px 12px; font-size: 12px; color: var(--color-text-muted, #64748B); }
+    `;
+    document.head.appendChild(st);
+  }
+
+  let vdlPop = null, vdlInput = null, vdlItems = [], vdlActive = -1;
+  const vdlEsc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+  // Hand every <input list> over to the custom dropdown (once each).
+  function enhanceSearchInputs() {
+    document.querySelectorAll("input[list]").forEach((inp) => {
+      if (inp.dataset.vdl) return;
+      ensureSearchDropdownStyle();
+      inp.dataset.vdl = inp.getAttribute("list");
+      inp.removeAttribute("list"); // no more native popup
+      inp.setAttribute("autocomplete", "off");
+      inp.classList.add("vdl-input");
+    });
+  }
+
+  // Options of an input's datalist - cached until the datalist changes
+  // (big lists, e.g. ~16,000 airports, aren't re-read on every keystroke).
+  function vdlOptions(inp) {
+    const dl = document.getElementById(inp.dataset.vdl);
+    if (!dl) return [];
+    const sig = `${dl.children.length}|${dl.firstElementChild ? dl.firstElementChild.value : ""}|${dl.lastElementChild ? dl.lastElementChild.value : ""}`;
+    if (dl._vdlCache && dl._vdlCache.sig === sig) return dl._vdlCache.options;
+    const seen = new Set();
+    const options = Array.from(dl.querySelectorAll("option")).map((o) => ({ value: o.value, label: (o.textContent || o.label || "").trim() }))
+      .filter((o) => o.value && !seen.has(o.value) && seen.add(o.value));
+    dl._vdlCache = { sig, options };
+    return options;
+  }
+  const VDL_MAX_ROWS = 200; // drawn at most - keep typing to narrow a long list
+
+  function vdlPosition() {
+    if (!vdlPop || !vdlInput) return;
+    if (!vdlInput.isConnected) { closeSearchDropdown(); return; }
+    const r = vdlInput.getBoundingClientRect();
+    if (r.width === 0 && r.height === 0) { closeSearchDropdown(); return; }
+    const w = Math.min(Math.max(r.width, Number(vdlInput.dataset.vdlMinWidth) || 200), window.innerWidth - 16);
+    vdlPop.style.width = `${w}px`;
+    vdlPop.style.left = `${Math.max(8, Math.min(r.left, window.innerWidth - w - 8))}px`;
+    const h = vdlPop.offsetHeight;
+    const below = r.bottom + 3;
+    vdlPop.style.top = `${below + h > window.innerHeight - 8 && r.top - h - 3 > 8 ? r.top - h - 3 : below}px`;
+  }
+
+  function renderSearchDropdown() {
+    const all = vdlOptions(vdlInput);
+    const typed = vdlInput.value.trim().toLowerCase();
+    // A value that already IS one of the options (just picked / loaded):
+    // show the whole list with it marked, not just that one row.
+    const exact = all.some((o) => o.value.toLowerCase() === typed);
+    const q = exact ? "" : typed;
+    const starts = [], contains = [];
+    all.forEach((o) => {
+      const hay = `${o.value} ${o.label}`.toLowerCase();
+      if (!q || o.value.toLowerCase().startsWith(q)) starts.push(o);
+      else if (hay.includes(q)) contains.push(o);
+    });
+    vdlItems = starts.concat(contains);
+    const total = vdlItems.length;
+    if (total > VDL_MAX_ROWS) {
+      // Keep the current value's row in view even when it's past the cut.
+      const cur = vdlItems.findIndex((o) => o.value.toLowerCase() === typed);
+      const picked = cur >= VDL_MAX_ROWS ? vdlItems[cur] : null;
+      vdlItems = picked ? [picked].concat(vdlItems.slice(0, VDL_MAX_ROWS - 1)) : vdlItems.slice(0, VDL_MAX_ROWS);
+    }
+    const mark = (text) => {
+      if (!q) return vdlEsc(text);
+      const i = text.toLowerCase().indexOf(q);
+      return i < 0 ? vdlEsc(text) : vdlEsc(text.slice(0, i)) + `<mark>${vdlEsc(text.slice(i, i + q.length))}</mark>` + vdlEsc(text.slice(i + q.length));
+    };
+    const current = vdlInput.value.trim().toLowerCase();
+    vdlPop.innerHTML = vdlItems.length
+      ? `<div class="vdl-list">${vdlItems.map((o, i) => `
+          <div class="vdl-item${o.value.toLowerCase() === current ? " vdl-selected" : ""}" data-i="${i}" title="${vdlEsc(o.label && o.label !== o.value ? `${o.value} - ${o.label}` : o.value)}">
+            <span class="vdl-main">${mark(o.value)}</span>${o.label && o.label !== o.value ? `<span class="vdl-sub">${mark(o.label)}</span>` : ""}
+          </div>`).join("")}</div>${total > vdlItems.length ? `<div class="vdl-empty">Showing ${vdlItems.length} of ${total} - keep typing to narrow</div>` : ""}`
+      : `<div class="vdl-empty">No matches</div>`;
+    vdlActive = q && vdlItems.length ? 0 : vdlItems.findIndex((o) => o.value.toLowerCase() === current);
+    vdlPaintActive(true);
+    vdlPosition();
+  }
+
+  function vdlPaintActive(scroll) {
+    if (!vdlPop) return;
+    vdlPop.querySelectorAll(".vdl-item").forEach((el, i) => el.classList.toggle("vdl-active", i === vdlActive));
+    const el = vdlPop.querySelector(`.vdl-item[data-i="${vdlActive}"]`);
+    if (el && scroll) el.scrollIntoView({ block: "nearest" });
+  }
+
+  function openSearchDropdown(inp) {
+    if (inp.disabled || inp.readOnly) return;
+    if (!vdlPop) {
+      vdlPop = document.createElement("div");
+      vdlPop.className = "vdl-pop";
+      // Keep focus in the input while clicking / scrolling the list.
+      vdlPop.addEventListener("mousedown", (e) => e.preventDefault());
+      vdlPop.addEventListener("mousemove", (e) => {
+        const it = e.target.closest(".vdl-item");
+        if (it && Number(it.dataset.i) !== vdlActive) { vdlActive = Number(it.dataset.i); vdlPaintActive(false); }
+      });
+      vdlPop.addEventListener("click", (e) => {
+        const it = e.target.closest(".vdl-item");
+        if (it) pickSearchOption(Number(it.dataset.i));
+      });
+      document.body.appendChild(vdlPop);
+    }
+    vdlInput = inp;
+    vdlPop.style.display = "block";
+    renderSearchDropdown();
+  }
+
+  function closeSearchDropdown() {
+    if (vdlPop) vdlPop.style.display = "none";
+    vdlInput = null; vdlActive = -1;
+  }
+
+  function pickSearchOption(i) {
+    const o = vdlItems[i];
+    const inp = vdlInput;
+    if (!o || !inp) return;
+    inp.value = o.value;
+    closeSearchDropdown();
+    inp.dispatchEvent(new Event("input", { bubbles: true }));
+    inp.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+
+  document.addEventListener("focusin", (e) => {
+    if (e.target.matches && e.target.matches("input.vdl-input")) openSearchDropdown(e.target);
+  });
+  document.addEventListener("mousedown", (e) => {
+    const inp = e.target.closest && e.target.closest("input.vdl-input");
+    if (inp && inp === document.activeElement && (!vdlInput || vdlPop.style.display === "none")) openSearchDropdown(inp);
+    else if (vdlInput && !inp && vdlPop && !vdlPop.contains(e.target)) closeSearchDropdown();
+  }, true);
+  document.addEventListener("input", (e) => {
+    // Our own pick also fires "input" - the list is already closed then.
+    if (e.target.matches && e.target.matches("input.vdl-input") && e.target === document.activeElement && e.isTrusted) {
+      if (vdlInput !== e.target) openSearchDropdown(e.target); else renderSearchDropdown();
+    }
+  });
+  document.addEventListener("focusout", (e) => {
+    if (e.target === vdlInput) setTimeout(() => { if (document.activeElement !== vdlInput) closeSearchDropdown(); }, 0);
+  });
+  document.addEventListener("keydown", (e) => {
+    if (!e.target.matches || !e.target.matches("input.vdl-input")) return;
+    const open = vdlInput === e.target && vdlPop && vdlPop.style.display !== "none";
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      if (!open) { openSearchDropdown(e.target); return; }
+      if (!vdlItems.length) return;
+      vdlActive = e.key === "ArrowDown" ? Math.min(vdlItems.length - 1, vdlActive + 1) : Math.max(0, vdlActive - 1);
+      vdlPaintActive(true);
+    } else if (e.key === "Enter" && open && vdlActive >= 0) {
+      e.preventDefault();
+      e.stopImmediatePropagation(); // Enter picks here - it doesn't also run the page's own Enter action
+      pickSearchOption(vdlActive);
+    } else if (e.key === "Escape" && open) {
+      e.preventDefault();
+      e.stopImmediatePropagation(); // closes just the list, not the popup it sits in
+      closeSearchDropdown();
+    } else if (e.key === "Tab" && open) {
+      closeSearchDropdown();
+    }
+  }, true);
+  document.addEventListener("scroll", (e) => { if (vdlInput && vdlPop && !vdlPop.contains(e.target)) vdlPosition(); }, true);
+  window.addEventListener("resize", () => { if (vdlInput) vdlPosition(); });
+  setInterval(enhanceSearchInputs, 400);
+  enhanceSearchInputs();
 
   // ============================================================
   // Project calendar - replaces the browser's own date picker on EVERY

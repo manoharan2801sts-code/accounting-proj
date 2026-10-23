@@ -113,7 +113,7 @@
         );
         if (!ok) return;
         try {
-          const res = await fetch(`http://localhost:8000/api/ledgers/${btn.dataset.id}/delete/?company_id=${currentCompanyId}`, {
+          const res = await fetch(`http://127.0.0.1:8000/api/ledgers/${btn.dataset.id}/delete/?company_id=${currentCompanyId}`, {
             method: "DELETE",
           });
           const result = await res.json();
@@ -126,7 +126,7 @@
     });
   }
 
-  const ACCOUNTS_API = "http://localhost:8000/api/accounts/";
+  const ACCOUNTS_API = "http://127.0.0.1:8000/api/accounts/";
 
   async function load(companyId, country) {
     currentCompanyId = companyId; currentCountryCode = country;
@@ -135,7 +135,7 @@
       if (!res.ok) throw new Error(`Accounts API returned ${res.status}`);
       allAccounts = await res.json();
     } catch (err) {
-      console.error("Could not load accounts from the Django API - is it running on localhost:8000?", err);
+      console.error("Could not load accounts from the Django API - is it running on 127.0.0.1:8000?", err);
       allAccounts = [];
     }
     currentCcy = currencyFor(country);

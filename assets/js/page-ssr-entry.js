@@ -5,7 +5,7 @@
   // /api/ssr-tickets/ (dbo.sp_SSRTicket) and posts its own ALS-n JV. GST % and
   // the JV ledgers come from Ledger Mapping (SSR Markup / SSR Service Fee and
   // the Supplier SSR Markup / Supplier SSR Service Fee fields).
-  const API = "http://localhost:8000/api/";
+  const API = "http://127.0.0.1:8000/api/";
   const n = (v) => Number(String(v || "").replace(/,/g, "")) || 0;
   // Money amounts follow Company Master's "No. of Decimals" (same as the
   // ticket screen's fmtN) - f2 for display, fmtN for amount input boxes.
@@ -178,20 +178,40 @@
   }));
 
   // ---------- SSR fare breakup popup (double-click a row) ----------
-  const EDIT_FIELDS = { seat: "m-seat", meal: "m-meal", baggage: "m-baggage", other_ssr: "m-other-ssr",
-    markup: "m-markup", service_fee: "m-service-fee", supp_markup: "m-supp-markup", supp_service_fee: "m-supp-service-fee" };
+  // Line-level amount fields - each is the SUM of the popup grid's rows, so
+  // the J.V, reports and prints keep reading the same columns.
+  const EDIT_FIELDS = ["seat", "meal", "baggage", "other_ssr", "markup", "service_fee", "supp_markup", "supp_service_fee"];
   const INFO_FIELDS = { airline_category: "m-airline-category", ticket_no: "m-ticket-no", pax_name: "m-pax-name",
     pax_type: "m-pax-type", sector: "m-sector", office_id: "m-office-id", supplier: "m-supplier", fop: "m-fop" };
   const SSR_TYPES = window.VoyagerHardcode.dropdownValues("ssrTypes");
-  // One row per SSR type: SSR Ticket Number + SSR detail text.
-  $("m-ssr-items").innerHTML = `<span></span><span class="m-ssr-head">SSR Ticket No</span><span class="m-ssr-head">SSR Details</span>` +
-    SSR_TYPES.map((t, i) =>
-      `<label>${esc(t)}</label>` +
-      `<input class="dom-input m-ssr-tkt" data-type="${esc(t)}" id="m-ssr-tkt-${i}" maxlength="30" placeholder="Ticket number" />` +
-      `<input class="dom-input m-ssr-item" data-type="${esc(t)}" id="m-ssr-item-${i}" maxlength="60" placeholder="Code / item" />`).join("");
+  // SSR type -> the line's amount column it adds into.
+  const TYPE_AMOUNT_FIELD = { Baggage: "baggage", Meal: "meal", Seat: "seat", "Other SSR": "other_ssr" };
+  // Per-row charge boxes, in grid order (supplier side first, as the header).
+  const ROW_CHARGES = ["amount", "supp_markup", "supp_service_fee", "markup", "service_fee"];
+  const amtBox = (t, k) => `<input class="dom-input dom-amount m-ssr-amt" type="text" inputmode="decimal" data-type="${esc(t)}" data-k="${k}" value="0.00" />`;
+  // One row per SSR type: Type | EMD | Details | Amt | Supplier SSR Markup /
+  // SSR Service Fee / GST Amt | Customer SSR Markup / SSR Service Fee / GST Amt.
+  $("m-ssr-rows").innerHTML = SSR_TYPES.map((t, i) => `<tr data-type="${esc(t)}">
+      <td class="m-ssr-type">${esc(t)}</td>
+      <td><input class="dom-input m-ssr-tkt" data-type="${esc(t)}" id="m-ssr-tkt-${i}" maxlength="30" placeholder="EMD ticket number" /></td>
+      <td><input class="dom-input m-ssr-item" data-type="${esc(t)}" id="m-ssr-item-${i}" maxlength="60" placeholder="Code / item" /></td>
+      <td>${amtBox(t, "amount")}</td>
+      <td class="m-ssr-grp-start">${amtBox(t, "supp_markup")}</td><td>${amtBox(t, "supp_service_fee")}</td><td class="m-ssr-ro m-supp-gst">0.00</td>
+      <td class="m-ssr-grp-start">${amtBox(t, "markup")}</td><td>${amtBox(t, "service_fee")}</td><td class="m-ssr-ro m-cust-gst">0.00</td>
+    </tr>`).join("");
+  const rowOf = (t) => Array.from(document.querySelectorAll("#m-ssr-rows tr")).find((tr) => tr.dataset.type === t);
+  const box = (t, k) => rowOf(t).querySelector(`.m-ssr-amt[data-k="${k}"]`);
   function readModal() {
-    const l = { ssr_items: {}, ssr_ticket_numbers: {} };
-    Object.entries(EDIT_FIELDS).forEach(([k, id]) => { l[k] = n($(id).value); });
+    const l = { ssr_items: {}, ssr_ticket_numbers: {}, ssr_charges: {} };
+    EDIT_FIELDS.forEach((k) => { l[k] = 0; });
+    SSR_TYPES.forEach((t) => {
+      const c = {};
+      ROW_CHARGES.forEach((k) => { c[k] = n(box(t, k).value); });
+      if (ROW_CHARGES.some((k) => c[k])) l.ssr_charges[t] = c;
+      const amountField = TYPE_AMOUNT_FIELD[t] || "other_ssr";
+      l[amountField] += c.amount;
+      ["markup", "service_fee", "supp_markup", "supp_service_fee"].forEach((k) => { l[k] += c[k]; });
+    });
     document.querySelectorAll(".m-ssr-item").forEach((el) => { if (el.value.trim()) l.ssr_items[el.dataset.type] = el.value.trim(); });
     document.querySelectorAll(".m-ssr-tkt").forEach((el) => { if (el.value.trim()) l.ssr_ticket_numbers[el.dataset.type] = el.value.trim(); });
     return l;
@@ -199,27 +219,48 @@
   function recalcModal() {
     const l = readModal();
     const t = lineTotals(l);
+    SSR_TYPES.forEach((ty) => {
+      const tr = rowOf(ty);
+      tr.querySelector(".m-supp-gst").textContent = f2(n(box(ty, "supp_service_fee").value) * suppGstPct() / 100);
+      tr.querySelector(".m-cust-gst").textContent = f2(n(box(ty, "service_fee").value) * custGstPct() / 100);
+    });
+    $("m-supp-head").title = `GST Amt = SSR Service Fee x ${pct(suppGstPct())}% (GST % of "${FIELD.supp_service_fee}" in Ledger Mapping)`;
+    $("m-cust-head").title = `GST Amt = SSR Service Fee x ${pct(custGstPct())}% (GST % of "${FIELD.service_fee}" in Ledger Mapping)`;
     $("m-ssr-total").textContent = f2(t.ssr);
-    $("m-gst-pct").textContent = pct(custGstPct()); $("m-supp-gst-pct").textContent = pct(suppGstPct());
-    $("m-taxable").textContent = f2(l.service_fee); $("m-gst-amt").textContent = f2(t.gst);
-    $("m-supp-taxable").textContent = f2(l.supp_service_fee); $("m-supp-gst-amt").textContent = f2(t.suppGst);
+    $("m-supp-markup-total").textContent = f2(l.supp_markup); $("m-supp-sfee-total").textContent = f2(l.supp_service_fee);
+    $("m-supp-gst-amt").textContent = f2(t.suppGst);
+    $("m-markup-total").textContent = f2(l.markup); $("m-sfee-total").textContent = f2(l.service_fee);
+    $("m-gst-amt").textContent = f2(t.gst);
     $("m-total").textContent = f2(t.total);
   }
   // (Leaving a box formats it to the company's decimals - shared, util.js.)
-  document.querySelectorAll(".ssr-calc").forEach((el) => el.addEventListener("input", recalcModal));
   // Same rule as the Booking screen: a markup / service fee can't hold an
-  // amount until its ledger is set in Ledger Mapping.
+  // amount until its ledger is set in Ledger Mapping. Every SSR type's markup
+  // / service fee posts to the same single mapped ledger.
   const guardWarned = new Set();
-  Object.entries({ markup: "m-markup", service_fee: "m-service-fee", supp_markup: "m-supp-markup", supp_service_fee: "m-supp-service-fee" })
-    .forEach(([k, id]) => $(id).addEventListener("input", (e) => {
-      if (mapped.has(FIELD[k]) || n(e.target.value) === 0) return;
+  document.querySelectorAll(".m-ssr-amt").forEach((el) => el.addEventListener("input", (e) => {
+    const k = el.dataset.k;
+    if (FIELD[k] && !mapped.has(FIELD[k]) && n(e.target.value) !== 0) {
       e.target.value = fmtN(0);
-      if (!guardWarned.has(id)) { guardWarned.add(id); voyagerAlert(`Required Ledger account is not mapped ("${FIELD[k]}" in Ledger Mapping).`); }
-      recalcModal();
-    }));
+      if (!guardWarned.has(k)) { guardWarned.add(k); voyagerAlert(`Required Ledger account is not mapped ("${FIELD[k]}" in Ledger Mapping).`); }
+    }
+    recalcModal();
+  }));
+
+  // Per-type charges of a line. Lines saved before the grid have no
+  // ssr_charges: each type gets its own amount column, and the line's markup
+  // / service fees sit on its first entered type.
+  function chargesOf(l) {
+    if (l.ssr_charges && Object.keys(l.ssr_charges).length) return l.ssr_charges;
+    const out = {};
+    SSR_TYPES.forEach((t) => { out[t] = { amount: n(l[TYPE_AMOUNT_FIELD[t] || "other_ssr"]) }; });
+    const first = SSR_TYPES.find((t) => (l.ssr_items || {})[t] || out[t].amount) || SSR_TYPES[0];
+    if (first) ["markup", "service_fee", "supp_markup", "supp_service_fee"].forEach((k) => { out[first][k] = n(l[k]); });
+    return out;
+  }
 
   // A line nothing has been entered on yet (no SSR detail, every amount 0).
-  const isBlankLine = (l) => !ssrSummary(l) && Object.keys(EDIT_FIELDS).every((k) => !n(l[k]));
+  const isBlankLine = (l) => !ssrSummary(l) && EDIT_FIELDS.every((k) => !n(l[k]));
   function openLine(idx) {
     editing = idx;
     const l = lines[idx];
@@ -233,7 +274,8 @@
       ? lines.find((o, i) => i !== idx && o.pax_type === l.pax_type && !isBlankLine(o))
       : null;
     const src = template || l;
-    Object.entries(EDIT_FIELDS).forEach(([k, id]) => { $(id).value = fmtN(src[k]); });
+    const charges = chargesOf(src);
+    SSR_TYPES.forEach((t) => ROW_CHARGES.forEach((k) => { box(t, k).value = fmtN((charges[t] || {})[k] || 0); }));
     document.querySelectorAll(".m-ssr-item").forEach((el) => { el.value = (src.ssr_items || {})[el.dataset.type] || ""; });
     document.querySelectorAll(".m-ssr-tkt").forEach((el) => { el.value = (l.ssr_ticket_numbers || {})[el.dataset.type] || ""; });
     document.querySelectorAll("#ssr-modal input").forEach((el) => { el.disabled = viewMode; });
@@ -246,6 +288,9 @@
   $("m-save-btn").addEventListener("click", () => {
     const l = readModal();
     if (!Object.keys(l.ssr_items).length) { voyagerAlert("Enter at least one SSR detail (Baggage, Meal, Seat...)."); return; }
+    // A type with an EMD number or any amount must say what the SSR is.
+    const noDetail = SSR_TYPES.find((t) => !l.ssr_items[t] && (l.ssr_ticket_numbers[t] || l.ssr_charges[t]));
+    if (noDetail) { voyagerAlert(`Enter the SSR Details for ${noDetail}.`); rowOf(noDetail).querySelector(".m-ssr-item").focus(); return; }
     lines[editing] = { ...lines[editing], ...l };
     close("ssr-modal"); render();
   });
@@ -441,7 +486,7 @@
         ticket_no: p.ticket_no, pax_name: p.passenger_name, pax_type: p.pax_type || tl.pax_type || "",
         sector: s.sector, airline_category: tl.airline_category || "", office_id: tl.office_id || "",
         supplier: tl.supplier_name || t.supplier_name || "", fop: tl.fop || "",
-        ssr_items: {}, ssr_ticket_numbers: {}, seat: 0, meal: 0, baggage: 0, other_ssr: 0, markup: 0, service_fee: 0, supp_markup: 0, supp_service_fee: 0,
+        ssr_items: {}, ssr_ticket_numbers: {}, ssr_charges: {}, seat: 0, meal: 0, baggage: 0, other_ssr: 0, markup: 0, service_fee: 0, supp_markup: 0, supp_service_fee: 0,
       }));
     });
     close("ssr-pax-modal");
@@ -486,7 +531,7 @@
         original_ticket_line_id: l.original_ticket_line_id, reschedule_line_id: l.reschedule_line_id,
         ticket_no: l.ticket_no, passenger_name: l.pax_name, pax_type: l.pax_type, airline_category: l.airline_category,
         sector: l.sector, office_id: l.office_id, supplier_name: l.supplier, fop: l.fop, ssr_items: l.ssr_items || {},
-        ssr_ticket_numbers: l.ssr_ticket_numbers || {},
+        ssr_ticket_numbers: l.ssr_ticket_numbers || {}, ssr_charges: l.ssr_charges || {},
         seat: n(l.seat), meal: n(l.meal), baggage: n(l.baggage), other_ssr: n(l.other_ssr),
         markup: n(l.markup), service_fee: n(l.service_fee), supp_markup: n(l.supp_markup), supp_service_fee: n(l.supp_service_fee),
       })),

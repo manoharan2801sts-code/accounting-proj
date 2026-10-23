@@ -4,14 +4,14 @@
 
   // Office ID: loaded from Sundry Creditors (suppliers) for the active
   // company; picking/typing a matching Office ID auto-fills Supplier Name.
-  const SUPPLIERS_API = "http://localhost:8000/api/suppliers/";
+  const SUPPLIERS_API = "http://127.0.0.1:8000/api/suppliers/";
   async function populateSuppliers(companyId) {
     try {
       const res = await fetch(`${SUPPLIERS_API}?company_id=${companyId}`);
       if (!res.ok) throw new Error(`Suppliers API returned ${res.status}`);
       allSuppliers = await res.json();
     } catch (err) {
-      console.error("Could not load suppliers (Sundry Creditors) from the Django API - is it running on localhost:8000?", err);
+      console.error("Could not load suppliers (Sundry Creditors) from the Django API - is it running on 127.0.0.1:8000?", err);
       allSuppliers = [];
     }
     document.getElementById("sm-office-id-options").innerHTML = allSuppliers
@@ -112,7 +112,7 @@
   // up by Office ID. `savedRules` is a local cache of the last GET, kept
   // in sync after every create/delete.
   // ============================================================
-  const RULES_API = "http://localhost:8000/api/supplier-commission-rules/";
+  const RULES_API = "http://127.0.0.1:8000/api/supplier-commission-rules/";
   const listTbody = document.getElementById("sm-list-tbody");
   const emptyRow = document.getElementById("sm-list-empty-row");
   let savedRules = [];

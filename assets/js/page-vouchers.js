@@ -90,13 +90,13 @@
 
   async function load(companyId, country) {
     try {
-      const res = await fetch(`http://localhost:8000/api/vouchers/?company_id=${companyId}`);
+      const res = await fetch(`http://127.0.0.1:8000/api/vouchers/?company_id=${companyId}`);
       if (!res.ok) throw new Error(`Vouchers API returned ${res.status}`);
       allVouchers = await res.json();
     } catch (err) {
-      console.error("Could not load vouchers from the Django API — is it running on localhost:8000?", err);
+      console.error("Could not load vouchers from the Django API — is it running on 127.0.0.1:8000?", err);
       document.getElementById("voucher-list").innerHTML =
-        `<p style="color:var(--color-danger); padding:16px;">Could not load vouchers from the database. Is the Django backend running on localhost:8000?</p>`;
+        `<p style="color:var(--color-danger); padding:16px;">Could not load vouchers from the database. Is the Django backend running on 127.0.0.1:8000?</p>`;
       return;
     }
     ccy = currencyFor(country);

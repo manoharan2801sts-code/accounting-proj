@@ -121,7 +121,7 @@
     const tickets = window.VoyagerMock.getTicketsForCustomer(companyId, customerName)
       .map((t) => ({ kind: "Ticket", date: t.issue_date, label: `${t.pnr} - ${t.passenger_name} (${t.sector})`, amount: t.total_billed, editUrl: window.VoyagerEntry.zoomInUrl("ticket-entry.html", t.id, returnTo) }));
     const hotels = window.VoyagerMock.getHotelsForCustomer(companyId, customerName)
-      .map((h) => ({ kind: "Hotel", date: h.check_in, label: `${h.hotel_name} - ${h.guest_name}`, amount: h.customer_billing, editUrl: window.VoyagerEntry.zoomInUrl("hotel-entry.html", h.id, returnTo) }));
+      .map((h) => ({ kind: "Hotel", date: h.check_in, label: `${h.hotel_name} - ${h.guest_name}`, amount: h.customer_billing, editUrl: "maintenance.html?key=trans-hotels-booking" }));
     const items = tickets.concat(hotels).sort((a, b) => (a.date < b.date ? 1 : -1));
     renderTransactions(customerName, `${items.length} transaction(s) for this customer`, items, ccy);
   }
@@ -133,7 +133,7 @@
     }
     const returnTo = window.location.pathname.split("/").pop() + window.location.search;
     const items = window.VoyagerMock.getHotelsForSupplier(companyId, supplierName)
-      .map((h) => ({ kind: "Hotel", date: h.check_in, label: `${h.hotel_name} - ${h.guest_name}`, amount: h.supplier_cost, editUrl: window.VoyagerEntry.zoomInUrl("hotel-entry.html", h.id, returnTo) }))
+      .map((h) => ({ kind: "Hotel", date: h.check_in, label: `${h.hotel_name} - ${h.guest_name}`, amount: h.supplier_cost, editUrl: "maintenance.html?key=trans-hotels-booking" }))
       .sort((a, b) => (a.date < b.date ? 1 : -1));
     renderTransactions(supplierName, `${items.length} transaction(s) for this supplier`, items, ccy);
   }

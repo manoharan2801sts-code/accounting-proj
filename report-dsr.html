@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
   <link href="assets/css/design-system.css" rel="stylesheet" />
-  <link href="assets/css/app.css?v=7" rel="stylesheet" />
+  <link href="assets/css/app.css?v=8" rel="stylesheet" />
   <link rel="icon" type="image/png" href="assets/img/favicon.png" />
   <style>
     /* Locked to the viewport - only the grid body scrolls, not the whole
@@ -238,12 +238,12 @@
     </main>
   </div>
 
-  <script src="assets/js/hardcode.js?v=6"></script>
+  <script src="assets/js/hardcode.js?v=10"></script>
   <script src="assets/js/mock-data.js"></script>
-  <script src="assets/js/api.js?v=6"></script>
-  <script src="assets/js/util.js?v=5"></script>
+  <script src="assets/js/api.js?v=5"></script>
+  <script src="assets/js/util.js?v=6"></script>
   <script src="assets/js/entry-common.js"></script>
-  <script src="assets/js/shell.js?v=36"></script>
+  <script src="assets/js/shell.js?v=46"></script>
   <script>
     // Not gated on DOMContentLoaded - when this page is opened via the
     // app's SPA navigation (shell.js's navigateTo), its <script> tags are
@@ -383,12 +383,12 @@
     // from the Django backend (same /api/tickets/ endpoint ticket-entry.js
     // and tickets.html already use).
     // ============================================================
-    const TICKETS_API = "http://localhost:8000/api/tickets/";
-    const RESCHEDULE_TICKETS_API = "http://localhost:8000/api/reschedule-tickets/list/";
-    const CANCELLATION_DSR_API = "http://localhost:8000/api/cancellation-tickets/dsr/";
-    const SSR_DSR_API = "http://localhost:8000/api/ssr-tickets/dsr/";
+    const TICKETS_API = "http://127.0.0.1:8000/api/tickets/";
+    const RESCHEDULE_TICKETS_API = "http://127.0.0.1:8000/api/reschedule-tickets/list/";
+    const CANCELLATION_DSR_API = "http://127.0.0.1:8000/api/cancellation-tickets/dsr/";
+    const SSR_DSR_API = "http://127.0.0.1:8000/api/ssr-tickets/dsr/";
     // DSR page: every column of the agreed format, one row per passenger line.
-    const DSR_DETAILED_API = "http://localhost:8000/api/dsr/detailed/";
+    const DSR_DETAILED_API = "http://127.0.0.1:8000/api/dsr/detailed/";
     let allRows = [];
 
     function fmtAmt(n) {
@@ -702,7 +702,7 @@
       } catch (err) {
         console.error("Could not load tickets for the DSR report - is the Django backend running?", err);
         allRows = [];
-        tbody.innerHTML = `<tr><td colspan="73" style="text-align:left; padding:2rem; color:var(--color-text-muted);">Could not load data. Is the Django backend running on localhost:8000?</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="73" style="text-align:left; padding:2rem; color:var(--color-text-muted);">Could not load data. Is the Django backend running on 127.0.0.1:8000?</td></tr>`;
         return;
       }
       populateReferenceFilters();

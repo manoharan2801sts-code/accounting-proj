@@ -189,7 +189,7 @@
     tbody.innerHTML = `<tr><td colspan="8" class="po-empty">Loading...</td></tr>`;
     try {
       const qs = new URLSearchParams({ company_id: activeCompanyId, as_of: $("po-as-of").value || "" });
-      const res = await fetch(`http://localhost:8000/api/${SIDE}/?${qs}`);
+      const res = await fetch(`http://127.0.0.1:8000/api/${SIDE}/?${qs}`);
       const result = await res.json();
       if (seq !== loadSeq) return; // a newer load (e.g. the filter's Show) took over
       data = result;
@@ -201,7 +201,7 @@
       if (seq !== loadSeq) return;
       console.error(err);
       data = null;
-      tbody.innerHTML = `<tr><td colspan="8" class="po-empty">Could not load data. Is the Django backend running on localhost:8000?</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="8" class="po-empty">Could not load data. Is the Django backend running on 127.0.0.1:8000?</td></tr>`;
     }
   }
 

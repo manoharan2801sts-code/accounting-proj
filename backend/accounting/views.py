@@ -2186,7 +2186,192 @@ def _build_ticket_lines(company_id, customer_row, lines_in):
     return line_objs, lines_json
 
 
+# ==========================================================================
+# Edit history / audit log - who changed what on Booking / Reschedule /
+# Cancellation / SSR Updation. The save views are wrapped with audited():
+# the document is read straight from its tables (sp_AuditLog SNAPSHOT)
+# before and after the save, and every changed field is logged with the
+# signed-in user. A Booking / Reschedule edit can carry changes down to its
+# follow-up documents (chain edit) - those are snapshotted too and get
+# their own rows ("source" = the document whose edit changed them).
+# Runs AFTER the save has committed and never fails the save itself.
+# Backend only - not shown anywhere in the app (no API reads it); read it
+# in SQL from dbo.AuditLogs / dbo.vw_AuditLogChanges.
+# ==========================================================================
+import functools
+import logging
+
+_audit_logger = logging.getLogger(__name__)
+
+# Columns that are keys / bookkeeping, not something a user edits.
+_AUDIT_SKIP = {
+    "id", "created_at", "updated_at", "company_id", "customer_ledger_id", "supplier_ledger_id",
+    "ticket_id", "reschedule_ticket_id", "cancellation_ticket_id", "ssr_ticket_id", "original_ticket_id",
+    "original_ticket_line_id", "reschedule_line_id", "based_on_reschedule_line_id", "source_reschedule_ticket_id",
+}
+_AUDIT_WORDS = {
+    "yq": "YQ", "yr": "YR", "k3": "K3", "gst": "GST", "tds": "TDS", "pg": "PG", "ssr": "SSR", "fop": "FOP",
+    "pnr": "PNR", "gds": "GDS", "roe": "ROE", "id": "ID", "supp": "Supplier", "addl": "Addl", "per": "%",
+    "pct": "%", "comm": "Commission", "disc": "Discount", "cust": "Customer", "emd": "EMD", "no": "No",
+}
+_AUDIT_LABELS = {
+    "tax_others": "Other Taxes", "total_billed": "Total", "booking_reference": "S PNR / Booking Reference",
+    "ssr_items": "SSR Details", "ssr_ticket_numbers": "EMD Ticket Numbers", "ssr_charges": "SSR Charges",
+    "customer_name": "Customer", "supplier_name": "Supplier",
+}
+# Line identity across a save, per module (SSR lines are rewritten on save).
+_AUDIT_LINE_KEY = {"Booking": "id", "Reschedule": "original_ticket_line_id",
+                   "Cancellation": "original_ticket_line_id", "SSR Updation": "original_ticket_line_id"}
+
+
+def _audit_label(col):
+    if col in _AUDIT_LABELS:
+        return _AUDIT_LABELS[col]
+    return " ".join(_AUDIT_WORDS.get(w, w.capitalize()) for w in col.split("_"))
+
+
+def _audit_norm(v):
+    """Comparable / displayable form: numbers to 2 dp, JSON text parsed, '' = None."""
+    if v is None:
+        return None
+    if isinstance(v, bool):
+        return "Yes" if v else "No"
+    if isinstance(v, (int, float)):
+        return round(float(v), 2)
+    s = str(v).strip()
+    if s == "":
+        return None
+    if s[:1] in "{[":
+        try:
+            parsed = json.loads(s)
+            return parsed if parsed not in ({}, []) else None
+        except ValueError:
+            pass
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}(T00:00:00(\.0+)?)?", s):
+        return f"{s[8:10]}/{s[5:7]}/{s[0:4]}"
+    return s
+
+
+def _audit_show(v):
+    if v is None:
+        return ""
+    if isinstance(v, float):
+        return f"{v:.2f}"
+    if isinstance(v, dict):
+        return ", ".join(f"{k}: {_audit_show(x) if not isinstance(x, (int, float)) else x}" for k, x in v.items())
+    if isinstance(v, list):
+        return ", ".join(_audit_show(x) for x in v)
+    return str(v)
+
+
+def _audit_take(module, document_id):
+    try:
+        row = sp_client.audit_snapshot(module, document_id)
+    except Exception:  # noqa: BLE001 - history must never break a save
+        _audit_logger.exception("audit snapshot failed (%s %s)", module, document_id)
+        return None
+    if not row or not row.get("header_json"):
+        return None
+    return {"header": json.loads(row["header_json"]), "lines": json.loads(row.get("lines_json") or "[]")}
+
+
+def _audit_diff(module, before, after):
+    """[{scope, line, field, old, new}] between two snapshots."""
+    changes = []
+
+    def fields(old, new, scope, line=""):
+        for col in sorted(set(old) | set(new)):
+            if col in _AUDIT_SKIP:
+                continue
+            a, b = _audit_norm(old.get(col)), _audit_norm(new.get(col))
+            if a != b:
+                changes.append({"scope": scope, "line": line, "field": _audit_label(col),
+                                "old": _audit_show(a), "new": _audit_show(b)})
+
+    fields(before["header"], after["header"], "Header")
+    key = _AUDIT_LINE_KEY.get(module, "id")
+    old_lines = {l.get(key): l for l in before["lines"]}
+    new_lines = {l.get(key): l for l in after["lines"]}
+    name = lambda l: " / ".join(str(x) for x in (l.get("ticket_no"), l.get("passenger_name")) if x)
+    for k, l in new_lines.items():
+        if k in old_lines:
+            fields(old_lines[k], l, "Passenger", name(l))
+        else:
+            changes.append({"scope": "Passenger Added", "line": name(l), "field": "", "old": "", "new": name(l)})
+    for k, l in old_lines.items():
+        if k not in new_lines:
+            changes.append({"scope": "Passenger Removed", "line": name(l), "field": "", "old": name(l), "new": ""})
+    return changes
+
+
+def _audit_write(request, company_id, module, document_id, snapshot, action, changes, source=None):
+    user = getattr(request, "app_user", None) or {}
+    try:
+        sp_client.audit_insert(
+            company_id, module, document_id, (snapshot or {}).get("header", {}).get("invoice_number"), action, source,
+            user.get("id"), user.get("full_name") or user.get("email"),
+            json.dumps(changes, ensure_ascii=False, default=str), len(changes),
+        )
+    except Exception:  # noqa: BLE001
+        _audit_logger.exception("audit insert failed (%s %s)", module, document_id)
+
+
+def audited(module, id_kwarg=None):
+    """Wraps a create / update view so every successful save is logged."""
+    def deco(view):
+        @functools.wraps(view)
+        def wrapper(request, *args, **kwargs):
+            if request.method != "POST":
+                return view(request, *args, **kwargs)
+            doc_id = kwargs.get(id_kwarg) if id_kwarg else None
+            before, chain_before = None, {}
+            if doc_id:
+                before = _audit_take(module, doc_id)
+                if module in ("Booking", "Reschedule"):
+                    try:
+                        for c in sp_client.audit_chain(module, doc_id):
+                            chain_before[(c["module"], c["id"])] = _audit_take(c["module"], c["id"])
+                    except Exception:  # noqa: BLE001
+                        _audit_logger.exception("audit chain failed (%s %s)", module, doc_id)
+            response = view(request, *args, **kwargs)
+            try:
+                if response.status_code in (200, 201):
+                    data = json.loads(response.content or b"{}")
+                    new_id = doc_id or (data.get("id") if isinstance(data, dict) else None)
+                    after = _audit_take(module, new_id) if new_id else None
+                    if after:
+                        company_id = after["header"].get("company_id")
+                        if before is None:
+                            _audit_write(request, company_id, module, new_id, after, "CREATE", [])
+                        else:
+                            changes = _audit_diff(module, before, after)
+                            if changes:
+                                _audit_write(request, company_id, module, new_id, after, "UPDATE", changes)
+                            source = f"{module} {after['header'].get('invoice_number') or new_id}"
+                            for (m, cid), cb in chain_before.items():
+                                ca = _audit_take(m, cid)
+                                if cb and ca:
+                                    cc = _audit_diff(m, cb, ca)
+                                    if cc:
+                                        _audit_write(request, company_id, m, cid, ca, "UPDATE", cc, source=source)
+            except Exception:  # noqa: BLE001
+                _audit_logger.exception("audit log failed (%s %s)", module, doc_id)
+            return response
+        return wrapper
+    return deco
+
+
+def _ref_date_after_invoice_error(body, ref_key, label):
+    """Booking / Rescheduled / Cancellation Ref Date can't be later than the
+    Invoice Date - the error text, or None when fine (or a date is missing)."""
+    ref, invoice = _parse_date(body.get(ref_key)), _parse_date(body.get("invoice_date"))
+    if ref and invoice and ref > invoice:
+        return f"{label} cannot be later than the Invoice Date."
+    return None
+
+
 @csrf_exempt
+@audited("Booking")
 @transaction.atomic
 def ticket_create(request):
     """
@@ -2220,6 +2405,9 @@ def ticket_create(request):
         body = json.loads(request.body)
     except json.JSONDecodeError:
         return JsonResponse({"error": "Invalid JSON body"}, status=400)
+    ref_date_error = _ref_date_after_invoice_error(body, "booking_ref_date", "Booking Ref Date")
+    if ref_date_error:
+        return JsonResponse({"error": ref_date_error}, status=400)
 
     company_id = body.get("company_id")
     lines_in = body.get("lines") or []
@@ -2287,6 +2475,7 @@ def ticket_create(request):
 
 
 @csrf_exempt
+@audited("Booking", "ticket_id")
 @transaction.atomic
 def ticket_update(request, ticket_id):
     """
@@ -2310,6 +2499,9 @@ def ticket_update(request, ticket_id):
         body = json.loads(request.body)
     except json.JSONDecodeError:
         return JsonResponse({"error": "Invalid JSON body"}, status=400)
+    ref_date_error = _ref_date_after_invoice_error(body, "booking_ref_date", "Booking Ref Date")
+    if ref_date_error:
+        return JsonResponse({"error": ref_date_error}, status=400)
 
     company_id = body.get("company_id")
     lines_in = body.get("lines") or []
@@ -2482,6 +2674,7 @@ def _build_reschedule_lines(company_id, lines_in, chain_by_original):
 
 
 @csrf_exempt
+@audited("Reschedule")
 @transaction.atomic
 def reschedule_ticket_create(request):
     """
@@ -2516,6 +2709,9 @@ def reschedule_ticket_create(request):
         body = json.loads(request.body)
     except json.JSONDecodeError:
         return JsonResponse({"error": "Invalid JSON body"}, status=400)
+    ref_date_error = _ref_date_after_invoice_error(body, "booking_ref_date", "Rescheduled Ref Date")
+    if ref_date_error:
+        return JsonResponse({"error": ref_date_error}, status=400)
 
     company_id = body.get("company_id")
     original_ticket_id = body.get("original_ticket_id")
@@ -2592,6 +2788,7 @@ def reschedule_ticket_create(request):
 
 
 @csrf_exempt
+@audited("Reschedule", "reschedule_ticket_id")
 @transaction.atomic
 def reschedule_ticket_update(request, reschedule_ticket_id):
     """
@@ -2612,6 +2809,9 @@ def reschedule_ticket_update(request, reschedule_ticket_id):
         body = json.loads(request.body)
     except json.JSONDecodeError:
         return JsonResponse({"error": "Invalid JSON body"}, status=400)
+    ref_date_error = _ref_date_after_invoice_error(body, "booking_ref_date", "Rescheduled Ref Date")
+    if ref_date_error:
+        return JsonResponse({"error": ref_date_error}, status=400)
 
     company_id = body.get("company_id")
     lines_in = body.get("lines") or []
@@ -3035,7 +3235,7 @@ RESCHED_JV_LINE_MAP = [
     ("Debit", "Expenditure To Supplier", "Supplier SSR Markup A/c", "supp_ssr_markup"),
     ("Debit", "Expenditure To Supplier", "Supplier SSR Service Fee A/c", "supp_ssr_service_fee"),
     ("Debit", "GST and TDS", "Input IGST A/c", "supp_gst"),
-    ("Debit", "Expenditure To Supplier", "Supplier Reschedule Penalty A/c", "reschedule_penalty"),
+    ("Debit", "Expenditure To Supplier", "Supplier Penalty Amount A/c", "reschedule_penalty"),
     ("Credit", "Earnings From Customer", "Consolidator Markup A/c", "supp_markup"),
     ("Credit", "Earnings From Customer", "Consolidator Addl Markup A/c", "supp_addl_markup"),
     ("Credit", "Earnings From Customer", "Consolidator Service Fee A/c", "supp_service_fee"),
@@ -3043,7 +3243,7 @@ RESCHED_JV_LINE_MAP = [
     ("Credit", "Earnings From Customer", "Consolidator SSR Markup A/c", "supp_ssr_markup"),
     ("Credit", "Earnings From Customer", "Consolidator SSR Service Fee A/c", "supp_ssr_service_fee"),
     ("Credit", "GST and TDS", "Output IGST A/c", "supp_gst"),
-    ("Credit", "Earnings From Customer", "Consolidator Reschedule Penalty A/c", "reschedule_penalty"),
+    ("Credit", "Earnings From Customer", "Consolidator Penalty Amount A/c", "reschedule_penalty"),
     ("Debit", "Expenditure To Customer", "Discount A/c", "discount"),
     ("Credit", "GST and TDS", "Discount TDS A/c", "discount_tds"),
     ("Credit", "Earnings From Customer", "Markup A/c", "markup"),
@@ -3950,30 +4150,17 @@ def _cancel_tds_overrides(line_in):
 # Card"/"Client Card" = no FOP leg, i.e. JV-1). Exact Dr/Cr direction as
 # given in the spec - never flipped to force a balance.
 #
-# Rows 10 and 16 are DELIBERATELY the same ledger ("Supplier Cancellation
-# Penalty A/c") on opposite sides - re-confirmed explicitly (2026-10-07,
-# second pass) via the user's own Excel-sourced spec: "Supplier Cancellation
-# Penalty A/c - DEBIT = Penalty Amount" AND "Supplier Cancellation Penalty
-# A/c - CREDIT = Penalty Amount", both flagged IMPORTANT, with an explicit
-# "do not rename the accounting fields" rule. An EARLIER pass briefly
-# "corrected" this to Dr Supplier-side/Cr Consolidator-side (mirroring
-# Reschedule's own Supplier/Consolidator Reschedule Penalty A/c pair,
-# unifying the two field names) - that was a misreading of a separate,
-# UI-label-only request ("Penalty Amount" instead of "Reschedule Penalty"/
-# "Cancellation Penalty" as the on-screen label text) and has been reverted:
-# Cancellation's own "Supplier Cancellation Penalty A/c" field is its own
-# distinct Master Mapping entry, separate from Reschedule's "Supplier/
-# Consolidator Reschedule Penalty A/c" - scoped to the Cancellation page
-# only, Reschedule's own JV/mapping is untouched (RESCHED_JV_LINE_MAP keeps
-# its original field names). Rows 15/27 are still two separate literal
-# "Output IGST A/c" Credit rows, kept exactly as specified (unlike Booking/
-# Reschedule, whose own Output GST rows are combined + state-split into
-# CGST/SGST by a later, separate instruction for those two flows only).
+# Penalty (rows 10 / 16): the Supplier card's Penalty Amount posts Debit
+# "Supplier Penalty Amount A/c" / Credit "Consolidator Penalty Amount A/c" -
+# the same pair Reschedule uses (one Ledger Mapping field each, for both
+# Reschedule and Cancellation; the old Supplier Reschedule / Supplier
+# Cancellation / Consolidator Reschedule Penalty fields were merged into
+# these by migration 0069). Rows 15/27 are still two separate literal
+# "Output IGST A/c" Credit rows, kept exactly as specified.
 #
 # Each entry: (dr_cr, masters_category, field_name, amount_key) - same
 # shape and same Master Mapping (masters_category, field_name) literals as
-# JV_LINE_MAP/RESCHED_JV_LINE_MAP; the only field_name new to this module is
-# ("Expenditure To Supplier", "Supplier Cancellation Penalty A/c").
+# JV_LINE_MAP/RESCHED_JV_LINE_MAP.
 # ============================================================
 CANCEL_JV_LINE_MAP = [
     ("Debit", "Earnings From Supplier", "Commission A/c", "commission"),                                   # 3
@@ -3983,13 +4170,13 @@ CANCEL_JV_LINE_MAP = [
     ("Debit", "Expenditure To Supplier", "Supplier Service Fee A/c", "supp_service_fee"),                  # 7
     ("Debit", "Expenditure To Supplier", "Supplier Addl Service Fee A/c", "supp_addl_service_fee"),        # 8
     ("Debit", "GST and TDS", "Input IGST A/c", "supp_gst"),                                                # 9
-    ("Debit", "Expenditure To Supplier", "Supplier Cancellation Penalty A/c", "cancellation_penalty"),      # 10
+    ("Debit", "Expenditure To Supplier", "Supplier Penalty Amount A/c", "cancellation_penalty"),            # 10
     ("Credit", "Earnings From Customer", "Consolidator Markup A/c", "supp_markup"),                        # 11
     ("Credit", "Earnings From Customer", "Consolidator Addl Markup A/c", "supp_addl_markup"),              # 12
     ("Credit", "Earnings From Customer", "Consolidator Service Fee A/c", "supp_service_fee"),              # 13
     ("Credit", "Earnings From Customer", "Consolidator Addl Service Fee A/c", "supp_addl_service_fee"),    # 14
     ("Credit", "GST and TDS", "Output IGST A/c", "supp_gst"),                                              # 15
-    ("Credit", "Expenditure To Supplier", "Supplier Cancellation Penalty A/c", "cancellation_penalty"),     # 16
+    ("Credit", "Earnings From Customer", "Consolidator Penalty Amount A/c", "cancellation_penalty"),        # 16
     ("Credit", "Expenditure To Supplier", "Supplier Markup A/c", "supp_markup_reversal"),                  # 17
     ("Credit", "Expenditure To Supplier", "Supplier Addl Markup A/c", "supp_addl_markup_reversal"),        # 18
     ("Debit", "Earnings From Customer", "Consolidator Markup A/c", "supp_markup_reversal"),                # 19
@@ -4618,6 +4805,7 @@ def cancellation_fare_totals(request):
 
 
 @csrf_exempt
+@audited("Cancellation")
 @transaction.atomic
 def cancellation_ticket_create(request):
     """
@@ -4654,6 +4842,9 @@ def cancellation_ticket_create(request):
         body = json.loads(request.body)
     except json.JSONDecodeError:
         return JsonResponse({"error": "Invalid JSON body"}, status=400)
+    ref_date_error = _ref_date_after_invoice_error(body, "cancellation_ref_date", "Cancellation Ref Date")
+    if ref_date_error:
+        return JsonResponse({"error": ref_date_error}, status=400)
 
     company_id = body.get("company_id")
     original_ticket_id = body.get("original_ticket_id")
@@ -4791,6 +4982,7 @@ CANCEL_UPDATE_LINE_NUMERIC_FIELDS = {
 
 
 @csrf_exempt
+@audited("Cancellation", "cancellation_id")
 @transaction.atomic
 def cancellation_ticket_update(request, cancellation_id):
     """
@@ -4821,6 +5013,9 @@ def cancellation_ticket_update(request, cancellation_id):
         body = json.loads(request.body)
     except json.JSONDecodeError:
         return JsonResponse({"error": "Invalid JSON body"}, status=400)
+    ref_date_error = _ref_date_after_invoice_error(body, "cancellation_ref_date", "Cancellation Ref Date")
+    if ref_date_error:
+        return JsonResponse({"error": ref_date_error}, status=400)
 
     company_id = body.get("company_id")
     lines_in = body.get("lines") or []
@@ -5632,12 +5827,17 @@ def master_mapping_list(request):
     out = [_master_mapping_dict(m) for m in rows]
     as_of = _parse_date(request.GET.get("as_of"))
     if as_of:
+        # A field whose first Effective From is after as_of is not mapped on
+        # that date - left out, so the screen blocks its amount box.
+        in_force = []
         for row in out:
             r = resolve_mapping(company_id, row["field_name"], as_of, row.get("product_type") or "Airline")
             if r:
                 row.update({"ledger_id": r["ledger_id"], "ledger_name": r["ledger_name"],
                             "ledger_gst_percentage": r["gst_pct"],
                             "effective_from": r["effective_from"].isoformat() if r["effective_from"] else None})
+                in_force.append(row)
+        out = in_force
     return JsonResponse(out, safe=False)
 
 
@@ -5665,6 +5865,22 @@ def master_mapping_save(request):
     rows_in = body.get("rows") or []
     if not company_id or not product_type or not masters_category or not rows_in:
         return JsonResponse({"error": "company_id, product_type, masters_category and rows are required"}, status=400)
+
+    # Saving a DIFFERENT ledger on a date that already has a mapping version
+    # replaces that version - every document dated from then on moves to the
+    # new ledger. Not done silently: the screen must confirm it first
+    # (confirm_replace), otherwise 409 tells it what would change.
+    if not body.get("confirm_replace"):
+        history = sp_client.master_mapping_history(company_id, product_type)
+        for row in rows_in:
+            day = _parse_date(row.get("effective_from"))
+            same_day = next((h for h in history if h["field_name"] == (row.get("field_name") or "").strip()
+                             and _parse_date(h["effective_from"]) == day), None)
+            if same_day and row.get("ledger_id") and int(same_day["ledger_id"]) != int(row["ledger_id"]):
+                return JsonResponse({
+                    "needs_confirm": True, "field_name": same_day["field_name"],
+                    "effective_from": day.isoformat(), "old_ledger": same_day["ledger_name"],
+                }, status=409)
 
     saved = []
     for row in rows_in:
@@ -6291,6 +6507,10 @@ def auth_my_permissions(request):
 # SSR Updation (trans-airline-ssr.html) - dbo.sp_SSRTicket
 # ============================================================================
 SSR_AMOUNT_FIELDS = ("seat", "meal", "baggage", "other_ssr", "markup", "service_fee", "supp_markup", "supp_service_fee")
+# SSR popup grid: per type Amt + Supplier / Customer SSR Markup and SSR
+# Service Fee, and which line amount column each SSR type adds into.
+SSR_CHARGE_KEYS = ("amount", "supp_markup", "supp_service_fee", "markup", "service_fee")
+SSR_TYPE_AMOUNT_FIELD = {"Baggage": "baggage", "Meal": "meal", "Seat": "seat", "Other SSR": "other_ssr"}
 SSR_LINE_TEXT_FIELDS = ("ticket_no", "passenger_name", "pax_type", "airline_category", "sector", "office_id", "fop")
 
 
@@ -6408,6 +6628,15 @@ def _ssr_build(company_id, body):
         # SSR Ticket Number is optional, kept only for SSR types that have a detail.
         ticket_numbers = {k: str(v).strip() for k, v in (l.get("ssr_ticket_numbers") or {}).items()
                           if k in items and str(v or "").strip()}
+        # Per SSR type charges (popup grid). When sent, the line's amount
+        # columns are their sums - the J.V and reports read those columns.
+        charges = {}
+        for t, c in (l.get("ssr_charges") or {}).items():
+            row = {k: float(_safe_decimal((c or {}).get(k))) for k in SSR_CHARGE_KEYS}
+            if any(row.values()):
+                if t not in items:
+                    return None, None, None, f"SSR line {i} ({l.get('passenger_name') or ''}): enter the SSR Details for {t}."
+                charges[t] = row
         if not l.get("original_ticket_line_id"):
             return None, None, None, f"SSR line {i} is not linked to a booking passenger - pick it again with New."
         supplier_name = (l.get("supplier_name") or "").strip()
@@ -6420,12 +6649,22 @@ def _ssr_build(company_id, body):
             supplier_id = supplier_cache[supplier_name]["id"]
         line = {k: (l.get(k) or None) for k in SSR_LINE_TEXT_FIELDS}
         line.update({k: float(_safe_decimal(l.get(k))) for k in SSR_AMOUNT_FIELDS})
+        if charges:
+            for k in SSR_AMOUNT_FIELDS:
+                line[k] = 0.0
+            for t, c in charges.items():
+                line[SSR_TYPE_AMOUNT_FIELD.get(t, "other_ssr")] += c["amount"]
+                for k in ("markup", "service_fee", "supp_markup", "supp_service_fee"):
+                    line[k] += c[k]
+            for k in SSR_AMOUNT_FIELDS:
+                line[k] = round(line[k], 2)
         line.update({
             "original_ticket_line_id": int(l["original_ticket_line_id"]),
             "reschedule_line_id": int(l["reschedule_line_id"]) if l.get("reschedule_line_id") else None,
             "supplier_name": supplier_name or None, "supplier_ledger_id": supplier_id,
             "ssr_items": json.dumps(items, ensure_ascii=False),
             "ssr_ticket_numbers": json.dumps(ticket_numbers, ensure_ascii=False),
+            "ssr_charges": json.dumps(charges, ensure_ascii=False),
         })
         line["total_billed"] = round(_ssr_line_amounts(company_id, line, _parse_date(body.get("invoice_date")))["sales"], 2)
         lines.append(line)
@@ -6486,12 +6725,14 @@ def _ssr_save(request, ssr_id=None):
 
 
 @csrf_exempt
+@audited("SSR Updation")
 def ssr_ticket_create(request):
     """POST /api/ssr-tickets/create/ - new SSR Updation + its ALS-n JV."""
     return _ssr_save(request)
 
 
 @csrf_exempt
+@audited("SSR Updation", "ssr_id")
 def ssr_ticket_update(request, ssr_id):
     """POST /api/ssr-tickets/<id>/update/ - edits a saved SSR Updation; its JV is recomputed in place."""
     return _ssr_save(request, ssr_id=ssr_id)
@@ -6529,6 +6770,7 @@ def _ssr_line_dict(l):
     out.update({k: float(l.get(k) or 0) for k in SSR_AMOUNT_FIELDS + ("total_billed",)})
     out["ssr_items"] = parse("ssr_items")
     out["ssr_ticket_numbers"] = parse("ssr_ticket_numbers")
+    out["ssr_charges"] = parse("ssr_charges")
     return out
 
 
@@ -7422,6 +7664,26 @@ def payables_report(request):
     return party_outstanding_report(request, "payables")
 
 
+
+def airline_dropdowns(request):
+    """
+    GET /api/airline-dropdowns/[?list_key=paxTypes]
+    Airline dropdown lists from dbo.AirlineDropdownValues, in the same shape
+    hardcode.js keeps dropdowns.xml lists in:
+      { "paxTypes": { "default": "", "options": [ {"value": "Adult", "label": "Adult", "code": "ADT"}, ... ] }, ... }
+    `value` is what the screens save; `code` is the short ID for Auto Push.
+    """
+    if request.method != "GET":
+        return HttpResponseNotAllowed(["GET"])
+    lists = {}
+    for r in sp_client.airline_dropdown_list(request.GET.get("list_key") or None):
+        lst = lists.setdefault(r["list_key"], {"default": "", "options": []})
+        lst["options"].append({"value": r["name"], "label": r["label"], "code": r["code"]})
+        if r["is_default"]:
+            lst["default"] = r["name"]
+    return JsonResponse(lists)
+
+
 # ============================================================================
 # Live-only endpoints & backwards-compatibility helpers (Render / TiDB)
 # ============================================================================
@@ -7681,3 +7943,4 @@ def parties_suppliers_list(request):
         for s in suppliers
     ]
     return JsonResponse(data, safe=False)
+

@@ -6,7 +6,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
 <link href="assets/css/design-system.css" rel="stylesheet" />
-<link href="assets/css/app.css?v=7" rel="stylesheet" />
+<link href="assets/css/app.css?v=8" rel="stylesheet" />
 <link rel="icon" type="image/png" href="assets/img/favicon.png" />
 <style>
   /* Same screen layout as New Airline Ticket (ticket-entry.html) - the
@@ -35,9 +35,25 @@
   .ssr-pick-table th { position: sticky; top: 0; background: #3B6DB5; color: #FFFFFF; font-weight: 700; text-align: left; padding: 4px 8px; height: 26px; }
   .ssr-pick-table td { padding: 4px 8px; border-bottom: 1px solid #EEF1F5; }
   #ssr-modal .dom-modal-form-grid .dom-input-readonly { justify-content: flex-start !important; text-align: left; }
-  /* SSR Details: SSR type | SSR Ticket Number | SSR detail text. */
-  #m-ssr-items { grid-template-columns: 82px 1fr 1fr; }
-  #m-ssr-items .m-ssr-head { font-size: 10.5px; font-weight: 700; color: #64748B; }
+  /* SSR popup grid: one row per SSR type -
+     SSR Details and Fares (Type | EMD Ticket Number | Details | Amt) | Supplier (SSR Markup, SSR Service Fee, GST Amt) | Customer (same). */
+  #ssr-modal .dom-modal-window { width: 1340px; }
+  .m-ssr-card { background: #FFFFFF; border: 1px solid #CBD5E1; border-radius: 3px; padding: 6px 8px; display: flex; flex-direction: column; gap: 6px; }
+  .m-ssr-grid { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 11.5px; }
+  #ssr-modal .dom-modal-col-left { flex-basis: 260px; }
+  /* Headings: centred, never cut - a long one wraps to 2 lines, every
+     heading cell keeps the same height. */
+  .m-ssr-grid th { background: #3B6DB5; color: #FFFFFF; font-weight: 700; padding: 4px 4px; border: 1px solid #FFFFFF;
+    text-align: center; vertical-align: middle; white-space: normal; line-height: 1.2; overflow-wrap: break-word; }
+  .m-ssr-grid thead tr:first-child th { font-size: 12px; height: 24px; letter-spacing: 0.2px; }
+  .m-ssr-grid thead tr:last-child th { height: 32px; font-size: 11px; }
+  .m-ssr-grid td { padding: 3px 4px; border-bottom: 1px solid #EEF1F5; vertical-align: middle; }
+  .m-ssr-grid td.m-ssr-type { font-weight: 700; color: #334155; padding-left: 6px; white-space: nowrap; }
+  .m-ssr-grid td .dom-input { width: 100%; box-sizing: border-box; }
+  .m-ssr-grid td.m-ssr-ro { text-align: right; font-family: var(--font-mono); color: #334155; background: #F1F5F9; padding-right: 8px; }
+  .m-ssr-grid .m-ssr-grp-start { border-left: 2px solid #94A3B8; }
+  .m-ssr-grid tfoot td { font-weight: 800; text-align: right; font-family: var(--font-mono); background: #F8FAFC; border-top: 2px solid #CBD5E1; padding: 5px 8px; }
+  .m-ssr-grid tfoot td:first-child { text-align: left; font-family: var(--font-body); }
   .ssr-result-row { cursor: pointer; border-bottom: 1px solid #E2E8F0; }
   /* New / Find result grids: every column stays on one line (the box
      scrolls sideways if needed); the long SSR text is cut with "..." and
@@ -348,49 +364,47 @@
           <label>Supplier</label><div class="dom-input-readonly" id="m-supplier">—</div>
           <label>FOP</label><div class="dom-input-readonly" id="m-fop">—</div>
         </div>
-        <div class="dom-modal-section-title" style="margin-top:10px;">SSR Details</div>
-        <!-- One row per SSR type (dropdowns.xml "ssrTypes"): label + SSR
-             Ticket Number + SSR detail textbox, filled in by page-ssr-entry.js. -->
-        <div class="dom-modal-form-grid" id="m-ssr-items"></div>
       </div>
 
       <div class="dom-modal-col-right">
-        <div class="dom-modal-fares-card">
+        <div class="m-ssr-card">
           <div class="dom-modal-section-title">SSR Charges (INR)</div>
-          <div class="dom-modal-fares-grid">
-            <div class="fare-item"><label>Seat Charges</label><input class="dom-input ssr-calc dom-amount" type="text" inputmode="decimal" id="m-seat" value="0.00" /></div>
-            <div class="fare-item"><label>Meal Charges</label><input class="dom-input ssr-calc dom-amount" type="text" inputmode="decimal" id="m-meal" value="0.00" /></div>
-            <div class="fare-item"><label>Baggage</label><input class="dom-input ssr-calc dom-amount" type="text" inputmode="decimal" id="m-baggage" value="0.00" /></div>
-            <div class="fare-item"><label>Other SSR</label><input class="dom-input ssr-calc dom-amount" type="text" inputmode="decimal" id="m-other-ssr" value="0.00" /></div>
-            <div class="fare-item"><label>SSR Total</label><div class="dom-input-readonly" id="m-ssr-total">0.00</div></div>
-          </div>
-        </div>
-
-        <div class="dom-modal-accounting-row">
-          <div class="dom-modal-section-title">Customer</div>
-          <div class="dom-modal-section-title">Supplier</div>
-          <div class="dom-acct-box">
-            <div class="dom-acct-body">
-              <div class="dom-acct-field"><label>SSR Markup</label><input class="dom-input ssr-calc dom-amount" type="text" inputmode="decimal" id="m-markup" value="0.00" /></div>
-              <div class="dom-acct-field"><label>SSR Service Fee</label><input class="dom-input ssr-calc dom-amount" type="text" inputmode="decimal" id="m-service-fee" value="0.00" /></div>
-              <div class="dom-acct-field"><label>GST %</label><div class="dom-input-readonly" id="m-gst-pct" style="text-align:right; justify-content:flex-end;" title="GST % of the ledger mapped in Ledger Mapping">0.00</div></div>
-              <div class="dom-acct-field"><label>Taxable Amount</label><div class="dom-input-readonly" id="m-taxable" style="text-align:right; justify-content:flex-end;">0.00</div></div>
-              <div class="dom-acct-field"><label>GST Amount</label><div class="dom-input-readonly" id="m-gst-amt" style="text-align:right; justify-content:flex-end;">0.00</div></div>
-            </div>
-          </div>
-          <div class="dom-acct-box">
-            <div class="dom-acct-body">
-              <div class="dom-acct-field"><label>SSR Markup</label><input class="dom-input ssr-calc dom-amount" type="text" inputmode="decimal" id="m-supp-markup" value="0.00" /></div>
-              <div class="dom-acct-field"><label>SSR Service Fee</label><input class="dom-input ssr-calc dom-amount" type="text" inputmode="decimal" id="m-supp-service-fee" value="0.00" /></div>
-              <div class="dom-acct-field"><label>GST %</label><div class="dom-input-readonly" id="m-supp-gst-pct" style="text-align:right; justify-content:flex-end;" title="GST % of the ledger mapped in Ledger Mapping">0.00</div></div>
-              <div class="dom-acct-field"><label>Taxable Amount</label><div class="dom-input-readonly" id="m-supp-taxable" style="text-align:right; justify-content:flex-end;">0.00</div></div>
-              <div class="dom-acct-field"><label>GST Amount</label><div class="dom-input-readonly" id="m-supp-gst-amt" style="text-align:right; justify-content:flex-end;">0.00</div></div>
-            </div>
-            <div class="dom-acct-box-actions">
-              <button type="button" class="dom-nav-btn btn-danger" id="m-remove-btn" title="Remove this SSR line">Remove</button>
-              <button type="button" class="dom-nav-btn" data-close="ssr-modal">Cancel</button>
-              <button type="button" class="dom-nav-btn btn-primary" id="m-save-btn">Save &amp; Apply</button>
-            </div>
+          <!-- One row per SSR type (dropdowns.xml "ssrTypes"), built by
+               page-ssr-entry.js. Supplier / Customer SSR Markup and SSR Service
+               Fee of every type post to the same Ledger Mapping ledgers
+               (SSR Markup A/c, SSR Service Fee A/c and the Supplier ones);
+               GST Amt = SSR Service Fee x that ledger's GST %. -->
+          <table class="m-ssr-grid">
+            <colgroup>
+              <col style="width:9%" /><col style="width:14%" /><col style="width:15%" /><col style="width:10%" />
+              <col style="width:8.5%" /><col style="width:10%" /><col style="width:7.5%" />
+              <col style="width:8.5%" /><col style="width:10%" /><col style="width:7.5%" />
+            </colgroup>
+            <thead>
+              <tr>
+                <th colspan="4">SSR Details and Fares</th>
+                <th colspan="3" class="m-ssr-grp-start" id="m-supp-head">Supplier</th>
+                <th colspan="3" class="m-ssr-grp-start" id="m-cust-head">Customer</th>
+              </tr>
+              <tr>
+                <th>Type</th><th>EMD Ticket Number</th><th>Details</th><th class="num">Amt</th>
+                <th class="num m-ssr-grp-start">SSR Markup</th><th class="num">SSR Service Fee</th><th class="num">GST Amt</th>
+                <th class="num m-ssr-grp-start">SSR Markup</th><th class="num">SSR Service Fee</th><th class="num">GST Amt</th>
+              </tr>
+            </thead>
+            <tbody id="m-ssr-rows"></tbody>
+            <tfoot>
+              <tr>
+                <td colspan="3">Total</td><td id="m-ssr-total">0.00</td>
+                <td class="m-ssr-grp-start" id="m-supp-markup-total">0.00</td><td id="m-supp-sfee-total">0.00</td><td id="m-supp-gst-amt">0.00</td>
+                <td class="m-ssr-grp-start" id="m-markup-total">0.00</td><td id="m-sfee-total">0.00</td><td id="m-gst-amt">0.00</td>
+              </tr>
+            </tfoot>
+          </table>
+          <div class="dom-acct-box-actions">
+            <button type="button" class="dom-nav-btn btn-danger" id="m-remove-btn" title="Remove this SSR line">Remove</button>
+            <button type="button" class="dom-nav-btn" data-close="ssr-modal">Cancel</button>
+            <button type="button" class="dom-nav-btn btn-primary" id="m-save-btn">Save &amp; Apply</button>
           </div>
         </div>
       </div>
@@ -421,11 +435,11 @@
   </div>
 </div>
 
-<script src="assets/js/hardcode.js?v=6"></script>
+<script src="assets/js/hardcode.js?v=10"></script>
 <script src="assets/js/mock-data.js"></script>
-<script src="assets/js/api.js?v=6"></script>
-<script src="assets/js/util.js?v=5"></script>
-<script src="assets/js/shell.js?v=36"></script>
+<script src="assets/js/api.js?v=5"></script>
+<script src="assets/js/util.js?v=6"></script>
+<script src="assets/js/shell.js?v=46"></script>
 <script src="assets/js/invoice-templates.js?v=22"></script>
-<script src="assets/js/page-ssr-entry.js?v=34"></script>
+<script src="assets/js/page-ssr-entry.js?v=41"></script>
 </body></html>

@@ -1591,6 +1591,7 @@ CREATE TABLE dbo.SSR_AL_TicketLines (
     fop                     NVARCHAR(20) NULL,
     ssr_items               NVARCHAR(MAX) NULL,
     ssr_ticket_numbers      NVARCHAR(MAX) NULL,
+    ssr_charges             NVARCHAR(MAX) NULL,
     seat                    NUMERIC(14,2) NOT NULL DEFAULT 0,
     meal                    NUMERIC(14,2) NOT NULL DEFAULT 0,
     baggage                 NUMERIC(14,2) NOT NULL DEFAULT 0,
@@ -1608,6 +1609,10 @@ GO
 -- SSR Ticket Number per SSR type (migration 0049) - added after the table first shipped.
 IF COL_LENGTH('dbo.SSR_AL_TicketLines', 'ssr_ticket_numbers') IS NULL
     ALTER TABLE dbo.SSR_AL_TicketLines ADD ssr_ticket_numbers NVARCHAR(MAX) NULL;
+GO
+-- Per SSR type charges from the SSR popup grid (migration 0068).
+IF COL_LENGTH('dbo.SSR_AL_TicketLines', 'ssr_charges') IS NULL
+    ALTER TABLE dbo.SSR_AL_TicketLines ADD ssr_charges NVARCHAR(MAX) NULL;
 GO
 
 -- --------------------------------------------------------------------------
@@ -1813,4 +1818,129 @@ SELECT COUNT(*) AS app_user_count FROM AppUsers;
 SELECT module, COUNT(*) AS menu_count FROM MenuMaster GROUP BY module ORDER BY module;
 GO
 
-                                        
+-- Airline dropdown lists with short codes (migration 0070).
+IF OBJECT_ID('dbo.AirlineDropdownValues', 'U') IS NULL
+CREATE TABLE dbo.AirlineDropdownValues (
+    id            INT IDENTITY(1,1) PRIMARY KEY,
+    list_key      NVARCHAR(50)  NOT NULL,   -- e.g. paxTypes (same key the screens use)
+    code          NVARCHAR(10)  NOT NULL,   -- short ID for Auto Push / import, e.g. ADT
+    name          NVARCHAR(100) NOT NULL,   -- value saved on the transaction, e.g. Adult
+    display_label NVARCHAR(100) NULL,       -- text shown when it differs from name
+    sort_order    INT NOT NULL DEFAULT 0,
+    is_default    BIT NOT NULL DEFAULT 0,
+    is_active     BIT NOT NULL DEFAULT 1,
+    created_at    DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+    updated_at    DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+    CONSTRAINT uq_airline_dd_code UNIQUE (list_key, code),
+    CONSTRAINT uq_airline_dd_name UNIQUE (list_key, name)
+);
+GO
+MERGE dbo.AirlineDropdownValues AS t
+USING (VALUES
+    (N'bookingModes', N'MAN', N'Manual', NULL, 10, 1),
+    (N'bookingModes', N'AUTO', N'Auto Push', NULL, 20, 0),
+    (N'bookingTypes', N'TD', N'Travel Desk', NULL, 10, 0),
+    (N'bookingTypes', N'IND', N'Indesk', NULL, 20, 0),
+    (N'bookingTypes', N'AGT', N'Agent', NULL, 30, 0),
+    (N'bookingTypes', N'RPA', N'Retrieve PNR Accounting', NULL, 40, 0),
+    (N'bookingTypes', N'MAN', N'Manual Booking', NULL, 50, 0),
+    (N'bookingTypes', N'MOB', N'Mobile Booking', NULL, 60, 0),
+    (N'bookingTypes', N'TCO', N'Travel Co-Ordinator', NULL, 70, 0),
+    (N'bookingTypes', N'SSR', N'SSR Updation', NULL, 80, 0),
+    (N'bookingStatuses', N'CON', N'Confirmed', NULL, 10, 0),
+    (N'bookingStatuses', N'RES', N'Re-Scheduled', NULL, 20, 0),
+    (N'bookingStatuses', N'CAN', N'Normal Cancelled', NULL, 30, 0),
+    (N'travelTypes', N'DOM', N'Domestic', NULL, 10, 0),
+    (N'travelTypes', N'INT', N'International', NULL, 20, 0),
+    (N'custDiscountOn', N'BAS', N'Basic', NULL, 10, 0),
+    (N'custDiscountOn', N'BYQ', N'Basic + YQ', NULL, 20, 0),
+    (N'custDiscountOn', N'BYR', N'Basic + YR', NULL, 30, 0),
+    (N'custDiscountOn', N'BYQYR', N'Basic + YQ + YR', NULL, 40, 0),
+    (N'custDiscountOn', N'GRS', N'Gross', NULL, 50, 0),
+    (N'custDiscountTypes', N'PCT', N'Percentage', NULL, 10, 0),
+    (N'custDiscountTypes', N'FLT', N'Flat', NULL, 20, 0),
+    (N'paxTypes', N'ADT', N'Adult', NULL, 10, 0),
+    (N'paxTypes', N'CHD', N'Child', NULL, 20, 0),
+    (N'paxTypes', N'INF', N'Infant', NULL, 30, 0),
+    (N'paymentModes', N'TOP', N'Top-up', NULL, 10, 0),
+    (N'paymentModes', N'PG', N'Payment Gateway', NULL, 20, 0),
+    (N'airlineCategories', N'LCC', N'LCC', NULL, 10, 0),
+    (N'airlineCategories', N'FSC', N'FSC', NULL, 20, 0),
+    (N'airlineCategories', N'OSC', N'OSC', NULL, 30, 0),
+    (N'fopOptions', N'OC', N'Own Card', NULL, 10, 0),
+    (N'fopOptions', N'CC', N'Client Card', NULL, 20, 0),
+    (N'fopOptions', N'CASH', N'Cash', NULL, 30, 0),
+    (N'cardTypes', N'OC', N'Own Card', NULL, 10, 0),
+    (N'cardTypes', N'CC', N'Client Card', NULL, 20, 0),
+    (N'cabinOptions', N'Y', N'Economy', NULL, 10, 0),
+    (N'cabinOptions', N'W', N'Premium Economy', NULL, 20, 0),
+    (N'cabinOptions', N'C', N'Business Class', NULL, 30, 0),
+    (N'cabinOptions', N'F', N'First Class', NULL, 40, 0),
+    (N'fareTypeOptions', N'NRM', N'Normal Fare', NULL, 10, 0),
+    (N'fareTypeOptions', N'CRP', N'Corporate Fare', NULL, 20, 0),
+    (N'fareTypeOptions', N'RTL', N'Retail Fare', NULL, 30, 0),
+    (N'fareTypeOptions', N'ECP', N'ECoupon Fare', NULL, 40, 0),
+    (N'fareTypeOptions', N'SPL', N'Special Fare', NULL, 50, 0),
+    (N'fareTypeOptions', N'SME', N'SME Fare', NULL, 60, 0),
+    (N'fareTypeOptions', N'FLX', N'Flexi Fare', NULL, 70, 0),
+    (N'fareTypeOptions', N'MRN', N'Marine Fare', NULL, 80, 0),
+    (N'fareTypeOptions', N'DEF', N'Defence Fare', NULL, 90, 0),
+    (N'fareTypeOptions', N'RTS', N'Roundtrip Special Fare', NULL, 100, 0),
+    (N'fareTypeOptions', N'SMC', N'SME Corporate/Corp Connect Fare', NULL, 110, 0),
+    (N'fareTypeOptions', N'SMR', N'SME Retail Fare', NULL, 120, 0),
+    (N'fareTypeOptions', N'LAB', N'Labour Fare', NULL, 130, 0),
+    (N'fareTypeOptions', N'CFX', N'Corporate Flexi', NULL, 140, 0),
+    (N'fareTypeOptions', N'STU', N'Student Fare', NULL, 150, 0),
+    (N'fareTypeOptions', N'DBS', N'Double Seat', NULL, 160, 0),
+    (N'fareTypeOptions', N'SRC', N'Senior Citizen Fare', NULL, 170, 0),
+    (N'dsrStatuses', N'CON', N'Confirmed', NULL, 10, 0),
+    (N'dsrStatuses', N'RES', N'Re-Scheduled', N'Reschedule', 20, 0),
+    (N'dsrStatuses', N'CAN', N'Normal Cancelled', N'Cancellation', 30, 0),
+    (N'dsrStatuses', N'SSR', N'SSR Updated', N'SSR Updation', 40, 0),
+    (N'ssrTypes', N'BAG', N'Baggage', NULL, 10, 0),
+    (N'ssrTypes', N'MEAL', N'Meal', NULL, 20, 0),
+    (N'ssrTypes', N'SEAT', N'Seat', NULL, 30, 0),
+    (N'ssrTypes', N'OTH', N'Other SSR', NULL, 40, 0)
+) AS s (list_key, code, name, display_label, sort_order, is_default)
+ON t.list_key = s.list_key AND t.code = s.code
+WHEN NOT MATCHED THEN
+    INSERT (list_key, code, name, display_label, sort_order, is_default, is_active, created_at, updated_at)
+    VALUES (s.list_key, s.code, s.name, s.display_label, s.sort_order, s.is_default, 1, SYSUTCDATETIME(), SYSUTCDATETIME());
+GO
+
+-- Edit history of Booking / Reschedule / Cancellation / SSR Updation (migration 0071).
+IF OBJECT_ID('dbo.AuditLogs', 'U') IS NULL
+CREATE TABLE dbo.AuditLogs (
+    id           INT IDENTITY(1,1) PRIMARY KEY,
+    company_id   INT NOT NULL,
+    module       NVARCHAR(30)  NOT NULL,   -- Booking / Reschedule / Cancellation / SSR Updation
+    document_id  INT NOT NULL,
+    document_no  NVARCHAR(50)  NULL,       -- Invoice Number at the time of the change
+    action       NVARCHAR(20)  NOT NULL,   -- CREATE / UPDATE
+    source       NVARCHAR(150) NULL,       -- set when the change came from another document's edit
+    user_id      INT NULL,
+    user_name    NVARCHAR(150) NULL,
+    change_count INT NOT NULL DEFAULT 0,
+    changes      NVARCHAR(MAX) NULL,       -- JSON [{scope, line, field, old, new}]
+    changed_at   DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
+);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'ix_audit_logs_document')
+    CREATE INDEX ix_audit_logs_document ON dbo.AuditLogs (company_id, module, document_id);
+GO
+
+-- Edit history, one row per changed field (migration 0072) - backend only.
+CREATE OR ALTER VIEW dbo.vw_AuditLogChanges AS
+-- Edit history of the airline entries (Booking / Reschedule / Cancellation /
+-- SSR Updation), one row per changed field - backend only, e.g.
+--   SELECT * FROM dbo.vw_AuditLogChanges WHERE document_no = 'TA/TAX/00012/26-27' ORDER BY changed_at_ist DESC;
+--   SELECT * FROM dbo.vw_AuditLogChanges WHERE user_name = 'Rahul Mehta' ORDER BY changed_at_ist DESC;
+SELECT a.id AS log_id, a.company_id, a.module, a.document_id, a.document_no,
+       a.action, a.source, a.user_id, a.user_name,
+       DATEADD(MINUTE, 330, a.changed_at) AS changed_at_ist,   -- stored in UTC; +5:30 = India time
+       j.scope, j.line AS passenger, j.field, j.old AS old_value, j.new AS new_value
+FROM dbo.AuditLogs a
+OUTER APPLY OPENJSON(NULLIF(a.changes, '[]')) WITH (
+    scope NVARCHAR(40) '$.scope', line NVARCHAR(200) '$.line', field NVARCHAR(100) '$.field',
+    old NVARCHAR(MAX) '$.old', new NVARCHAR(MAX) '$.new'
+) j;
+GO

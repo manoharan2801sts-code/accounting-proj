@@ -57,7 +57,8 @@
         { field: "Consolidator Addl Service Fee A/c", group: "Incomes" },
         { field: "Consolidator SSR Markup A/c", group: "Incomes" },
         { field: "Consolidator SSR Service Fee A/c", group: "Incomes" },
-        { field: "Consolidator Reschedule Penalty A/c", group: "Incomes" },
+        // Reschedule + Cancellation: the Supplier card's Penalty Amount.
+        { field: "Consolidator Penalty Amount A/c", group: "Incomes" },
         { field: "Consolidator Misc Markup A/c", group: "Incomes", only: "Miscellaneous" },
         { field: "Consolidator Misc Service Fee A/c", group: "Incomes", only: "Miscellaneous" },
       ],
@@ -71,8 +72,8 @@
         { field: "Supplier Addl Service Fee A/c", group: "Expenses" },
         { field: "Supplier SSR Markup A/c", group: "Expenses" },
         { field: "Supplier SSR Service Fee A/c", group: "Expenses" },
-        { field: "Supplier Reschedule Penalty A/c", group: "Expenses" },
-        { field: "Supplier Cancellation Penalty A/c", group: "Expenses" },
+        // Reschedule + Cancellation: the Supplier card's Penalty Amount.
+        { field: "Supplier Penalty Amount A/c", group: "Expenses" },
         { field: "Supplier Misc Markup A/c", group: "Expenses", only: "Miscellaneous" },
         { field: "Supplier Misc Service Fee A/c", group: "Expenses", only: "Miscellaneous" },
       ],
@@ -127,7 +128,7 @@
   const productBadgeName = document.getElementById("mm-product-badge-name");
   fillPlain(productSel, PRODUCT_TYPES, "Select...");
 
-  const LEDGERS_BY_GROUP_API = "http://localhost:8000/api/ledgers-by-group/";
+  const LEDGERS_BY_GROUP_API = "http://127.0.0.1:8000/api/ledgers-by-group/";
   async function ledgersForGroup(groupName) {
     if (ledgerCache[groupName]) return ledgerCache[groupName];
     try {
@@ -258,23 +259,40 @@
     await renderAllCategories();
   });
 
-  async function saveRow(row) {
+  async function saveRow(row, confirmReplace = false) {
     const product = productSel.value;
-    const ledgerId = row.querySelector(".mm-ledger-select").value;
+    const ledgerSel = row.querySelector(".mm-ledger-select");
+    const ledgerId = ledgerSel.value;
     const effectiveFrom = row.querySelector(".mm-effective-from").value;
     if (!ledgerId || !effectiveFrom) {
       voyagerAlert("Pick a Ledger and an Effective From date before saving this field.");
       return;
     }
     try {
-      const res = await fetch("http://localhost:8000/api/master-mapping/save/", {
+      const res = await fetch("http://127.0.0.1:8000/api/master-mapping/save/", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           company_id: activeCompanyId, product_type: product, masters_category: row.dataset.category,
           rows: [{ field_name: row.dataset.field, ledger_id: Number(ledgerId), effective_from: effectiveFrom }],
+          confirm_replace: confirmReplace,
         }),
       });
       const data = await res.json().catch(() => null);
+      // Same Effective From date, different ledger: that would move every
+      // document dated from that day to the new ledger - ask first.
+      if (res.status === 409 && data && data.needs_confirm) {
+        const d = data.effective_from.split("-").reverse().join("/");
+        const newLedger = ledgerSel.options[ledgerSel.selectedIndex].text;
+        const ok = await voyagerConfirm(
+          `"${data.field_name}" is already mapped to "${data.old_ledger}" from ${d}.\n\n` +
+          `Saving "${newLedger}" with the same date REPLACES it - every document dated ${d} or later ` +
+          `(already saved ones too) will post to "${newLedger}".\n\n` +
+          `To keep older documents on "${data.old_ledger}", press Cancel and change Effective From ` +
+          `to the date the new ledger should start.`,
+          { title: "Replace Ledger Mapping?", confirmLabel: "Replace", icon: "warning" });
+        if (ok) await saveRow(row, true);
+        return;
+      }
       if (!res.ok) throw new Error((data && data.error) || `Save failed: ${res.status}`);
     } catch (err) {
       console.error("Could not save Master Mapping", err);
@@ -305,7 +323,7 @@
       const id = row.dataset.mappingId;
       if (id) {
         try {
-          await fetch(`http://localhost:8000/api/master-mapping/${id}/delete/?company_id=${activeCompanyId}`, { method: "DELETE" });
+          await fetch(`http://127.0.0.1:8000/api/master-mapping/${id}/delete/?company_id=${activeCompanyId}`, { method: "DELETE" });
         } catch (err) {
           console.error("Could not delete Master Mapping row", err);
         }
@@ -324,7 +342,7 @@
   async function loadMappings() {
     if (!activeCompanyId || !productSel.value) return;
     try {
-      const res = await fetch(`http://localhost:8000/api/master-mapping/?company_id=${activeCompanyId}&product_type=${encodeURIComponent(productSel.value)}`);
+      const res = await fetch(`http://127.0.0.1:8000/api/master-mapping/?company_id=${activeCompanyId}&product_type=${encodeURIComponent(productSel.value)}`);
       if (!res.ok) throw new Error(`Master Mapping API returned ${res.status}`);
       allMappings = await res.json();
     } catch (err) {

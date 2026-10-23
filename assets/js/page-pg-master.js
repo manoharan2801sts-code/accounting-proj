@@ -7,8 +7,8 @@
 
   const LEDGER_GROUP = "Current Liabilities";
   const CHARGES_LEDGER_GROUP = "Expenses";
-  const PG_MASTER_API = "http://localhost:8000/api/pg-master/";
-  const LEDGERS_BY_GROUP_API = "http://localhost:8000/api/ledgers-by-group/";
+  const PG_MASTER_API = "http://127.0.0.1:8000/api/pg-master/";
+  const LEDGERS_BY_GROUP_API = "http://127.0.0.1:8000/api/ledgers-by-group/";
 
   // DOM Elements - Left Form
   const formName = document.getElementById("pg-form-name");

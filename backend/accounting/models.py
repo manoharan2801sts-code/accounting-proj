@@ -43,7 +43,8 @@ _field_gst_pct_cache = {}
 # every JV / GST calculation resolves a mapped field's ledger from:
 #   resolve_mapping(company, field, as_of) -> the mapping in force ON as_of
 #   = the latest history row with effective_from <= as_of; a document dated
-#   before every row uses the earliest one; as_of None = the latest mapping.
+#   before every row is NOT mapped (None) - a mapping never applies before
+#   its own Effective From date; as_of None = the latest mapping.
 # Cached per (company, product); clear_mapping_caches() after any Ledger
 # Mapping save/delete or ledger GST % change.
 # ---------------------------------------------------------------------------
@@ -84,7 +85,7 @@ def _mapping_history(company_id, product_type="Airline"):
 def resolve_mapping(company_id, field_name, as_of=None, product_type="Airline"):
     """The Ledger Mapping in force for field_name on as_of (a document's own
     date) - {ledger_id, ledger_name, gst_pct, effective_from, masters_category},
-    or None when the field was never mapped."""
+    or None when the field was never mapped or is not mapped yet on as_of."""
     if company_id is None:
         return None
     rows = _mapping_history(company_id, product_type).get(field_name)
@@ -94,7 +95,7 @@ def resolve_mapping(company_id, field_name, as_of=None, product_type="Airline"):
     if day is None:
         return rows[-1]
     in_force = [r for r in rows if r["effective_from"] <= day]
-    return in_force[-1] if in_force else rows[0]
+    return in_force[-1] if in_force else None
 
 
 def mapped_gst_pct(company_id, field_name, as_of=None, product_type="Airline"):
@@ -1378,6 +1379,11 @@ class SSRAirlineTicketLine(models.Model):
     # SSR Ticket Number per SSR type, same JSON-text shape as ssr_items,
     # e.g. {"Baggage": "0981234567890"} - optional per type.
     ssr_ticket_numbers = models.TextField(null=True, blank=True)
+    # Per SSR type charges from the SSR popup grid, JSON text e.g.
+    # {"Baggage": {"amount": 125, "supp_markup": 20, "supp_service_fee": 10,
+    #  "markup": 30, "service_fee": 20}}. The line's seat / meal / baggage /
+    # other_ssr / markup / service_fee / supp_* columns hold their sums.
+    ssr_charges = models.TextField(null=True, blank=True)
 
     seat = models.DecimalField(max_digits=14, decimal_places=2, default=0, db_default=0)
     meal = models.DecimalField(max_digits=14, decimal_places=2, default=0, db_default=0)
@@ -2117,3 +2123,59 @@ class UserMenuAccess(models.Model):
 
     def __str__(self):
         return f"{self.user_id} -> {self.menu_id}"
+
+
+class AirlineDropdownValue(models.Model):
+    """
+    Airline dropdown lists (Booking / Reschedule / Cancellation, SSR,
+    Returns / DSR, FOP Master) - moved here from dropdowns.xml. `name` is the
+    value saved on transactions (e.g. "Adult"); `code` is its short ID for
+    Auto Push / import (e.g. "ADT"). Read by dbo.sp_AirlineDropdown.
+    """
+    id = models.AutoField(primary_key=True)
+    list_key = models.CharField(max_length=50)
+    code = models.CharField(max_length=10)
+    name = models.CharField(max_length=100)
+    display_label = models.CharField(max_length=100, null=True, blank=True)
+    sort_order = models.IntegerField(default=0)
+    is_default = models.BooleanField(default=False)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "AirlineDropdownValues"
+        constraints = [
+            models.UniqueConstraint(fields=["list_key", "code"], name="uq_airline_dd_code"),
+            models.UniqueConstraint(fields=["list_key", "name"], name="uq_airline_dd_name"),
+        ]
+
+    def __str__(self):
+        return f"{self.list_key}: {self.code} = {self.name}"
+
+class AuditLog(models.Model):
+    """
+    Edit history of Booking / Reschedule / Cancellation / SSR Updation - one
+    row per save: who, when, which document, and every changed field
+    (`changes` = JSON [{scope, line, field, old, new}]). Written by
+    views.audited() through dbo.sp_AuditLog.
+    """
+    id = models.AutoField(primary_key=True)
+    company_id = models.IntegerField()
+    module = models.CharField(max_length=30)
+    document_id = models.IntegerField()
+    document_no = models.CharField(max_length=50, null=True, blank=True)
+    action = models.CharField(max_length=20)
+    source = models.CharField(max_length=150, null=True, blank=True)
+    user_id = models.IntegerField(null=True, blank=True)
+    user_name = models.CharField(max_length=150, null=True, blank=True)
+    change_count = models.IntegerField(default=0)
+    changes = models.TextField(null=True, blank=True)
+    changed_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "AuditLogs"
+        indexes = [models.Index(fields=["company_id", "module", "document_id"], name="ix_audit_logs_document")]
+
+    def __str__(self):
+        return f"{self.module} {self.document_no} {self.action} by {self.user_name}"

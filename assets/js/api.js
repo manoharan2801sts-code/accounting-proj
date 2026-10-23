@@ -3,9 +3,9 @@
  * Provides ultra-fast (0ms) in-memory cached responses and instant fallback.
  */
 (function (window) {
-  const API_BASE =
+    const API_BASE =
     window.location.protocol === "file:" || (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") && window.location.port !== "8000"
-      ? "http://localhost:8000/api"
+      ? "http://127.0.0.1:8000/api"
       : "/api";
 
   const TOKEN_KEY = "voyager_access_token";
@@ -31,35 +31,26 @@
     },
   };
 
-  // Every page calls the backend with plain fetch("http://localhost:8000/api/...")
+  // Every page calls the backend with plain fetch("http://127.0.0.1:8000/api/...")
   // - attach the signed-in user's token to those calls here, once, instead
   // of in every page script. The server rejects API calls without it
   // (accounting/permissions.py). A 401 means the session ended or the user
   // was deactivated: back to the login page.
   const nativeFetch = window.fetch.bind(window);
-  const API_PREFIXES = [API_BASE, "http://localhost:8000/api", "http://127.0.0.1:8000/api"];
+  const API_PREFIXES = [API_BASE, "http://127.0.0.1:8000/api", "http://localhost:8000/api"];
   window.fetch = function (input, init) {
     let url = typeof input === "string" ? input : (input && input.url) || "";
-    // On production (e.g. Render), redirect any hardcoded localhost:8000/api calls to the current server's API_BASE
-    if (API_BASE !== "http://localhost:8000/api") {
-      if (url.startsWith("http://localhost:8000/api")) {
-        url = url.replace("http://localhost:8000/api", API_BASE);
-      } else if (url.startsWith("http://127.0.0.1:8000/api")) {
+    if (API_BASE !== "http://127.0.0.1:8000/api" && API_BASE !== "http://localhost:8000/api") {
+      if (url.startsWith("http://127.0.0.1:8000/api")) {
         url = url.replace("http://127.0.0.1:8000/api", API_BASE);
+      } else if (url.startsWith("http://localhost:8000/api")) {
+        url = url.replace("http://localhost:8000/api", API_BASE);
       }
     }
     const token = localStorage.getItem(TOKEN_KEY);
-    const isApi = API_PREFIXES.some((p) => url.startsWith(p)) || url.startsWith(API_BASE);
-    if (!isApi) return nativeFetch(url || input, init);
-    if (!token || token === "demo-token") {
-      if (!url.includes("/auth/login")) {
-        console.warn("[API] No token for API call, redirecting to login:", url);
-        Store.clear();
-        window.location.href = "index.html";
-        return new Promise(() => {});
-      }
-      return nativeFetch(url || input, init);
-    }
+    const isApi = API_PREFIXES.some((p) => url.startsWith(p)) || url.startsWith("/api");
+    const reqInput = typeof input === "string" ? url : (input && input.url ? new Request(url, input) : url);
+    if (!isApi || !token || token === "demo-token") return nativeFetch(reqInput, init);
     const opts = { ...(init || {}) };
     const headers = new Headers(opts.headers || (typeof input !== "string" && input.headers) || {});
     if (!headers.has("Authorization")) headers.set("Authorization", `Bearer ${token}`);
@@ -74,10 +65,10 @@
         return Promise.resolve(new Response(hit.body, { status: hit.status, headers: { "Content-Type": "application/json" } }));
       }
     }
-    return nativeFetch(url, opts).then((res) => {
+    return nativeFetch(input, opts).then((res) => {
       if (res.status === 401 && !url.includes("/auth/login")) {
-        console.warn("[API] 401 returned for", url, "- redirecting to login.");
         Store.clear();
+        try { sessionStorage.removeItem("voyager_permissions"); } catch (_) {}
         window.location.href = "index.html";
       }
       if (cacheable && res.ok) {
@@ -138,7 +129,8 @@
       if (res.status === 401 && auth && retry) {
         const refreshed = await tryRefresh();
         if (refreshed) return request(path, { method, body, auth, retry: false });
-        console.warn("[API] Session expired or refresh failed");
+        Store.clear();
+        window.location.href = "index.html";
         return Promise.reject(new Error("Session expired"));
       }
 

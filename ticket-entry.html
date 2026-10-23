@@ -9,7 +9,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
 <link href="assets/css/design-system.css" rel="stylesheet" />
-<link href="assets/css/app.css?v=7" rel="stylesheet" />
+<link href="assets/css/app.css?v=8" rel="stylesheet" />
 <link href="assets/css/loader.css" rel="stylesheet" />
 <style>
   /* Scoped to this page only — locks the outer page to the viewport so
@@ -869,9 +869,12 @@
       <div class="dom-modal-form-grid" style="grid-template-columns: 100px 1fr;">
         <div style="grid-column: 1 / -1; display:flex; align-items:center; gap:6px;">
           <label style="flex:0 0 100px;">Origin<span class="dom-req">*</span></label>
-          <input class="dom-input" type="text" id="sector-from" maxlength="4" placeholder="e.g. BOM" style="text-transform:uppercase; width:64px; flex:0 0 auto;" />
+          <!-- Airport code from assets/data/cityairport_lst.xml - type the code
+               or the city / airport name, pick from the list. -->
+          <input class="dom-input" type="text" id="sector-from" list="sector-airport-options" data-vdl-min-width="400" maxlength="40" placeholder="e.g. BOM" autocomplete="off" style="text-transform:uppercase; width:84px; flex:0 0 auto;" />
           <label style="margin-left:8px;">Destination<span class="dom-req">*</span></label>
-          <input class="dom-input" type="text" id="sector-to" maxlength="4" placeholder="e.g. DXB" style="text-transform:uppercase; width:64px; flex:0 0 auto;" />
+          <input class="dom-input" type="text" id="sector-to" list="sector-airport-options" data-vdl-min-width="400" maxlength="40" placeholder="e.g. DXB" autocomplete="off" style="text-transform:uppercase; width:84px; flex:0 0 auto;" />
+          <datalist id="sector-airport-options"></datalist>
         </div>
 
         <div style="grid-column: 1 / -1; display:flex; align-items:center; gap:6px;">
@@ -1478,13 +1481,13 @@
   </div>
 </div>
 
-<script src="assets/js/hardcode.js?v=6"></script>
+<script src="assets/js/hardcode.js?v=10"></script>
 <script src="assets/js/mock-data.js"></script>
 <script src="assets/js/loader.js?v=5"></script>
-<script src="assets/js/api.js?v=6"></script>
-<script src="assets/js/util.js?v=5"></script>
-<script src="assets/js/shell.js?v=36"></script>
+<script src="assets/js/api.js?v=5"></script>
+<script src="assets/js/util.js?v=6"></script>
+<script src="assets/js/shell.js?v=46"></script>
 <script src="assets/js/entry-common.js"></script>
 <script src="assets/js/invoice-templates.js?v=22"></script>
-<script src="assets/js/page-ticket-entry.js?v=163"></script>
+<script src="assets/js/page-ticket-entry.js?v=171"></script>
 </body></html>

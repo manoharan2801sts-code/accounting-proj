@@ -1,5 +1,5 @@
 (async function () {
-  const COMPANY_MASTER_API = "http://localhost:8000/api/company-master/";
+  const COMPANY_MASTER_API = "http://127.0.0.1:8000/api/company-master/";
   let activeCompanyId = null;
   // This page always edits ONE row - whichever CompanyMaster row's id
   // matches the active company from the top-nav switcher (creating it on
@@ -318,8 +318,10 @@
     set("cm-currency-symbol", c.currency_symbol);
     set("cm-currency-name", c.currency_name);
     set("cm-decimal-places", c.decimal_places != null ? c.decimal_places : 2);
-    setLogo(c.logo_base64 || null);
-    setSeal(c.seal_base64 || null);
+    // Logo / Seal arrive separately (loadCompanyImages) - only set here when
+    // this response actually carries them.
+    if ("logo_base64" in c && c.logo_base64 !== null) setLogo(c.logo_base64);
+    if ("seal_base64" in c && c.seal_base64 !== null) setSeal(c.seal_base64);
     document.getElementById("cm-terms").value = c.terms_conditions || "";
     BANK_FIELDS.forEach((f) => { document.getElementById(bankHiddenId(f)).value = c[f] || ""; });
     updateBankSummary();
@@ -385,13 +387,33 @@
 
   // Loads (or blanks the form for) whichever CompanyMaster row matches
   // the active company - not a list of every company in the system.
+  // The form fills from the light call (no images, ~0.1 s); the Logo / Seal
+  // (can be MBs of base64) load right after in the background. Save waits
+  // for them (imagesReady) so it never stores an empty logo / seal.
+  let imagesReady = Promise.resolve();
+  function loadCompanyImages() {
+    imagesReady = (async () => {
+      try {
+        const res = await fetch(`${COMPANY_MASTER_API}?id=${activeCompanyId}&images=all`);
+        if (!res.ok) return;
+        const c = await res.json();
+        // Not over a logo / seal just uploaded while this was loading.
+        if (!logoBase64) setLogo(c.logo_base64 || null);
+        if (!sealBase64) setSeal(c.seal_base64 || null);
+      } catch (err) {
+        console.error("Could not load the Company Master logo / seal", err);
+      }
+    })();
+    return imagesReady;
+  }
   async function loadActiveCompany() {
     if (!activeCompanyId) return;
     try {
-      const res = await fetch(`${COMPANY_MASTER_API}?id=${activeCompanyId}&images=all`);
+      const res = await fetch(`${COMPANY_MASTER_API}?id=${activeCompanyId}`);
       if (res.ok) {
         fillForm(await res.json());
         setViewMode(true); // real saved data - open read-only
+        loadCompanyImages();
         return;
       }
     } catch (err) {
@@ -424,6 +446,8 @@
       voyagerAlert("Fix the highlighted field(s) before saving.");
       return;
     }
+    // Logo / Seal still loading in the background - wait, or they'd be saved empty.
+    await imagesReady;
 
     const payload = {
       company_name: document.getElementById("cm-company-name").value.trim(),

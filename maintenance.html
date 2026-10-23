@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <title>Under Maintenance — TRAVEL AGENCY</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
+  <link href="assets/css/design-system.css" rel="stylesheet" />
+  <link href="assets/css/app.css?v=8" rel="stylesheet" />
+  <link rel="icon" type="image/png" href="assets/img/favicon.png" />
+  <style>
+    .mt-wrap { min-height: calc(100vh - var(--topnav-height, 52px) - var(--menubar-height, 44px) - 10rem); display: flex; align-items: center; justify-content: center; }
+    .mt-card {
+      background: var(--color-white, #FFFFFF); border: 1px solid var(--color-border, #CBD5E1); border-radius: 10px;
+      box-shadow: 0 10px 28px rgba(15, 23, 42, 0.08); padding: 2.5rem 3rem; max-width: 520px; width: 100%; text-align: center;
+    }
+    .mt-icon { width: 64px; height: 64px; margin: 0 auto 1.1rem; border-radius: 50%; background: #EEF3FB; color: var(--color-primary, #3B6DB5); display: flex; align-items: center; justify-content: center; }
+    .mt-crumb { font-size: 12px; color: var(--color-text-muted, #64748B); margin-bottom: 0.35rem; }
+    .mt-card h1 { font-size: 1.35rem; font-weight: 700; margin: 0 0 0.6rem; color: var(--color-text-dark, #0F172A); }
+    .mt-card p { font-size: 13.5px; line-height: 1.6; color: var(--color-text-muted, #64748B); margin: 0 0 1.4rem; }
+    .mt-card .dom-nav-btn { display: inline-flex; text-decoration: none; }
+  </style>
+</head>
+<body>
+  <header class="app-topnav" id="shell-topnav"></header>
+  <div class="app-body">
+    <main class="app-main" style="max-width: 1440px; margin: 0 auto; padding: 1.5rem 2rem;">
+      <!-- Shown for menus that are switched off for now - see
+           MAINTENANCE_KEYS in assets/js/hardcode.js. -->
+      <div class="mt-wrap">
+        <div class="mt-card">
+          <div class="mt-icon">
+            <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/></svg>
+          </div>
+          <div class="mt-crumb" id="mt-crumb"></div>
+          <h1 id="mt-title">Page Under Maintenance</h1>
+          <p>This module is currently under maintenance and will be available soon.<br />Thank you for your patience.</p>
+          <a class="dom-nav-btn btn-primary" href="dashboard.html">Go to Home</a>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script src="assets/js/api.js?v=5"></script>
+  <script src="assets/js/hardcode.js?v=10"></script>
+  <script src="assets/js/shell.js?v=46"></script>
+  <script>
+    (function () {
+      // ?key=<menu key> - the menu item that was clicked (highlighted in
+      // the menu, and its name shown in the title / breadcrumb).
+      const key = new URLSearchParams(window.location.search).get("key") || "";
+      const trail = [];
+      (function find(items, path) {
+        for (const it of items || []) {
+          const here = path.concat(it.label);
+          if (it.key === key) { trail.push(...here); return true; }
+          if (find(it.children, here)) return true;
+        }
+        return false;
+      })((window.VoyagerHardcode.NAV_SECTIONS || []).flatMap((s) => (s.items || []).map((i) => ({ ...i, label: `${s.label} > ${i.label}` }))), []);
+      const parts = trail.join(" > ").split(" > ");
+      if (parts.length > 1) {
+        document.getElementById("mt-crumb").textContent = parts.slice(0, -1).join(" › ");
+        const name = parts.slice(1).join(" ");
+        document.getElementById("mt-title").textContent = `${name} - Under Maintenance`;
+        document.title = `${name} - Under Maintenance — TRAVEL AGENCY`;
+      }
+      const start = () => VoyagerShell.init({ activeKey: key });
+      if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start); else start();
+    })();
+  </script>
+</body>
+</html>

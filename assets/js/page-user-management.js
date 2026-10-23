@@ -5,7 +5,7 @@
  * are stored but not yet enforced on individual screens.
  */
 (async function () {
-  const API = "http://localhost:8000/api/user-management/";
+  const API = "http://127.0.0.1:8000/api/user-management/";
   const MODULE_ORDER = ["Masters", "Transactions", "Reports", "Control Panel"];
   const MODULE_LABEL = { Transactions: "Transactions › Airline" };
   const FLAGS = ["can_view", "can_add", "can_edit", "can_delete"];
@@ -58,7 +58,7 @@
     } catch (err) {
       console.error("Could not load users - is the Django backend running?", err);
       users = [];
-      tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:2rem; color:var(--color-text-muted);">Could not load users. Is the Django backend running on localhost:8000?</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:2rem; color:var(--color-text-muted);">Could not load users. Is the Django backend running on 127.0.0.1:8000?</td></tr>`;
       return;
     }
     renderUsers();

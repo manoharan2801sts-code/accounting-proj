@@ -42,10 +42,10 @@
   let editLockMessage = null;
   let editLockBypass = false; // Super Admin - may edit anyway, after a warning
   let voucherTypes = []; // active Voucher Types for the active company - drives the Invoice Type dropdown + Invoice Number auto-numbering
-  const VOUCHER_TYPE_API = "http://localhost:8000/api/voucher-type/";
+  const VOUCHER_TYPE_API = "http://127.0.0.1:8000/api/voucher-type/";
   let fopMasterCards = []; // active FOP Master cards for the active company, refreshed by populateFopOptions
   let pgMasterGateways = []; // PG Master gateways for the active company, refreshed by populatePgOptions
-  const PG_MASTER_EFFECTIVE_API = "http://localhost:8000/api/pg-master/effective/";
+  const PG_MASTER_EFFECTIVE_API = "http://127.0.0.1:8000/api/pg-master/effective/";
   const pgEffectiveCache = new Map(); // `${gatewayName}|${asOfDateISO}` -> resolved snapshot (or null), so re-renders don't refetch
   let passengers = []; // array of passenger objects - source of truth for the register table
   let editingIndex = null;
@@ -133,6 +133,34 @@
     }
   }
   await loadAirlinesFromXml();
+
+  // Origin / Destination on the Sector modal - airport codes from
+  // assets/data/cityairport_lst.xml (<AIR><ID>MAA</ID><AN>Chennai - Chennai
+  // Airport</AN><CN>IN</CN></AIR>). ~16,000 airports, so it loads in the
+  // background (not awaited) - the dropdown searches the code and the
+  // city / airport name; picking one fills the code.
+  const airportCodes = new Set();
+  (async function loadAirportsFromXml() {
+    try {
+      const res = await fetch("assets/data/cityairport_lst.xml");
+      if (!res.ok) throw new Error(`Could not fetch cityairport_lst.xml (${res.status})`);
+      const xml = new DOMParser().parseFromString(await res.text(), "application/xml");
+      if (xml.querySelector("parsererror")) throw new Error("cityairport_lst.xml is not valid XML");
+      const esc = (v) => v.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
+      const html = [];
+      xml.querySelectorAll("AIR").forEach((el) => {
+        const code = (el.querySelector("ID")?.textContent || "").trim().toUpperCase();
+        if (!code || airportCodes.has(code)) return;
+        airportCodes.add(code);
+        const name = (el.querySelector("AN")?.textContent || "").trim();
+        const country = (el.querySelector("CN")?.textContent || "").trim();
+        html.push(`<option value="${esc(code)}">${esc(name)}${country ? ` (${esc(country)})` : ""}</option>`);
+      });
+      document.getElementById("sector-airport-options").innerHTML = html.join("");
+    } catch (err) {
+      console.error("Could not load airports from XML:", err);
+    }
+  })();
   // Gateway Ref stays visible next to Payment Mode always - only becomes
   // editable once "Payment Gateway" is picked; read-only for Top-up, since
   // it's not relevant there. Only clears its value on a genuine user-driven
@@ -257,8 +285,8 @@
   // ============================================================
   // Customers / Suppliers - real backend
   // ============================================================
-  const CUSTOMERS_API = "http://localhost:8000/api/customers/";
-  const SUPPLIERS_API = "http://localhost:8000/api/suppliers/";
+  const CUSTOMERS_API = "http://127.0.0.1:8000/api/customers/";
+  const SUPPLIERS_API = "http://127.0.0.1:8000/api/suppliers/";
 
   async function populateRefs(companyId) {
     const ref = window.VoyagerMock.getReferenceData(companyId);
@@ -273,7 +301,7 @@
       if (!suppRes.ok) throw new Error(`Suppliers API returned ${suppRes.status}`);
       allCustomers = await custRes.json(); allSuppliers = await suppRes.json();
     } catch (err) {
-      console.error("Could not load customers/suppliers from the Django API - is it running on localhost:8000?", err);
+      console.error("Could not load customers/suppliers from the Django API - is it running on 127.0.0.1:8000?", err);
       voyagerAlert("Could not load customers/suppliers from the database. Is the Django backend running?", { icon: "error" });
       allCustomers = []; allSuppliers = [];
     }
@@ -302,7 +330,7 @@
   // for the PG Receipts tab's own copy of that same comparison).
   let companyState = "";
   let companyMaster = null; // full Company Master record - the printed invoice's letterhead
-  const COMPANY_MASTER_API = "http://localhost:8000/api/company-master/";
+  const COMPANY_MASTER_API = "http://127.0.0.1:8000/api/company-master/";
   async function populateCompanyState(companyId) {
     try {
       const res = await fetch(`${COMPANY_MASTER_API}?id=${companyId}`);
@@ -331,7 +359,7 @@
   // rows (see renderPgReceiptsTab), same convention as the backend's
   // mapped_ledger() in views._compute_jv_lines.
   let mappedFieldLedgerName = {};
-  const MASTER_MAPPING_API = "http://localhost:8000/api/master-mapping/";
+  const MASTER_MAPPING_API = "http://127.0.0.1:8000/api/master-mapping/";
   async function populateMappedFieldNames(companyId) {
     try {
       // Ledger Mapping in force on this document's Invoice Date (effective
@@ -366,13 +394,9 @@
     // Reschedule PNR Details tab only - same guard, so these can't hold a
     // value either until their own Master Mapping ledger is set.
     "modal-agent-penalty": "Agent Penalty A/c",
-    // modal-reschedule-penalty deliberately NOT listed here - it's one
-    // shared DOM input repurposed for two genuinely different Master
-    // Mapping fields depending on mode (Reschedule's own "Supplier
-    // Reschedule Penalty A/c" vs Cancellation's own separate "Supplier
-    // Cancellation Penalty A/c" - scoped to the Cancellation page only,
-    // 2026-10-07), so a single static field-name string here can't cover
-    // both - handled inline in the "input" listener below instead.
+    // Supplier card's Penalty Amount (Reschedule and Cancellation) - posts
+    // to "Supplier Penalty Amount A/c" / "Consolidator Penalty Amount A/c".
+    "modal-reschedule-penalty": "Supplier Penalty Amount A/c",
   };
   const jvGuardWarned = new Set();
   document.addEventListener("focusin", (e) => { jvGuardWarned.delete(e.target.id); });
@@ -407,9 +431,7 @@
     );
   }
   document.addEventListener("input", (e) => {
-    const fieldName = e.target.id === "modal-reschedule-penalty"
-      ? (cancellationMode ? "Supplier Cancellation Penalty A/c" : "Supplier Reschedule Penalty A/c")
-      : JV_GUARDED_FIELDS[e.target.id];
+    const fieldName = JV_GUARDED_FIELDS[e.target.id];
     if (!fieldName || mappedFieldNames.has(fieldName) || viewMode) return;
     if ((parseFloat(e.target.value) || 0) === 0) return;
     e.target.value = "0.00";
@@ -422,7 +444,7 @@
 
   // Gateway Ref dropdown - lists PG Master's active Payment Gateway Names
   // (same idea as the FOP Card Number dropdown pulling from FOP Master).
-  const PG_MASTER_API = "http://localhost:8000/api/pg-master/";
+  const PG_MASTER_API = "http://127.0.0.1:8000/api/pg-master/";
   async function populatePgOptions(companyId) {
     try {
       const res = await fetch(`${PG_MASTER_API}?company_id=${companyId}`);
@@ -516,7 +538,7 @@
   // FOP dropdown starts Cash-only; "Own Card"/"Client Card" are only added
   // when FOP Master (fop-master.html) has at least one ACTIVE card of that
   // type - no active cards at all means the dropdown stays just "Cash".
-  const FOP_MASTER_API = "http://localhost:8000/api/fop-master/";
+  const FOP_MASTER_API = "http://127.0.0.1:8000/api/fop-master/";
   async function populateFopOptions(companyId) {
     const fopSelect = document.getElementById("modal-fop");
     const current = fopSelect.value;
@@ -573,7 +595,7 @@
   // (office ID, airline category, travel type, or a sector's cabin/fare
   // type via Save in the Add Sector popup). No exact match -> the Supplier
   // Commission fields are cleared, not left showing a stale value.
-  const SUPPLIER_RULES_API = "http://localhost:8000/api/supplier-commission-rules/";
+  const SUPPLIER_RULES_API = "http://127.0.0.1:8000/api/supplier-commission-rules/";
   function clearSupplierCommissionAutofill() {
     document.getElementById("modal-supp-comm-on").value = "";
     document.getElementById("modal-supp-comm-type").value = "";
@@ -720,6 +742,22 @@
     if (!iso) return "";
     const [y, m, d] = iso.split("-");
     return `${d}/${m}/${y}`;
+  }
+  // Booking / Rescheduled / Cancellation Ref Date (the same box, relabelled
+  // per screen) can't be later than the Invoice Date - "" when fine.
+  function refDateAfterInvoiceError() {
+    const ref = parseDDMMYYYY(getDateGroupValue(document.getElementById("booking_ref_date")));
+    const inv = parseDDMMYYYY(getDateGroupValue(document.getElementById("invoice_date")));
+    if (!ref || !inv || ref <= inv) return "";
+    const label = (document.getElementById("booking_ref_date_label").textContent || "Booking Ref Date").replace("*", "").trim();
+    return `${label} cannot be later than the Invoice Date.`;
+  }
+  function checkRefDateNotAfterInvoice() {
+    const err = refDateAfterInvoiceError();
+    if (!err) return true;
+    setHint("booking_ref_date_hint", err, false);
+    voyagerAlert(err, { focusEl: document.querySelector("#booking_ref_date .dg-native") });
+    return false;
   }
   function checkNotFutureAndInFY(str, label) {
     const d = parseDDMMYYYY(str);
@@ -1634,6 +1672,15 @@
     const from = document.getElementById("sector-from").value.trim().toUpperCase();
     const to = document.getElementById("sector-to").value.trim().toUpperCase();
     if (!from || !to) { voyagerAlert("Sector From and To are both required."); return; }
+    // Only real airport codes from cityairport_lst.xml (checked once it has loaded).
+    if (airportCodes.size) {
+      const bad = [["Origin", from, "sector-from"], ["Destination", to, "sector-to"]].find(([, code]) => !airportCodes.has(code));
+      if (bad) {
+        voyagerAlert(`${bad[0]} "${bad[1]}" is not in the airport list - pick it from the list.`, { focusEl: document.getElementById(bad[2]) });
+        return;
+      }
+    }
+    if (from === to) { voyagerAlert("Origin and Destination cannot be the same airport."); return; }
     const travelDate = getDateGroupValue(document.getElementById("sector-travel-date"));
     // Backstop for a typed-in value - the calendar's own min (set in
     // openSectorModal) already blocks picking an earlier date, but a
@@ -2192,7 +2239,7 @@
       voyagerAlert(`Please fill the following required field(s) before proceeding: ${missing.join(", ")}.`, { focusEl });
       return false;
     }
-    return true;
+    return checkRefDateNotAfterInvoice();
   }
   document.getElementById("proceed-btn").addEventListener("click", () => {
     if (!validateHeaderRequiredFields()) return;
@@ -2738,6 +2785,34 @@
     document.getElementById("jv-fop-total-credit").textContent = fmtN(totalAmount);
   }
 
+  // PG GST's Credit line(s), shared by the Booking and Reschedule PG
+  // Receipts tabs - same Company State vs Customer State (Ledger Master)
+  // comparison the main Journal Voucher tab's Output GST uses (see
+  // _compute_jv_lines server-side): same state = split half/half into
+  // Output CGST A/c + Output SGST A/c, different state = one Output IGST
+  // A/c line. Resolved via Ledger Mapping ("GST and TDS") - NOT PG
+  // Master's own PG Charges Master ledger, which is only for the separate
+  // PG Charges row. Returns { html, total, lastRow }.
+  function pgGstCreditRows(pgGstTotal, afterRow) {
+    const custLedger = allCustomers.find((c) => c.name === document.getElementById("customer").value);
+    const customerState = (custLedger && custLedger.state_name) || "";
+    const sameState = !!companyState && !!customerState
+      && companyState.trim().toLowerCase() === customerState.trim().toLowerCase();
+    const gstMappedName = (fieldName) => {
+      if (!mappedFieldNames.has(fieldName)) warnUnmappedGstField(fieldName);
+      return mappedFieldLedgerName[fieldName] || `${fieldName} (not mapped in Master Mapping)`;
+    };
+    let row = afterRow;
+    if (sameState) {
+      const half = Math.round(pgGstTotal / 2 * 100) / 100;
+      return {
+        html: jvRowHtml(++row, gstMappedName("Output CGST A/c"), 0, half) + jvRowHtml(++row, gstMappedName("Output SGST A/c"), 0, half),
+        total: half * 2, lastRow: row,
+      };
+    }
+    return { html: jvRowHtml(++row, gstMappedName("Output IGST A/c"), 0, pgGstTotal), total: pgGstTotal, lastRow: row };
+  }
+
   // PG Receipts tab - only posts when Payment Mode = "Payment Gateway".
   // Amount is the same customer total already computed for the JV's
   // Customer row.
@@ -2797,23 +2872,6 @@
     const pgLedgerUnmapped = gateway && !gateway.pg_charges_master_ledger_id;
     const unmappedSuffix = ' <span style="color:#DC2626; font-weight:700;" title="No PG Charges Master ledger mapped in PG Master">(unmapped)</span>';
 
-    // PG GST's Credit line(s) - same Company State vs Customer State
-    // (Ledger Master) comparison the main Journal Voucher tab's Output GST
-    // uses (see _compute_jv_lines server-side): same state = split
-    // half/half into Output CGST A/c + Output SGST A/c, different state =
-    // one combined Output IGST A/c line. Resolved via Master Mapping
-    // (same "GST and TDS" ledgers the main tab posts to) - NOT PG
-    // Master's own PG Charges Master ledger, which is only for the
-    // separate PG Charges row above.
-    const custLedger = allCustomers.find((c) => c.name === document.getElementById("customer").value);
-    const customerState = (custLedger && custLedger.state_name) || "";
-    const sameState = !!companyState && !!customerState
-      && companyState.trim().toLowerCase() === customerState.trim().toLowerCase();
-    function gstMappedName(fieldName) {
-      if (!mappedFieldNames.has(fieldName)) warnUnmappedGstField(fieldName);
-      return mappedFieldLedgerName[fieldName] || `${fieldName} (not mapped in Master Mapping)`;
-    }
-
     let rowsHtml = jvRowHtml(1, customerRow.ledger_name, 0, creditAmount) + jvRowHtml(2, pgLedgerName, debitAmount, 0);
     let totalDebit = debitAmount;
     let totalCredit = creditAmount;
@@ -2823,15 +2881,8 @@
       totalCredit += pgChargesTotal;
     }
     if (pgGstTotal > 0) {
-      if (sameState) {
-        const half = Math.round(pgGstTotal / 2 * 100) / 100;
-        rowsHtml += jvRowHtml(++rowNum, gstMappedName("Output CGST A/c"), 0, half);
-        rowsHtml += jvRowHtml(++rowNum, gstMappedName("Output SGST A/c"), 0, half);
-        totalCredit += half * 2;
-      } else {
-        rowsHtml += jvRowHtml(++rowNum, gstMappedName("Output IGST A/c"), 0, pgGstTotal);
-        totalCredit += pgGstTotal;
-      }
+      const gst = pgGstCreditRows(pgGstTotal, rowNum);
+      rowsHtml += gst.html; rowNum = gst.lastRow; totalCredit += gst.total;
     }
     document.getElementById("jv-pg-table-body").innerHTML = rowsHtml;
     document.getElementById("jv-pg-total-debit").textContent = fmtN(totalDebit);
@@ -2889,10 +2940,10 @@
       // Saved voucher only while VIEWING - once Edit is clicked, preview
       // the on-screen (unsaved) figures live instead.
       if (editId && viewMode) {
-        res = await fetch(`http://localhost:8000/api/tickets/${editId}/jv-preview/?company_id=${activeCompanyId}`);
+        res = await fetch(`http://127.0.0.1:8000/api/tickets/${editId}/jv-preview/?company_id=${activeCompanyId}`);
       } else {
         if (passengers.length === 0) throw new Error("Add at least one passenger (via Proceed ->) to preview the JV.");
-        res = await fetch("http://localhost:8000/api/tickets/jv-preview-draft/", {
+        res = await fetch("http://127.0.0.1:8000/api/tickets/jv-preview-draft/", {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify(buildTicketPayload()),
         });
@@ -2901,7 +2952,7 @@
       if (!res.ok) throw new Error(jv.error || "Could not compute JV.");
       if (editId && !viewMode) {
         jv.editing_saved = true;
-        jv.voucher_no = await savedVoucherNo(`http://localhost:8000/api/tickets/${editId}/jv-preview/?company_id=${activeCompanyId}`);
+        jv.voucher_no = await savedVoucherNo(`http://127.0.0.1:8000/api/tickets/${editId}/jv-preview/?company_id=${activeCompanyId}`);
       }
       if (seq !== jvLoadSeq) return; // a newer preview is on its way
       await renderJvPreview(jv);
@@ -2914,22 +2965,15 @@
   // Reschedule-only Journal Voucher (project owner's fixed 26-field spec,
   // 2026-09-30) - a completely separate preview path from loadJvPreview/
   // renderJvPreview above (Booking's own JV), which this never touches or
-  // reuses data from. JV-1..JV-5 per Payment Mode + FOP:
-  //   Topup+Cash -> JV-1 (Main only)
-  //   Payment Gateway+Cash -> JV-2 (Main + PG Receipt)
-  //   Topup+Own Card -> JV-3 (Main + FOP Payment)
-  //   Topup+Client Card -> JV-4 (Main + FOP Payment)
-  //   Payment Gateway+Own Card -> JV-5 (Main + PG Receipt)
-  // Any other combination (e.g. Payment Gateway+Client Card, not covered
-  // by the spec) shows Main only, same as JV-1.
+  // reuses data from. Extra tabs, decided independently - exactly what the
+  // server posts (_reschedule_fop_payment_lines / _reschedule_pg_receipt_lines)
+  // and the same rule as Booking's J.V:
+  //   FOP Payment tab - FOP is Own Card or Client Card (any Payment Mode)
+  //   PG Receipts tab - Payment Mode is "Payment Gateway" (any FOP)
+  // e.g. Payment Gateway + Own Card shows BOTH; Top-up + Cash shows neither.
   // ============================================================
-  function jvTabForPaymentFop(paymentMode, fop) {
-    if (paymentMode === "Topup" && fop === "Cash") return null;
-    if (paymentMode === "Payment Gateway" && fop === "Cash") return "pg";
-    if (paymentMode === "Topup" && fop === "Own Card") return "fop";
-    if (paymentMode === "Topup" && fop === "Client Card") return "fop";
-    if (paymentMode === "Payment Gateway" && fop === "Own Card") return "pg";
-    return null;
+  function jvTabsForPaymentFop(paymentMode, fop) {
+    return { fop: fop === "Own Card" || fop === "Client Card", pg: paymentMode === "Payment Gateway" };
   }
 
   // Main JV - now filters out zero-amount rows the same way renderJvPreview
@@ -2971,19 +3015,11 @@
     const paymentMode = document.getElementById("payment_mode").value;
     const p = passengers[0];
     const fop = p ? (p.fop || "Cash") : "Cash";
-    const tab = jvTabForPaymentFop(paymentMode, fop);
-    if (tab === "fop") {
-      setJvTabVisible("pg", false);
-      await renderRescheduleFopPaymentTab(jv, fop, p);
-      setJvTabVisible("fop", true);
-    } else if (tab === "pg") {
-      setJvTabVisible("fop", false);
-      await renderReschedulePgReceiptTab(jv, p);
-      setJvTabVisible("pg", true);
-    } else {
-      setJvTabVisible("fop", false);
-      setJvTabVisible("pg", false);
-    }
+    const tabs = jvTabsForPaymentFop(paymentMode, fop);
+    if (tabs.fop) await renderRescheduleFopPaymentTab(jv, fop, p);
+    setJvTabVisible("fop", tabs.fop);
+    if (tabs.pg) await renderReschedulePgReceiptTab(jv);
+    setJvTabVisible("pg", tabs.pg);
   }
 
   // FOP Payment tab (JV-3 Own Card / JV-4 Client Card) - Supplier's amount
@@ -3015,11 +3051,12 @@
     document.getElementById("jv-fop-empty").style.display = "none";
   }
 
-  // PG Receipt tab (JV-2/JV-5) - per spec: Customer Credit, PG Charges
-  // Credit, GST Credit (one row - no same/different-state CGST/SGST
-  // split, that's a Booking-only convention), PG Platform Debit =
-  // Customer + PG Charges + GST. Always shows all 4 rows even at zero.
-  async function renderReschedulePgReceiptTab(jv, p) {
+  // PG Receipt tab (JV-2/JV-5): Customer Credit, PG Charges Credit (PG
+  // Master's PG Charges ledger), PG GST Credit (Output CGST + SGST or
+  // Output IGST from Ledger Mapping - same rows as Booking's PG tab),
+  // PG Platform Debit = Customer + PG Charges + PG GST. PG Charges are
+  // every passenger's, not just the first one's.
+  async function renderReschedulePgReceiptTab(jv) {
     const customerRow = (jv.accounts || []).find((a) => a.role === "customer");
     const creditAmount = customerRow ? (customerRow.debit || 0) : 0;
     const gatewayRef = document.getElementById("payment_gateway_ref").value;
@@ -3027,22 +3064,32 @@
     const pgLedgerName = gateway ? (gateway.payment_master_ledger_name || gatewayRef) : (gatewayRef || "PG Platform");
     const pgChargesLedgerName = gateway ? (gateway.pg_charges_master_ledger_name || "PG Charges") : "PG Charges";
 
-    const pgChargesTotal = p ? (p.pg_charges || 0) : 0;
+    const pgChargesTotal = Math.round(passengers.reduce((sum, x) => sum + (x.pg_charges || 0), 0) * 100) / 100;
     const pgGstPct = gateway ? Number(gateway.pg_charges_master_ledger_gst_percentage) || 0 : 0;
-    const pgGstTotal = Math.round(pgChargesTotal * pgGstPct / 100 * 100) / 100;
+    // Per passenger, rounded - same as the Booking tab's PG Platform Debit.
+    const pgGstTotal = Math.round(passengers.reduce((sum, x) =>
+      sum + Math.round((x.pg_charges || 0) * pgGstPct / 100 * 100) / 100, 0) * 100) / 100;
     if ((pgChargesTotal > 0 || pgGstTotal > 0) && gateway && !gateway.pg_charges_master_ledger_id) {
       warnUnmappedPgLedger(gatewayRef);
     }
-    const debitAmount = creditAmount + pgChargesTotal + pgGstTotal;
+    const debitAmount = Math.round((creditAmount + pgChargesTotal + pgGstTotal) * 100) / 100;
+    const pgLedgerUnmapped = gateway && !gateway.pg_charges_master_ledger_id;
+    const unmappedSuffix = ' <span style="color:#DC2626; font-weight:700;" title="No PG Charges Master ledger mapped in PG Master">(unmapped)</span>';
 
-    const rowsHtml =
-      jvRowHtml(1, customerRow ? customerRow.ledger_name : "Customer", 0, creditAmount) +
-      jvRowHtml(2, pgChargesLedgerName, 0, pgChargesTotal) +
-      jvRowHtml(3, pgChargesLedgerName, 0, pgGstTotal) +
-      jvRowHtml(4, pgLedgerName, debitAmount, 0);
+    let rowsHtml = jvRowHtml(1, customerRow ? customerRow.ledger_name : "Customer", 0, creditAmount);
+    let rowNum = 1, totalCredit = creditAmount;
+    if (pgChargesTotal > 0) {
+      rowsHtml += jvRowHtml(++rowNum, pgChargesLedgerName + (pgLedgerUnmapped ? unmappedSuffix : ""), 0, pgChargesTotal);
+      totalCredit += pgChargesTotal;
+    }
+    if (pgGstTotal > 0) {
+      const gst = pgGstCreditRows(pgGstTotal, rowNum);
+      rowsHtml += gst.html; rowNum = gst.lastRow; totalCredit += gst.total;
+    }
+    rowsHtml += jvRowHtml(++rowNum, pgLedgerName, debitAmount, 0);
     document.getElementById("jv-pg-table-body").innerHTML = rowsHtml;
     document.getElementById("jv-pg-total-debit").textContent = fmtN(debitAmount);
-    document.getElementById("jv-pg-total-credit").textContent = fmtN(creditAmount + pgChargesTotal + pgGstTotal);
+    document.getElementById("jv-pg-total-credit").textContent = fmtN(totalCredit);
     document.getElementById("jv-tab-panel-pg").querySelector("table").parentElement.style.display = "";
     document.getElementById("jv-pg-empty").style.display = "none";
   }
@@ -3056,10 +3103,10 @@
     try {
       let res;
       if (editingRescheduleId && viewMode) {
-        res = await fetch(`http://localhost:8000/api/reschedule-tickets/${editingRescheduleId}/jv-preview/?company_id=${activeCompanyId}`);
+        res = await fetch(`http://127.0.0.1:8000/api/reschedule-tickets/${editingRescheduleId}/jv-preview/?company_id=${activeCompanyId}`);
       } else {
         if (passengers.length === 0) throw new Error("Fill in the Reschedule PNR Details passenger to preview the JV.");
-        res = await fetch("http://localhost:8000/api/reschedule-tickets/jv-preview-draft/", {
+        res = await fetch("http://127.0.0.1:8000/api/reschedule-tickets/jv-preview-draft/", {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify(buildTicketPayload()),
         });
@@ -3068,7 +3115,7 @@
       if (!res.ok) throw new Error(jv.error || "Could not compute JV.");
       if (editingRescheduleId && !viewMode) {
         jv.editing_saved = true;
-        jv.voucher_no = await savedVoucherNo(`http://localhost:8000/api/reschedule-tickets/${editingRescheduleId}/jv-preview/?company_id=${activeCompanyId}`);
+        jv.voucher_no = await savedVoucherNo(`http://127.0.0.1:8000/api/reschedule-tickets/${editingRescheduleId}/jv-preview/?company_id=${activeCompanyId}`);
       }
       if (seq !== jvLoadSeq) return; // a newer preview is on its way
       await renderRescheduleJvPreview(jv);
@@ -3106,10 +3153,10 @@
     try {
       let res;
       if (cxEditSavedCancellationId && viewMode) {
-        res = await fetch(`http://localhost:8000/api/cancellation-tickets/${cxEditSavedCancellationId}/jv-preview/?company_id=${activeCompanyId}`);
+        res = await fetch(`http://127.0.0.1:8000/api/cancellation-tickets/${cxEditSavedCancellationId}/jv-preview/?company_id=${activeCompanyId}`);
       } else {
         if (passengers.length === 0) throw new Error("Pick a passenger (via New ->) to preview the JV.");
-        res = await fetch("http://localhost:8000/api/cancellation-tickets/jv-preview-draft/", {
+        res = await fetch("http://127.0.0.1:8000/api/cancellation-tickets/jv-preview-draft/", {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify(buildCancellationPreviewPayload()),
         });
@@ -3118,7 +3165,7 @@
       if (!res.ok) throw new Error(jv.error || "Could not compute JV.");
       if (cxEditSavedCancellationId && !viewMode) {
         jv.editing_saved = true;
-        jv.voucher_no = await savedVoucherNo(`http://localhost:8000/api/cancellation-tickets/${cxEditSavedCancellationId}/jv-preview/?company_id=${activeCompanyId}`);
+        jv.voucher_no = await savedVoucherNo(`http://127.0.0.1:8000/api/cancellation-tickets/${cxEditSavedCancellationId}/jv-preview/?company_id=${activeCompanyId}`);
       }
       if (seq !== jvLoadSeq) return; // a newer preview is on its way
       await renderCancellationJvPreview(jv);
@@ -3263,10 +3310,10 @@
     // Cancellations instead - the whole point is to show ONLY already-
     // cancelled tickets here, not the full tickets list.
     const findApi = rescheduleMode
-      ? `http://localhost:8000/api/reschedule-tickets/list/?company_id=${activeCompanyId}`
+      ? `http://127.0.0.1:8000/api/reschedule-tickets/list/?company_id=${activeCompanyId}`
       : cancellationMode
-      ? `http://localhost:8000/api/cancellation-tickets/list/?company_id=${activeCompanyId}`
-      : `http://localhost:8000/api/tickets/?company_id=${activeCompanyId}`;
+      ? `http://127.0.0.1:8000/api/cancellation-tickets/list/?company_id=${activeCompanyId}`
+      : `http://127.0.0.1:8000/api/tickets/?company_id=${activeCompanyId}`;
     let rows = [];
     try {
       const res = await fetch(findApi);
@@ -3390,8 +3437,8 @@
     let rows = [];
     try {
       const [tRes, rRes] = await Promise.all([
-        fetch(`http://localhost:8000/api/tickets/?company_id=${activeCompanyId}`),
-        fetch(`http://localhost:8000/api/reschedule-tickets/list/?company_id=${activeCompanyId}`),
+        fetch(`http://127.0.0.1:8000/api/tickets/?company_id=${activeCompanyId}`),
+        fetch(`http://127.0.0.1:8000/api/reschedule-tickets/list/?company_id=${activeCompanyId}`),
       ]);
       const tRows = tRes.ok ? await tRes.json() : [];
       const rRows = rRes.ok ? await rRes.json() : [];
@@ -3685,7 +3732,7 @@
     }
     try {
       const params = new URLSearchParams({ company_id: activeCompanyId, s_pnr: sPnr, airline_pnr: airlinePnr, ticket_no: ticketNo });
-      const res = await fetch(`http://localhost:8000/api/tickets/lookup-for-cancellation/?${params}`);
+      const res = await fetch(`http://127.0.0.1:8000/api/tickets/lookup-for-cancellation/?${params}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Ticket not found.");
       cxLookupTicketId = data.ticket_id || null;
@@ -3856,8 +3903,8 @@
   async function enterCancellationMode(ticketId, pickedPax, sourceRescheduleId) {
     try {
       const url = sourceRescheduleId
-        ? `http://localhost:8000/api/reschedule-tickets/${sourceRescheduleId}/?company_id=${activeCompanyId}`
-        : `http://localhost:8000/api/tickets/${ticketId}/?company_id=${activeCompanyId}`;
+        ? `http://127.0.0.1:8000/api/reschedule-tickets/${sourceRescheduleId}/?company_id=${activeCompanyId}`
+        : `http://127.0.0.1:8000/api/tickets/${ticketId}/?company_id=${activeCompanyId}`;
       const res = await fetch(url);
       const t = await res.json();
       if (!res.ok) throw new Error(t.error || "Ticket not found.");
@@ -3924,7 +3971,7 @@
           original_ticket_line_id: sourceRescheduleId ? p.original_ticket_line_id : p.id,
           reschedule_line_id: sourceRescheduleId ? p.id : null,
         }));
-        const totalsRes = await fetch("http://localhost:8000/api/cancellation-tickets/fare-totals/", {
+        const totalsRes = await fetch("http://127.0.0.1:8000/api/cancellation-tickets/fare-totals/", {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ company_id: activeCompanyId, lines: totalsReq }),
         });
@@ -4035,6 +4082,7 @@
   // record-keeping only, no Journal Voucher is posted (unlike Reschedule's
   // own auto-posted JV) - see views.cancellation_ticket_create.
   document.getElementById("cancellation-save-btn").addEventListener("click", async () => {
+    if (!checkRefDateNotAfterInvoice()) return;
     // Editing an already-saved Cancellation (Edit button unlocked it -
     // see edit-ticket-btn's own cancellationMode branch) hits update/
     // instead of create/, same "same button, different endpoint" pattern
@@ -4056,7 +4104,7 @@
         lines: passengers.map((p) => ({ ...p, id: p.id, ...markupReversalComponents(p) })),
       };
       try {
-        const res = await fetch(`http://localhost:8000/api/cancellation-tickets/${cxEditSavedCancellationId}/update/`, {
+        const res = await fetch(`http://127.0.0.1:8000/api/cancellation-tickets/${cxEditSavedCancellationId}/update/`, {
           method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
         });
         const result = await res.json();
@@ -4097,7 +4145,7 @@
     };
 
     try {
-      const res = await fetch("http://localhost:8000/api/cancellation-tickets/create/", {
+      const res = await fetch("http://127.0.0.1:8000/api/cancellation-tickets/create/", {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
       });
       const result = await res.json();
@@ -4231,7 +4279,7 @@
     }
     try {
       const params = new URLSearchParams({ company_id: activeCompanyId, s_pnr: sPnr, airline_pnr: airlinePnr, ticket_no: ticketNo });
-      const res = await fetch(`http://localhost:8000/api/tickets/lookup-for-reschedule/?${params}`);
+      const res = await fetch(`http://127.0.0.1:8000/api/tickets/lookup-for-reschedule/?${params}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Ticket not found.");
       rsLookupTicketId = data.ticket_id || null;
@@ -4512,7 +4560,7 @@
       let ancestorLevels = [];
       try {
         const chainUrl =
-          `http://localhost:8000/api/reschedule-tickets/parent-chain-line/?company_id=${activeCompanyId}&original_ticket_line_id=${pickedLineId}` +
+          `http://127.0.0.1:8000/api/reschedule-tickets/parent-chain-line/?company_id=${activeCompanyId}&original_ticket_line_id=${pickedLineId}` +
           (pickedBasedOnId ? `&based_on_reschedule_line_id=${pickedBasedOnId}` : "");
         const chainRes = await fetch(chainUrl);
         if (chainRes.ok) {
@@ -4627,7 +4675,7 @@
       // fallback above.
       try {
         const chainUrl =
-          `http://localhost:8000/api/reschedule-tickets/parent-chain-line/?company_id=${activeCompanyId}&original_ticket_line_id=${savedLine.original_ticket_line_id}` +
+          `http://127.0.0.1:8000/api/reschedule-tickets/parent-chain-line/?company_id=${activeCompanyId}&original_ticket_line_id=${savedLine.original_ticket_line_id}` +
           (savedLine.reschedule_line_id ? `&based_on_reschedule_line_id=${savedLine.reschedule_line_id}` : "");
         const chainRes = await fetch(chainUrl);
         if (chainRes.ok) {
@@ -4742,6 +4790,7 @@
     if (invErr) { setHint("invoice_date_hint", invErr, false); voyagerAlert(invErr); return; }
     const refErr = checkNotFutureAndInFY(getDateGroupValue(document.getElementById("booking_ref_date")), "Booking Ref Date");
     if (refErr) { setHint("booking_ref_date_hint", refErr, false); voyagerAlert(refErr); return; }
+    if (!checkRefDateNotAfterInvoice()) return;
     if (!document.getElementById("invoice_number").value.trim()) { voyagerAlert("Invoice Number is required."); return; }
     if (!checkDuplicateHeaderField("invoice_number", "invoice_number_hint", "invoice_number", "Invoice Number")) {
       voyagerAlert("This Invoice Number is already used."); return;
@@ -4763,11 +4812,11 @@
     const payload = buildTicketPayload();
     const url = rescheduleMode
       ? (editingRescheduleId
-          ? `http://localhost:8000/api/reschedule-tickets/${editingRescheduleId}/update/`
-          : "http://localhost:8000/api/reschedule-tickets/create/")
+          ? `http://127.0.0.1:8000/api/reschedule-tickets/${editingRescheduleId}/update/`
+          : "http://127.0.0.1:8000/api/reschedule-tickets/create/")
       : editId
-      ? `http://localhost:8000/api/tickets/${editId}/update/`
-      : "http://localhost:8000/api/tickets/create/";
+      ? `http://127.0.0.1:8000/api/tickets/${editId}/update/`
+      : "http://127.0.0.1:8000/api/tickets/create/";
 
     try {
       const res = await fetch(url, {
@@ -5021,7 +5070,7 @@
       try {
         const [, res] = await Promise.all([
           populateRefs(activeCompanyId),
-          fetch(`http://localhost:8000/api/tickets/${editId}/?company_id=${activeCompanyId}`),
+          fetch(`http://127.0.0.1:8000/api/tickets/${editId}/?company_id=${activeCompanyId}`),
         ]);
         const ticket = await res.json();
         if (!res.ok) throw new Error(ticket.error || "Ticket not found.");
@@ -5039,16 +5088,16 @@
       try {
         const [, res] = await Promise.all([
           populateRefs(activeCompanyId),
-          fetch(`http://localhost:8000/api/tickets/?company_id=${activeCompanyId}`),
+          fetch(`http://127.0.0.1:8000/api/tickets/?company_id=${activeCompanyId}`),
         ]);
         existingTickets = res.ok ? await res.json() : [];
       } catch (_) { existingTickets = []; }
       if (rescheduleSavedId) {
         try {
-          const res = await fetch(`http://localhost:8000/api/reschedule-tickets/${rescheduleSavedId}/?company_id=${activeCompanyId}`);
+          const res = await fetch(`http://127.0.0.1:8000/api/reschedule-tickets/${rescheduleSavedId}/?company_id=${activeCompanyId}`);
           const rt = await res.json();
           if (!res.ok) throw new Error(rt.error || "Saved reschedule ticket not found.");
-          const origRes = await fetch(`http://localhost:8000/api/tickets/${rt.original_ticket_id}/?company_id=${activeCompanyId}`);
+          const origRes = await fetch(`http://127.0.0.1:8000/api/tickets/${rt.original_ticket_id}/?company_id=${activeCompanyId}`);
           const originalTicket = await origRes.json();
           if (!origRes.ok) throw new Error(originalTicket.error || "Original ticket not found.");
           await enterSavedRescheduleMode(rt, originalTicket);
@@ -5059,12 +5108,12 @@
       } else if (rescheduleTicketId) {
         try {
           const [res, parentRes] = await Promise.all([
-            fetch(`http://localhost:8000/api/tickets/${rescheduleTicketId}/?company_id=${activeCompanyId}`),
+            fetch(`http://127.0.0.1:8000/api/tickets/${rescheduleTicketId}/?company_id=${activeCompanyId}`),
             // Chaining - also fetch the PREVIOUS reschedule this one was
             // found via, so "Parent PNR Details" reflects its data instead
             // of the several-steps-back original ticket's.
             parentRescheduleId
-              ? fetch(`http://localhost:8000/api/reschedule-tickets/${parentRescheduleId}/?company_id=${activeCompanyId}`)
+              ? fetch(`http://127.0.0.1:8000/api/reschedule-tickets/${parentRescheduleId}/?company_id=${activeCompanyId}`)
               : Promise.resolve(null),
           ]);
           const ticket = await res.json();
@@ -5107,7 +5156,7 @@
         enterBlankCancellationShell();
       } else if (cancellationSavedId) {
         try {
-          const res = await fetch(`http://localhost:8000/api/cancellation-tickets/${cancellationSavedId}/?company_id=${activeCompanyId}`);
+          const res = await fetch(`http://127.0.0.1:8000/api/cancellation-tickets/${cancellationSavedId}/?company_id=${activeCompanyId}`);
           const ct = await res.json();
           if (!res.ok) throw new Error(ct.error || "Saved cancellation not found.");
           enterSavedCancellationMode(ct);

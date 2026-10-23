@@ -1040,3 +1040,45 @@ def misc_save(company_id, fields, jv_narration, jv_total_debit, jv_total_credit,
     if not row or row.get("status") == "Error":
         raise StoredProcedureError((row or {}).get("error") or "Could not save this Miscellaneous transaction.")
     return {"id": row["id"], "voucher_id": row.get("voucher_id"), "voucher_no": row.get("voucher_no")}
+
+
+# ==========================================================================
+# Airline dropdown lists (dbo.sp_AirlineDropdown)
+# ==========================================================================
+
+def airline_dropdown_list(list_key=None):
+    """Active airline dropdown values (all lists, or one), in screen order."""
+    return exec_sp("dbo.sp_AirlineDropdown", {"Action": "LIST", "ListKey": list_key})
+
+
+def airline_dropdown_resolve(list_key, code=None, name=None):
+    """One value of a list by its short code (e.g. paxTypes / ADT) or its name - for Auto Push / import."""
+    return exec_sp_one("dbo.sp_AirlineDropdown", {"Action": "RESOLVE", "ListKey": list_key, "Code": code, "Name": name})
+
+
+# ==========================================================================
+# Edit history / audit log (dbo.sp_AuditLog)
+# ==========================================================================
+
+def audit_snapshot(module, document_id):
+    """{header_json, lines_json} of a document straight from its tables, or None."""
+    return exec_sp_one("dbo.sp_AuditLog", {"Action": "SNAPSHOT", "Module": module, "DocumentId": document_id})
+
+
+def audit_chain(module, document_id):
+    """[{module, id}] - follow-up documents of a Booking / Reschedule (same original booking)."""
+    return exec_sp("dbo.sp_AuditLog", {"Action": "CHAIN", "Module": module, "DocumentId": document_id})
+
+
+def audit_insert(company_id, module, document_id, document_no, action, source, user_id, user_name, changes_json, change_count):
+    return exec_sp_one("dbo.sp_AuditLog", {
+        "Action": "INSERT", "CompanyId": company_id, "Module": module, "DocumentId": document_id,
+        "DocumentNo": document_no, "LogAction": action, "Source": source, "UserId": user_id,
+        "UserName": user_name, "Changes": changes_json, "ChangeCount": change_count,
+    })
+
+
+def audit_list(company_id, module=None, document_id=None, top=500):
+    return exec_sp("dbo.sp_AuditLog", {"Action": "LIST", "CompanyId": company_id, "Module": module,
+                                       "DocumentId": document_id, "Top": top})
+

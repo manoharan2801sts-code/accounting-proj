@@ -135,6 +135,22 @@
     ]},
   ];
 
+  // Menus switched off for now: their links open maintenance.html ("Under
+  // Maintenance"). A parent key covers all its sub-menus. Their old pages
+  // were moved out of the project (D:\GOKUL S\Accounting Software\
+  // _Removed_Files_2026-10-22) - to bring a module back, restore its page
+  // there and remove its key here.
+  const MAINTENANCE_KEYS = new Set([
+    "trans-hotels", "trans-bus", "trans-train", "trans-visa", "trans-tour-packages", "trans-insurance",
+  ]);
+  (function markMaintenance(items, inherited) {
+    (items || []).forEach((it) => {
+      const off = inherited || MAINTENANCE_KEYS.has(it.key);
+      if (off && it.href) { it.liveHref = it.href; it.href = `maintenance.html?key=${it.key}`; }
+      markMaintenance(it.children, off);
+    });
+  })(NAV_SECTIONS.flatMap((s) => s.items), false);
+
   // Voucher/record status → pill tone. Moved out of util.js
   // (was: local STATUS_MAP inside statusPill()).
   const STATUS_MAP = {
@@ -225,7 +241,49 @@
     }
   }
   const DROPDOWNS = loadDropdowns();
+
+  // Airline dropdown lists (Booking / Reschedule / Cancellation, SSR,
+  // Returns / DSR, FOP Master) come from the database table
+  // AirlineDropdownValues (/api/airline-dropdowns/), not dropdowns.xml -
+  // each value also carries a short code (Confirmed = CON, Adult = ADT) for
+  // Auto Push. Same shape as the XML lists, loaded the same synchronous way
+  // so page scripts can read them immediately.
+  // Kept for 10 minutes per browser tab (sessionStorage), so a full page
+  // load doesn't wait on this call every time - the lists rarely change.
+  const AIRLINE_DD_CACHE_KEY = "voyager_airline_dropdowns";
+  const AIRLINE_DD_CACHE_MS = 10 * 60 * 1000;
+  function loadAirlineDropdowns() {
+    const token = localStorage.getItem("voyager_access_token");
+    if (!token || token === "demo-token") return {};
+    try {
+      const hit = JSON.parse(sessionStorage.getItem(AIRLINE_DD_CACHE_KEY) || "null");
+      if (hit && hit.token === token && Date.now() - hit.at < AIRLINE_DD_CACHE_MS && hit.data) return hit.data;
+    } catch (_) { /* no / bad cache - load below */ }
+    const data = fetchAirlineDropdowns(token);
+    if (Object.keys(data).length) {
+      try { sessionStorage.setItem(AIRLINE_DD_CACHE_KEY, JSON.stringify({ token, at: Date.now(), data })); } catch (_) { /* storage full */ }
+    }
+    return data;
+  }
+  function fetchAirlineDropdowns(token) {
+    const local = window.location.protocol === "file:" ||
+      ((window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") && window.location.port !== "8000");
+    try {
+      const xhr = new XMLHttpRequest();
+      xhr.open("GET", (local ? "http://127.0.0.1:8000/api" : "/api") + "/airline-dropdowns/", false);
+      xhr.setRequestHeader("Authorization", "Bearer " + token);
+      xhr.send();
+      if (xhr.status !== 200) throw new Error("HTTP " + xhr.status);
+      return JSON.parse(xhr.responseText) || {};
+    } catch (err) {
+      console.error("Could not load the airline dropdown lists (/api/airline-dropdowns/)", err);
+      return {};
+    }
+  }
+  Object.assign(DROPDOWNS, loadAirlineDropdowns());
   const dropdownValues = (key) => ((DROPDOWNS[key] || {}).options || []).map((o) => o.value);
+  // Short code of a saved value, e.g. dropdownCode("paxTypes", "Adult") -> "ADT".
+  const dropdownCode = (key, value) => (((DROPDOWNS[key] || {}).options || []).find((o) => o.value === value) || {}).code || "";
 
   // Fills every <select data-options="key"> under root from DROPDOWNS,
   // after whatever placeholder option(s) the HTML already has. Runs once
@@ -278,6 +336,7 @@
     TICKET_FORM_OPTIONS,
     DROPDOWNS,
     dropdownValues,
+    dropdownCode,
     fillDropdowns,
   };
 })(window);

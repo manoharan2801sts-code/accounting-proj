@@ -16,95 +16,22 @@
 -->
 <dropdowns>
 
-  <!-- ============ Airline Ticket (Booking / Reschedule / Cancellation) ============ -->
-  <list key="bookingModes" default="Manual">
-    <option>Manual</option>
-    <option>Auto Push</option>
-  </list>
-  <list key="bookingTypes">
-    <option>Travel Desk</option>
-    <option>Indesk</option>
-    <option>Agent</option>
-    <option>Retrieve PNR Accounting</option>
-    <option>Manual Booking</option>
-    <option>Mobile Booking</option>
-    <option>Travel Co-Ordinator</option>
-    <option>SSR Updation</option>
-  </list>
-  <list key="bookingStatuses">
-    <option>Confirmed</option>
-    <option>Re-Scheduled</option>
-    <option>Normal Cancelled</option>
-  </list>
-  <list key="travelTypes">
-    <option>Domestic</option>
-    <option>International</option>
-  </list>
+  <!-- ============ Airline lists ============
+       bookingModes, bookingTypes, bookingStatuses, travelTypes, custDiscountOn,
+       custDiscountTypes, paxTypes, paymentModes, airlineCategories, fopOptions,
+       cardTypes, cabinOptions, fareTypeOptions, dsrStatuses, ssrTypes are NOT
+       here any more - they load from the database table AirlineDropdownValues
+       (each value with a short code, e.g. Confirmed = CON, Adult = ADT).
+       Add / rename them there, not in this file. ==== -->
+
   <list key="currencies">
     <option>INR</option>
     <option>AED</option>
-  </list>
-  <!-- Customer Discount On / Supplier Commission On -->
-  <list key="custDiscountOn">
-    <option>Basic</option>
-    <option>Basic + YQ</option>
-    <option>Basic + YR</option>
-    <option>Basic + YQ + YR</option>
-    <option>Gross</option>
-  </list>
-  <!-- Customer Discount Type / Supplier Commission Type -->
-  <list key="custDiscountTypes">
-    <option>Percentage</option>
-    <option>Flat</option>
-  </list>
-  <list key="paxTypes">
-    <option>Adult</option>
-    <option>Child</option>
-    <option>Infant</option>
   </list>
   <!-- Miscellaneous > Status (Confirmed posts the J.V, Cancelled posts nothing) -->
   <list key="miscStatuses">
     <option>Confirmed</option>
     <option>Cancelled</option>
-  </list>
-  <list key="paymentModes">
-    <option>Top-up</option>
-    <option>Payment Gateway</option>
-  </list>
-  <list key="airlineCategories">
-    <option>LCC</option>
-    <option>FSC</option>
-    <option>OSC</option>
-  </list>
-  <list key="fopOptions">
-    <option>Own Card</option>
-    <option>Client Card</option>
-    <option>Cash</option>
-  </list>
-  <list key="cabinOptions">
-    <option>Economy</option>
-    <option>Premium Economy</option>
-    <option>Business Class</option>
-    <option>First Class</option>
-  </list>
-  <list key="fareTypeOptions">
-    <option>Normal Fare</option>
-    <option>Corporate Fare</option>
-    <option>Retail Fare</option>
-    <option>ECoupon Fare</option>
-    <option>Special Fare</option>
-    <option>SME Fare</option>
-    <option>Flexi Fare</option>
-    <option>Marine Fare</option>
-    <option>Defence Fare</option>
-    <option>Roundtrip Special Fare</option>
-    <option>SME Corporate/Corp Connect Fare</option>
-    <option>SME Retail Fare</option>
-    <option>Labour Fare</option>
-    <option>Corporate Flexi</option>
-    <option>Student Fare</option>
-    <option>Double Seat</option>
-    <option>Senior Citizen Fare</option>
   </list>
   <!-- User Name suggestions (Ticket screen) -->
   <list key="userNames">
@@ -136,11 +63,6 @@
     <option>Composition</option>
     <option>Unregistered</option>
     <option>SEZ</option>
-  </list>
-  <!-- FOP Master > Card Type -->
-  <list key="cardTypes">
-    <option>Own Card</option>
-    <option>Client Card</option>
   </list>
   <!-- Ledger > Opening Balance Dr/Cr -->
   <list key="openingBalanceTypes">
@@ -299,13 +221,6 @@
     <option>Insurance</option>
     <option>Vouchers</option>
   </list>
-  <!-- Returns > Status filter -->
-  <list key="dsrStatuses">
-    <option value="Confirmed">Confirmed</option>
-    <option value="Re-Scheduled">Reschedule</option>
-    <option value="Normal Cancelled">Cancellation</option>
-    <option value="SSR Updated">SSR Updation</option>
-  </list>
 
   <!-- ============ Report / transaction list filters ============ -->
   <!-- Branch / Office filter (GSTR, TDS, Bus, Train, Hotel, Tour, SSR, Misc lists) -->
@@ -321,12 +236,5 @@
     <option value="CANCELLED">Cancelled</option>
   </list>
 
-  <!-- ============ SSR Updation ============ -->
-  <list key="ssrTypes">
-    <option>Baggage</option>
-    <option>Meal</option>
-    <option>Seat</option>
-    <option>Other SSR</option>
-  </list>
 
 </dropdowns>

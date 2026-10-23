@@ -66,7 +66,7 @@
       completeSession(data);
     } catch (err) {
       showError(loginError, err.message === "Failed to fetch"
-        ? "Cannot reach the server. Is the Django backend running on localhost:8000?"
+        ? "Cannot reach the server. Is the Django backend running on 127.0.0.1:8000?"
         : (err.message || "Unable to sign in"));
     } finally {
       loginBtn.disabled = false;

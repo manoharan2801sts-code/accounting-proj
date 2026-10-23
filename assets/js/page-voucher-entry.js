@@ -46,7 +46,7 @@
   async function enterTicketVoucherViewMode(id) {
     let jv;
     try {
-      const res = await fetch(`http://localhost:8000/api/tickets/${id}/jv-preview/?company_id=${activeCompanyId}`);
+      const res = await fetch(`http://127.0.0.1:8000/api/tickets/${id}/jv-preview/?company_id=${activeCompanyId}`);
       jv = await res.json();
       if (!res.ok) throw new Error(jv.error || "Could not compute this ticket's JV.");
     } catch (err) {
@@ -302,7 +302,7 @@
     if (partyBillsCache[ledgerId]) return partyBillsCache[ledgerId];
     const qs = new URLSearchParams({ company_id: activeCompanyId, ledger_id: ledgerId });
     if (editId) qs.set("exclude_voucher_id", editId);
-    const res = await fetch(`http://localhost:8000/api/party-bills/?${qs}`);
+    const res = await fetch(`http://127.0.0.1:8000/api/party-bills/?${qs}`);
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "Could not load this party's invoices.");
     partyBillsCache[ledgerId] = data;
@@ -729,7 +729,7 @@
     }
   }
 
-  const ACCOUNTS_API = "http://localhost:8000/api/accounts/";
+  const ACCOUNTS_API = "http://127.0.0.1:8000/api/accounts/";
   // Payment / Receipt: once line 1 (the party) has its ledger, the next empty
   // line becomes the Default Bank automatically (Ledger Master's Default
   // Bank) - "To <bank>" on a Payment (money goes out of the bank), "By
@@ -779,7 +779,7 @@
     if (ticketId) return; // a ticket's own JV - its type is fixed
     let types = [];
     try {
-      const res = await fetch(`http://localhost:8000/api/voucher-type/?company_id=${companyId}`);
+      const res = await fetch(`http://127.0.0.1:8000/api/voucher-type/?company_id=${companyId}`);
       types = res.ok ? await res.json() : [];
     } catch (_) { types = []; }
     const standard = new Set(Object.keys(CATEGORY_VALUE).map((k) => k.toLowerCase()));
@@ -803,7 +803,7 @@
   async function populateRefs(companyId) {
     await loadVoucherTypeOptions(companyId);
     try {
-      const res = await fetch(`http://localhost:8000/api/ledgers/default-bank/?company_id=${companyId}`);
+      const res = await fetch(`http://127.0.0.1:8000/api/ledgers/default-bank/?company_id=${companyId}`);
       defaultBankName = res.ok ? (await res.json()).name || null : null;
     } catch (_) { defaultBankName = null; }
     // Account dropdown = real Chart of Accounts leaf Ledgers (no groups),
@@ -893,7 +893,7 @@
     const type = VOUCHER_TYPE_LABELS[voucherBaseType()] || "Journal";
     try {
       const name = voucherTypeName(); // a master entry has its own series (starts at 1)
-      const res = await fetch(`http://localhost:8000/api/vouchers/next-number/?company_id=${activeCompanyId}&voucher_type=${encodeURIComponent(type)}`
+      const res = await fetch(`http://127.0.0.1:8000/api/vouchers/next-number/?company_id=${activeCompanyId}&voucher_type=${encodeURIComponent(type)}`
         + (name ? `&voucher_type_name=${encodeURIComponent(name)}` : ""));
       const data = await res.json();
       document.getElementById("voucher_no").value = res.ok ? numberOnly(data.next_number) : "";
@@ -1174,8 +1174,8 @@
     const saveBtn = document.getElementById("save-btn");
     saveBtn.disabled = true;
     const url = editId
-      ? `http://localhost:8000/api/vouchers/${editId}/update/`
-      : "http://localhost:8000/api/vouchers/create/";
+      ? `http://127.0.0.1:8000/api/vouchers/${editId}/update/`
+      : "http://127.0.0.1:8000/api/vouchers/create/";
     try {
       const res = await fetch(url, {
         method: "POST",
@@ -1220,7 +1220,7 @@
         // Real backend fetch - never mock-routed, since this is a real
         // ledger posting that only exists in the Voucher table.
         try {
-          const res = await fetch(`http://localhost:8000/api/vouchers/${editId}/?company_id=${activeCompanyId}`);
+          const res = await fetch(`http://127.0.0.1:8000/api/vouchers/${editId}/?company_id=${activeCompanyId}`);
           const v = await res.json();
           if (!res.ok) throw new Error(v.error || "Could not load this voucher.");
           prefill(v);

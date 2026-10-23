@@ -4055,7 +4055,7 @@ BEGIN
     BEGIN
         SELECT sl.id, sl.original_ticket_line_id, sl.reschedule_line_id, sl.ticket_no, sl.passenger_name,
                sl.pax_type, sl.airline_category, sl.sector, sl.office_id, sl.supplier_ledger_id,
-               supp.name AS supplier_name, supp.state_name AS supplier_state, sl.fop, sl.ssr_items, sl.ssr_ticket_numbers,
+               supp.name AS supplier_name, supp.state_name AS supplier_state, sl.fop, sl.ssr_items, sl.ssr_ticket_numbers, sl.ssr_charges,
                sl.seat, sl.meal, sl.baggage, sl.other_ssr, sl.markup, sl.service_fee,
                sl.supp_markup, sl.supp_service_fee, sl.total_billed
         FROM dbo.SSR_AL_TicketLines sl
@@ -4156,12 +4156,12 @@ BEGIN
 
             INSERT INTO dbo.SSR_AL_TicketLines
                 (ssr_ticket_id, original_ticket_line_id, reschedule_line_id, ticket_no, passenger_name, pax_type,
-                 airline_category, sector, office_id, supplier_ledger_id, fop, ssr_items, ssr_ticket_numbers,
+                 airline_category, sector, office_id, supplier_ledger_id, fop, ssr_items, ssr_ticket_numbers, ssr_charges,
                  seat, meal, baggage, other_ssr, markup, service_fee, supp_markup, supp_service_fee, total_billed)
             SELECT @ResultId, j.original_ticket_line_id, j.reschedule_line_id, j.ticket_no, j.passenger_name, j.pax_type,
                    j.airline_category, j.sector, j.office_id,
                    (SELECT id FROM dbo.Ledgers WHERE company_id = @CompanyId AND name = j.supplier_name AND ledger_category = 'CREDITOR'),
-                   j.fop, j.ssr_items, j.ssr_ticket_numbers,
+                   j.fop, j.ssr_items, j.ssr_ticket_numbers, j.ssr_charges,
                    ISNULL(j.seat, 0), ISNULL(j.meal, 0), ISNULL(j.baggage, 0), ISNULL(j.other_ssr, 0),
                    ISNULL(j.markup, 0), ISNULL(j.service_fee, 0), ISNULL(j.supp_markup, 0), ISNULL(j.supp_service_fee, 0),
                    ISNULL(j.total_billed, 0)
@@ -4171,7 +4171,7 @@ BEGIN
                 pax_type NVARCHAR(10) '$.pax_type', airline_category NVARCHAR(5) '$.airline_category',
                 sector NVARCHAR(20) '$.sector', office_id NVARCHAR(30) '$.office_id',
                 supplier_name NVARCHAR(150) '$.supplier_name', fop NVARCHAR(20) '$.fop', ssr_items NVARCHAR(MAX) '$.ssr_items',
-                ssr_ticket_numbers NVARCHAR(MAX) '$.ssr_ticket_numbers',
+                ssr_ticket_numbers NVARCHAR(MAX) '$.ssr_ticket_numbers', ssr_charges NVARCHAR(MAX) '$.ssr_charges',
                 seat DECIMAL(14,2) '$.seat', meal DECIMAL(14,2) '$.meal', baggage DECIMAL(14,2) '$.baggage',
                 other_ssr DECIMAL(14,2) '$.other_ssr', markup DECIMAL(14,2) '$.markup', service_fee DECIMAL(14,2) '$.service_fee',
                 supp_markup DECIMAL(14,2) '$.supp_markup', supp_service_fee DECIMAL(14,2) '$.supp_service_fee',
@@ -4406,6 +4406,165 @@ BEGIN
             IF @@TRANCOUNT > 0 ROLLBACK TRAN;
             SELECT NULL AS id, 'Error' AS status, ERROR_MESSAGE() AS error;
         END CATCH
+        RETURN;
+    END
+END
+GO
+
+-- ============================================================
+-- dbo.sp_AirlineDropdown - airline dropdown lists (Booking, Reschedule,
+-- Cancellation, SSR, Returns / DSR, FOP Master). Each value has a short
+-- code (Confirmed = CON, Adult = ADT ...) for Auto Push / import.
+--   LIST    : active values of every list (or one @ListKey), screen order.
+--   RESOLVE : one value of @ListKey by its @Code or its @Name.
+-- ============================================================
+CREATE OR ALTER PROCEDURE dbo.sp_AirlineDropdown
+    @Action  NVARCHAR(20),
+    @ListKey NVARCHAR(50)  = NULL,
+    @Code    NVARCHAR(10)  = NULL,
+    @Name    NVARCHAR(100) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF @Action = 'LIST'
+    BEGIN
+        SELECT list_key, code, name, ISNULL(display_label, name) AS label, sort_order, is_default
+        FROM dbo.AirlineDropdownValues
+        WHERE is_active = 1 AND (@ListKey IS NULL OR list_key = @ListKey)
+        ORDER BY list_key, sort_order, id;
+        RETURN;
+    END
+
+    IF @Action = 'RESOLVE'
+    BEGIN
+        SELECT TOP 1 list_key, code, name, ISNULL(display_label, name) AS label
+        FROM dbo.AirlineDropdownValues
+        WHERE is_active = 1 AND list_key = @ListKey
+          AND ((@Code IS NOT NULL AND code = @Code) OR (@Code IS NULL AND name = @Name));
+        RETURN;
+    END
+END
+GO
+
+-- ============================================================
+-- dbo.sp_AuditLog - edit history of Booking / Reschedule / Cancellation /
+-- SSR Updation (who changed what, when) - views.audited().
+--   SNAPSHOT : the document straight from its tables, as JSON (header +
+--              lines, with customer / supplier names), before / after a save.
+--   CHAIN    : the follow-up documents of a Booking / Reschedule (same
+--              original booking) - an edit can carry changes down to them.
+--   INSERT   : one log row.
+--   LIST     : log rows of one document (newest first), or of a company.
+-- ============================================================
+CREATE OR ALTER PROCEDURE dbo.sp_AuditLog
+    @Action      NVARCHAR(20),
+    @CompanyId   INT           = NULL,
+    @Module      NVARCHAR(30)  = NULL,
+    @DocumentId  INT           = NULL,
+    @DocumentNo  NVARCHAR(50)  = NULL,
+    @LogAction   NVARCHAR(20)  = NULL,
+    @Source      NVARCHAR(150) = NULL,
+    @UserId      INT           = NULL,
+    @UserName    NVARCHAR(150) = NULL,
+    @ChangeCount INT           = 0,
+    @Changes     NVARCHAR(MAX) = NULL,
+    @Top         INT           = 500
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF @Action = 'SNAPSHOT'
+    BEGIN
+        IF @Module = 'Booking'
+            SELECT
+                (SELECT t.*, c.name AS customer_name, s.name AS supplier_name
+                 FROM dbo.AL_Tickets t
+                 LEFT JOIN dbo.Ledgers c ON c.id = t.customer_ledger_id
+                 LEFT JOIN dbo.Ledgers s ON s.id = t.supplier_ledger_id
+                 WHERE t.id = @DocumentId
+                 FOR JSON PATH, INCLUDE_NULL_VALUES, WITHOUT_ARRAY_WRAPPER) AS header_json,
+                (SELECT l.*, s.name AS supplier_name
+                 FROM dbo.AL_TicketLines l
+                 LEFT JOIN dbo.Ledgers s ON s.id = l.supplier_ledger_id
+                 WHERE l.ticket_id = @DocumentId ORDER BY l.id
+                 FOR JSON PATH, INCLUDE_NULL_VALUES) AS lines_json;
+        ELSE IF @Module = 'Reschedule'
+            SELECT
+                (SELECT t.*, c.name AS customer_name, s.name AS supplier_name
+                 FROM dbo.Rescheduled_Al_Ticket t
+                 LEFT JOIN dbo.Ledgers c ON c.id = t.customer_ledger_id
+                 LEFT JOIN dbo.Ledgers s ON s.id = t.supplier_ledger_id
+                 WHERE t.id = @DocumentId
+                 FOR JSON PATH, INCLUDE_NULL_VALUES, WITHOUT_ARRAY_WRAPPER) AS header_json,
+                (SELECT l.*, s.name AS supplier_name
+                 FROM dbo.Rescheduled_Al_TicketLines l
+                 LEFT JOIN dbo.Ledgers s ON s.id = l.supplier_ledger_id
+                 WHERE l.reschedule_ticket_id = @DocumentId ORDER BY l.id
+                 FOR JSON PATH, INCLUDE_NULL_VALUES) AS lines_json;
+        ELSE IF @Module = 'Cancellation'
+            SELECT
+                (SELECT t.*, c.name AS customer_name, s.name AS supplier_name
+                 FROM dbo.Cancellation_AL_Tickets t
+                 LEFT JOIN dbo.Ledgers c ON c.id = t.customer_ledger_id
+                 LEFT JOIN dbo.Ledgers s ON s.id = t.supplier_ledger_id
+                 WHERE t.id = @DocumentId
+                 FOR JSON PATH, INCLUDE_NULL_VALUES, WITHOUT_ARRAY_WRAPPER) AS header_json,
+                (SELECT l.*, s.name AS supplier_name
+                 FROM dbo.Cancellation_Al_TicketLines l
+                 LEFT JOIN dbo.Ledgers s ON s.id = l.supplier_ledger_id
+                 WHERE l.cancellation_ticket_id = @DocumentId ORDER BY l.id
+                 FOR JSON PATH, INCLUDE_NULL_VALUES) AS lines_json;
+        ELSE IF @Module = 'SSR Updation'
+            SELECT
+                (SELECT t.*, c.name AS customer_name
+                 FROM dbo.SSR_AL_Tickets t
+                 LEFT JOIN dbo.Ledgers c ON c.id = t.customer_ledger_id
+                 WHERE t.id = @DocumentId
+                 FOR JSON PATH, INCLUDE_NULL_VALUES, WITHOUT_ARRAY_WRAPPER) AS header_json,
+                (SELECT l.*, s.name AS supplier_name
+                 FROM dbo.SSR_AL_TicketLines l
+                 LEFT JOIN dbo.Ledgers s ON s.id = l.supplier_ledger_id
+                 WHERE l.ssr_ticket_id = @DocumentId ORDER BY l.id
+                 FOR JSON PATH, INCLUDE_NULL_VALUES) AS lines_json;
+        RETURN;
+    END
+
+    IF @Action = 'CHAIN'
+    BEGIN
+        DECLARE @Root INT = CASE @Module
+            WHEN 'Booking' THEN @DocumentId
+            WHEN 'Reschedule' THEN (SELECT original_ticket_id FROM dbo.Rescheduled_Al_Ticket WHERE id = @DocumentId)
+        END;
+        SELECT module, id FROM (
+            SELECT 'Reschedule' AS module, id FROM dbo.Rescheduled_Al_Ticket WHERE original_ticket_id = @Root
+            UNION ALL SELECT 'Cancellation', id FROM dbo.Cancellation_AL_Tickets WHERE original_ticket_id = @Root
+            UNION ALL SELECT 'SSR Updation', id FROM dbo.SSR_AL_Tickets WHERE original_ticket_id = @Root
+        ) x
+        WHERE @Root IS NOT NULL AND NOT (x.module = @Module AND x.id = @DocumentId)
+        ORDER BY module, id;
+        RETURN;
+    END
+
+    IF @Action = 'INSERT'
+    BEGIN
+        INSERT INTO dbo.AuditLogs
+            (company_id, module, document_id, document_no, action, source, user_id, user_name, change_count, changes, changed_at)
+        VALUES (@CompanyId, @Module, @DocumentId, @DocumentNo, @LogAction, @Source, @UserId, @UserName,
+                ISNULL(@ChangeCount, 0), @Changes, SYSUTCDATETIME());
+        SELECT CAST(SCOPE_IDENTITY() AS INT) AS id;
+        RETURN;
+    END
+
+    IF @Action = 'LIST'
+    BEGIN
+        SELECT TOP (@Top) id, company_id, module, document_id, document_no, action, source,
+               user_id, user_name, change_count, changes, changed_at
+        FROM dbo.AuditLogs
+        WHERE company_id = @CompanyId
+          AND (@Module IS NULL OR module = @Module)
+          AND (@DocumentId IS NULL OR document_id = @DocumentId)
+        ORDER BY changed_at DESC, id DESC;
         RETURN;
     END
 END

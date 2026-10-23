@@ -145,9 +145,59 @@ def load_data(force=False):
     except Exception:
         pass
 
+    # Self-healing check for new tables and columns in MySQL / TiDB
+    with connection.cursor() as cursor:
+        try:
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS `AirlineDropdownValues` (
+                  `id` int NOT NULL AUTO_INCREMENT,
+                  `list_key` varchar(50) NOT NULL,
+                  `code` varchar(10) NOT NULL,
+                  `name` varchar(100) NOT NULL,
+                  `display_label` varchar(100) DEFAULT NULL,
+                  `sort_order` int NOT NULL DEFAULT '0',
+                  `is_default` tinyint(1) NOT NULL DEFAULT '0',
+                  `is_active` tinyint(1) NOT NULL DEFAULT '1',
+                  `created_at` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+                  `updated_at` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+                  PRIMARY KEY (`id`),
+                  UNIQUE KEY `uq_airline_dd_code` (`list_key`,`code`),
+                  UNIQUE KEY `uq_airline_dd_name` (`list_key`,`name`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+            """)
+        except Exception as e:
+            print(f"[INFO] AirlineDropdownValues table check: {e}")
+
+        try:
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS `AuditLogs` (
+                  `id` int NOT NULL AUTO_INCREMENT,
+                  `company_id` int NOT NULL,
+                  `module` varchar(30) NOT NULL,
+                  `document_id` int NOT NULL,
+                  `document_no` varchar(50) DEFAULT NULL,
+                  `action` varchar(20) NOT NULL,
+                  `source` varchar(150) DEFAULT NULL,
+                  `user_id` int DEFAULT NULL,
+                  `user_name` varchar(150) DEFAULT NULL,
+                  `change_count` int NOT NULL DEFAULT '0',
+                  `changes` longtext,
+                  `changed_at` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+                  PRIMARY KEY (`id`),
+                  KEY `ix_audit_logs_document` (`company_id`,`module`,`document_id`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+            """)
+        except Exception as e:
+            print(f"[INFO] AuditLogs table check: {e}")
+
+        try:
+            cursor.execute("ALTER TABLE `SSR_AL_TicketLines` ADD COLUMN `ssr_charges` longtext NULL;")
+        except Exception:
+            pass
+
     counts = {}
     with connection.cursor() as cursor:
-        for tbl in ["Ledgers", "Ledger_Groups", "AL_Tickets", "AL_TicketLines", "Rescheduled_Al_Ticket", "Cancellation_AL_Tickets", "JournalVoucher", "Vouchers", "CompanyMaster"]:
+        for tbl in ["Ledgers", "Ledger_Groups", "AL_Tickets", "AL_TicketLines", "Rescheduled_Al_Ticket", "Cancellation_AL_Tickets", "SSR_AL_Tickets", "SSR_AL_TicketLines", "Misc_Transactions", "JournalVoucher", "Vouchers", "AirlineDropdownValues", "AuditLogs", "CompanyMaster"]:
             try:
                 cursor.execute(f"SELECT COUNT(*) FROM `{tbl}`;")
                 counts[tbl] = cursor.fetchone()[0]
@@ -170,6 +220,7 @@ def load_data(force=False):
     print(f"[OK] Row counts: {counts}")
     print("=" * 60)
     return {"status": "ok", "executed": success, "errors": errors, "counts": counts}
+
 
 
 if __name__ == "__main__":

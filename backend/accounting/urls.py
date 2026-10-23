@@ -104,4 +104,5 @@ urlpatterns = [
     path("user-management/users/<int:user_id>/access/", views.user_menu_access_get, name="user-menu-access-get"),
     path("user-management/users/<int:user_id>/access/save/", views.user_menu_access_save, name="user-menu-access-save"),
     path("user-management/menus/", views.menu_master_list, name="menu-master-list"),
+    path("airline-dropdowns/", views.airline_dropdowns, name="airline-dropdowns"),
 ]

@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
   <link href="assets/css/design-system.css" rel="stylesheet" />
-  <link href="assets/css/app.css?v=7" rel="stylesheet" />
+  <link href="assets/css/app.css?v=8" rel="stylesheet" />
   <link rel="icon" type="image/png" href="assets/img/favicon.png" />
   <style>
     /* Same look and behaviour as report-profit-loss.html: locked to the
@@ -126,9 +126,9 @@
   </div>
 
   <script src="assets/js/mock-data.js"></script>
-  <script src="assets/js/api.js?v=6"></script>
-  <script src="assets/js/hardcode.js?v=6"></script>
-  <script src="assets/js/shell.js?v=36"></script>
+  <script src="assets/js/api.js?v=5"></script>
+  <script src="assets/js/hardcode.js?v=10"></script>
+  <script src="assets/js/shell.js?v=46"></script>
   <script>
     // Not gated on DOMContentLoaded - this page's <script> can be injected
     // by the app's SPA navigation (shell.js's navigateTo) into a document
@@ -285,7 +285,7 @@
       try {
         const params = new URLSearchParams({ company_id: activeCompanyId, to_date: toDate });
         if (currentGroupId) params.set("group_id", currentGroupId);
-        const res = await fetch(`http://localhost:8000/api/balance-sheet/?${params}`);
+        const res = await fetch(`http://127.0.0.1:8000/api/balance-sheet/?${params}`);
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || "Could not load the Balance Sheet.");
         if (currentGroupId) renderDrill(data);

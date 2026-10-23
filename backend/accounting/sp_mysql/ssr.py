@@ -136,7 +136,7 @@ def ssr_ticket_get_lines(params):
     return query(
         "SELECT sl.id, sl.original_ticket_line_id, sl.reschedule_line_id, sl.ticket_no, sl.passenger_name, "
         "sl.pax_type, sl.airline_category, sl.sector, sl.office_id, sl.supplier_ledger_id, "
-        "supp.name AS supplier_name, supp.state_name AS supplier_state, sl.fop, sl.ssr_items, sl.ssr_ticket_numbers, "
+        "supp.name AS supplier_name, supp.state_name AS supplier_state, sl.fop, sl.ssr_items, sl.ssr_ticket_numbers, sl.ssr_charges, "
         "sl.seat, sl.meal, sl.baggage, sl.other_ssr, sl.markup, sl.service_fee, "
         "sl.supp_markup, sl.supp_service_fee, sl.total_billed "
         "FROM `SSR_AL_TicketLines` sl "
@@ -286,18 +286,22 @@ def ssr_ticket_save(params):
                 if isinstance(ssr_ticket_numbers_val, (dict, list)):
                     ssr_ticket_numbers_val = json.dumps(ssr_ticket_numbers_val)
 
+                ssr_charges_val = l.get("ssr_charges")
+                if isinstance(ssr_charges_val, (dict, list)):
+                    ssr_charges_val = json.dumps(ssr_charges_val)
+
                 _, lid = execute(
                     "INSERT INTO `SSR_AL_TicketLines` "
                     "(`ssr_ticket_id`, `original_ticket_line_id`, `reschedule_line_id`, `ticket_no`, "
                     "`passenger_name`, `pax_type`, `airline_category`, `sector`, `office_id`, "
-                    "`supplier_ledger_id`, `fop`, `ssr_items`, `ssr_ticket_numbers`, `seat`, `meal`, `baggage`, `other_ssr`, "
+                    "`supplier_ledger_id`, `fop`, `ssr_items`, `ssr_ticket_numbers`, `ssr_charges`, `seat`, `meal`, `baggage`, `other_ssr`, "
                     "`markup`, `service_fee`, `supp_markup`, `supp_service_fee`, `total_billed`) "
-                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
                     [
                         result_id, l.get("original_ticket_line_id"), l.get("reschedule_line_id"),
                         l.get("ticket_no"), l.get("passenger_name"), l.get("pax_type"),
                         l.get("airline_category"), l.get("sector"), l.get("office_id"),
-                        supp_id, l.get("fop"), ssr_items_val, ssr_ticket_numbers_val,
+                        supp_id, l.get("fop"), ssr_items_val, ssr_ticket_numbers_val, ssr_charges_val,
                         _p_dec(l, "seat"), _p_dec(l, "meal"), _p_dec(l, "baggage"), _p_dec(l, "other_ssr"),
                         _p_dec(l, "markup"), _p_dec(l, "service_fee"), _p_dec(l, "supp_markup"), _p_dec(l, "supp_service_fee"),
                         _p_dec(l, "total_billed"),

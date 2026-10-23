@@ -12,6 +12,7 @@ Rules:
   endpoint is listed in RULES with the menu(s) and flag it needs. Writes
   NOT listed in RULES are Super-Admin-only (fail closed).
 """
+import time
 import json
 
 from django.core import signing
@@ -93,6 +94,36 @@ def make_token(user_id):
     return signing.dumps({"uid": user_id}, salt=AUTH_TOKEN_SALT)
 
 
+# Every API call checks the signed-in user (and, for non-admins, their menu
+# rights). Both are kept in memory for a few seconds instead of being read
+# from the database on every call; user / menu-access saves clear them at
+# once (clear_user_cache), so a deactivation or rights change still applies
+# immediately.
+_USER_CACHE_SECONDS = 30
+_user_cache = {}   # uid -> (expires_at, AppUsers row)
+_perm_cache = {}   # uid -> (expires_at, {menu_key: {...}})
+
+
+def clear_user_cache(user_id=None):
+    """Forget cached user rows / menu rights - one user, or everyone."""
+    if user_id is None:
+        _user_cache.clear()
+        _perm_cache.clear()
+    else:
+        _user_cache.pop(int(user_id), None)
+        _perm_cache.pop(int(user_id), None)
+
+
+def _cached(cache, key, load):
+    now = time.monotonic()
+    hit = cache.get(key)
+    if hit and hit[0] > now:
+        return hit[1]
+    value = load()
+    cache[key] = (now + _USER_CACHE_SECONDS, value)
+    return value
+
+
 def user_from_request(request):
     """The active AppUsers row behind this request's Bearer token, or None."""
     header = request.headers.get("Authorization", "")
@@ -102,7 +133,11 @@ def user_from_request(request):
         data = signing.loads(header[7:], salt=AUTH_TOKEN_SALT, max_age=AUTH_TOKEN_MAX_AGE)
     except signing.BadSignature:
         return None
-    u = sp_client.app_user_get(data.get("uid"))
+    try:
+        uid = int(data.get("uid"))
+    except (TypeError, ValueError):
+        return None
+    u = _cached(_user_cache, uid, lambda: sp_client.app_user_get(uid))
     return u if u and u["is_active"] else None
 
 
@@ -110,13 +145,13 @@ def permissions_for(u):
     """{menu_key: {view, add, edit, delete}} for menus with View ticked; {} for a Super Admin (bypasses checks)."""
     if u["is_super_admin"]:
         return {}
-    return {
+    return _cached(_perm_cache, int(u["id"]), lambda: {
         r["menu_key"]: {
             "view": bool(r["can_view"]), "add": bool(r["can_add"]),
             "edit": bool(r["can_edit"]), "delete": bool(r["can_delete"]),
         }
         for r in sp_client.user_menu_access_get(u["id"]) if r["can_view"]
-    }
+    })
 
 
 def _body_has_id(request):
@@ -132,7 +167,13 @@ class MenuPermissionMiddleware:
 
     def __call__(self, request):
         denied = self._check(request)
-        return denied if denied is not None else self.get_response(request)
+        if denied is not None:
+            return denied
+        response = self.get_response(request)
+        # A user / menu-access change applies at once - drop the cached users.
+        if request.method != "GET" and request.path_info.startswith("/api/user-management/"):
+            clear_user_cache()
+        return response
 
     def _check(self, request):
         if request.method == "OPTIONS" or not request.path_info.startswith("/api/"):
