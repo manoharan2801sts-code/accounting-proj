@@ -350,22 +350,25 @@ def fop_master_list(p):
     if as_of:
         for r in rows:
             if r.get("card_type") == "Own Card":
-                hist = query(
-                    "SELECT `card_master_ledger_id`, `card_master_ledger_name` FROM `FOPMasterHistory` "
-                    "WHERE `fop_master_id` = %s AND `effective_from` <= %s "
-                    "ORDER BY `effective_from` DESC LIMIT 1",
-                    [r["id"], as_of],
-                )
-                if not hist:
+                try:
                     hist = query(
                         "SELECT `card_master_ledger_id`, `card_master_ledger_name` FROM `FOPMasterHistory` "
-                        "WHERE `fop_master_id` = %s "
-                        "ORDER BY `effective_from` ASC LIMIT 1",
-                        [r["id"]],
+                        "WHERE `fop_master_id` = %s AND `effective_from` <= %s "
+                        "ORDER BY `effective_from` DESC LIMIT 1",
+                        [r["id"], as_of],
                     )
-                if hist:
-                    r["card_master_ledger_id"] = hist[0]["card_master_ledger_id"]
-                    r["card_master_ledger_name"] = hist[0]["card_master_ledger_name"]
+                    if not hist:
+                        hist = query(
+                            "SELECT `card_master_ledger_id`, `card_master_ledger_name` FROM `FOPMasterHistory` "
+                            "WHERE `fop_master_id` = %s "
+                            "ORDER BY `effective_from` ASC LIMIT 1",
+                            [r["id"]],
+                        )
+                    if hist:
+                        r["card_master_ledger_id"] = hist[0]["card_master_ledger_id"]
+                        r["card_master_ledger_name"] = hist[0]["card_master_ledger_name"]
+                except Exception:
+                    pass
     return [bits(r, "is_active") for r in rows]
 
 
@@ -382,22 +385,25 @@ def fop_master_get_by_card_number(p):
     if not row:
         return []
     if as_of and row.get("card_type") == "Own Card":
-        hist = query(
-            "SELECT `card_master_ledger_id`, `card_master_ledger_name` FROM `FOPMasterHistory` "
-            "WHERE `fop_master_id` = %s AND `effective_from` <= %s "
-            "ORDER BY `effective_from` DESC LIMIT 1",
-            [row["id"], as_of],
-        )
-        if not hist:
+        try:
             hist = query(
                 "SELECT `card_master_ledger_id`, `card_master_ledger_name` FROM `FOPMasterHistory` "
-                "WHERE `fop_master_id` = %s "
-                "ORDER BY `effective_from` ASC LIMIT 1",
-                [row["id"]],
+                "WHERE `fop_master_id` = %s AND `effective_from` <= %s "
+                "ORDER BY `effective_from` DESC LIMIT 1",
+                [row["id"], as_of],
             )
-        if hist:
-            row["card_master_ledger_id"] = hist[0]["card_master_ledger_id"]
-            row["card_master_ledger_name"] = hist[0]["card_master_ledger_name"]
+            if not hist:
+                hist = query(
+                    "SELECT `card_master_ledger_id`, `card_master_ledger_name` FROM `FOPMasterHistory` "
+                    "WHERE `fop_master_id` = %s "
+                    "ORDER BY `effective_from` ASC LIMIT 1",
+                    [row["id"]],
+                )
+            if hist:
+                row["card_master_ledger_id"] = hist[0]["card_master_ledger_id"]
+                row["card_master_ledger_name"] = hist[0]["card_master_ledger_name"]
+        except Exception:
+            pass
     return [row]
 
 
