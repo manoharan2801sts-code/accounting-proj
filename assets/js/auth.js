@@ -1,4 +1,4 @@
-﻿(function () {
+(function () {
   const { Store, post } = window.VoyagerAPI;
 
   // Already signed in? Skip straight to the dashboard. A leftover demo
@@ -33,11 +33,9 @@
     Store.setToken(data.access_token);
     Store.setRefresh(data.refresh_token);
     Store.setUser(data.user);
-    // Data layer stays exactly as before (pages read real data via their
-    // own fetch calls; VoyagerAPI.get keeps serving mock data) - only the
-    // token + permissions are new.
-    Store.setMockMode(true);
+    Store.setMockMode(false);
     try {
+      localStorage.removeItem("voyager_mock_mode");
       sessionStorage.setItem("voyager_permissions", JSON.stringify({ is_super_admin: data.is_super_admin, menus: data.menus || {} }));
     } catch (_) {}
     window.location.href = "dashboard.html";

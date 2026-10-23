@@ -23,7 +23,7 @@
     setUser: (u) => localStorage.setItem(USER_KEY, JSON.stringify(u)),
     getCompanyId: () => localStorage.getItem(COMPANY_KEY),
     setCompanyId: (id) => localStorage.setItem(COMPANY_KEY, id),
-    isMockMode: () => localStorage.getItem(MOCK_KEY) === "1" || localStorage.getItem(TOKEN_KEY) === "demo-token" || !localStorage.getItem(TOKEN_KEY),
+    isMockMode: () => localStorage.getItem(MOCK_KEY) === "1" || localStorage.getItem(TOKEN_KEY) === "demo-token",
     setMockMode: (on) => (on ? localStorage.setItem(MOCK_KEY, "1") : localStorage.removeItem(MOCK_KEY)),
     clear: () => {
       [TOKEN_KEY, REFRESH_KEY, USER_KEY, MOCK_KEY].forEach((k) => localStorage.removeItem(k));
@@ -37,18 +37,16 @@
   // (accounting/permissions.py). A 401 means the session ended or the user
   // was deactivated: back to the login page.
   const nativeFetch = window.fetch.bind(window);
-  const API_PREFIXES = [API_BASE, "http://127.0.0.1:8000/api", "http://localhost:8000/api"];
   window.fetch = function (input, init) {
     let url = typeof input === "string" ? input : (input && input.url) || "";
     if (API_BASE !== "http://127.0.0.1:8000/api" && API_BASE !== "http://localhost:8000/api") {
-      if (url.startsWith("http://127.0.0.1:8000/api")) {
-        url = url.replace("http://127.0.0.1:8000/api", API_BASE);
-      } else if (url.startsWith("http://localhost:8000/api")) {
-        url = url.replace("http://localhost:8000/api", API_BASE);
+      if (url.includes("/api/")) {
+        const idx = url.indexOf("/api/");
+        url = API_BASE + url.slice(idx + 4);
       }
     }
     const token = localStorage.getItem(TOKEN_KEY);
-    const isApi = API_PREFIXES.some((p) => url.startsWith(p)) || url.startsWith("/api");
+    const isApi = url.startsWith(API_BASE) || url.startsWith("/api");
     const reqInput = typeof input === "string" ? url : (input && input.url ? new Request(url, input) : url);
     if (!isApi || !token || token === "demo-token") return nativeFetch(reqInput, init);
     const opts = { ...(init || {}) };
@@ -65,7 +63,7 @@
         return Promise.resolve(new Response(hit.body, { status: hit.status, headers: { "Content-Type": "application/json" } }));
       }
     }
-    return nativeFetch(input, opts).then((res) => {
+    return nativeFetch(reqInput, opts).then((res) => {
       if (res.status === 401 && !url.includes("/auth/login")) {
         Store.clear();
         try { sessionStorage.removeItem("voyager_permissions"); } catch (_) {}
