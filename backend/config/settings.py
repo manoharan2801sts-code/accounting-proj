@@ -105,7 +105,7 @@ DATABASES = {
 }
 
 # Airline ticket Auto Push import - X-Api-Key header for /api/import/tickets/...
-TICKET_IMPORT_API_KEY = config("TICKET_IMPORT_API_KEY", default="")
+TICKET_IMPORT_API_KEY = config("TICKET_IMPORT_API_KEY", default="dev-secret-key-change-in-production")
 
 AGENT_DB_NAME = config("AGENT_DB_NAME", default="Airline_Agent")
 AGENT_DB_TABLE = config("AGENT_DB_TABLE", default="Agent_ticket_data")

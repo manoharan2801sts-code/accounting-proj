@@ -471,18 +471,26 @@ def ticket_import_stage_doc_status(p):
         args.extend(doc_keys)
 
     sql = f"""
-        SELECT doc_key, company_id, ticket_status, source_system, doc_ref,
-               MIN(received_at) AS received_at,
-               process_status,
-               COUNT(*) AS passenger_count,
+        SELECT doc_key,
+               MAX(company_id) AS company_id,
+               MAX(source_system) AS source_system,
+               MAX(doc_ref) AS doc_ref,
+               MAX(ticket_status) AS ticket_status,
+               MAX(batch_id) AS batch_id,
+               COUNT(*) AS passengers,
+               MAX(process_status) AS process_status,
                MAX(retry_count) AS retry_count,
                MAX(error_message) AS error_message,
-               MAX(saved_invoice_number) AS saved_invoice_number,
-               MAX(saved_voucher_no) AS saved_voucher_no
+               MAX(saved_invoice_number) AS invoice_number,
+               MAX(saved_voucher_no) AS voucher_no,
+               MAX(target_header_id) AS target_header_id,
+               MAX(invoice_type) AS invoice_type,
+               MIN(received_at) AS received_at,
+               MAX(processed_at) AS processed_at
         FROM Ticket_Import_Staging
         WHERE {" AND ".join(where)}
-        GROUP BY doc_key, company_id, ticket_status, source_system, doc_ref, process_status
-        ORDER BY received_at DESC
+        GROUP BY doc_key
+        ORDER BY MAX(staging_id) DESC
         LIMIT {top}
     """
     return query(sql, args)
