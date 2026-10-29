@@ -22,6 +22,7 @@
   let activeCompanyId = null;
   let voucherTypes = [];
   let viewMode = false;
+  let savedVoucherNo = "";   // the saved SSR's posted J.V number (ALS-n)
   // The picked ticket: original Booking id, the Reschedule its live data
   // came from (if any) and its customer - what Save sends.
   let source = null;
@@ -182,7 +183,44 @@
   // the J.V, reports and prints keep reading the same columns.
   const EDIT_FIELDS = ["seat", "meal", "baggage", "other_ssr", "markup", "service_fee", "supp_markup", "supp_service_fee"];
   const INFO_FIELDS = { airline_category: "m-airline-category", ticket_no: "m-ticket-no", pax_name: "m-pax-name",
-    pax_type: "m-pax-type", sector: "m-sector", office_id: "m-office-id", supplier: "m-supplier", fop: "m-fop" };
+    pax_type: "m-pax-type", sector: "m-sector", office_id: "m-office-id", supplier: "m-supplier" };
+  // FOP and Card Number are editable, same as the Reschedule screen: Cash,
+  // plus Own Card / Client Card only when FOP Master has an ACTIVE card of
+  // that type; Card Number lists that type's active cards (none for Cash).
+  let fopChoices = ["Cash"];
+  let activeCards = [];
+  (async () => {
+    try {
+      const res = await fetch(`${API}fop-master/?company_id=${activeCompanyId}`);
+      activeCards = (res.ok ? await res.json() : []).filter((c) => c.is_active);
+      const activeTypes = new Set(activeCards.map((c) => c.card_type));
+      fopChoices = ["Cash", ...window.VoyagerHardcode.dropdownValues("fopOptions").filter((o) => o !== "Cash" && activeTypes.has(o))];
+    } catch (err) {
+      console.error("Could not load FOP Master cards", err);
+    }
+  })();
+  const options = (list) => list.map((o) => `<option value="${esc(o)}">${esc(o)}</option>`).join("");
+  function fillFop(current) {
+    // A saved line keeps showing its own FOP / card even if it is no longer active.
+    const choices = current && !fopChoices.includes(current) ? [...fopChoices, current] : fopChoices;
+    $("m-fop").innerHTML = options(choices);
+    $("m-fop").value = current && choices.includes(current) ? current : "Cash";
+  }
+  function fillCardNumber(current) {
+    const fop = $("m-fop").value;
+    const sel = $("m-card-number");
+    if (fop === "Cash") {
+      sel.innerHTML = "";
+      sel.disabled = true;
+      return;
+    }
+    const cards = activeCards.filter((c) => c.card_type === fop).map((c) => c.card_number);
+    const choices = current && !cards.includes(current) ? [...cards, current] : cards;
+    sel.innerHTML = `<option value="">Select...</option>` + options(choices);
+    sel.value = current && choices.includes(current) ? current : "";
+    sel.disabled = viewMode;
+  }
+  $("m-fop").addEventListener("change", () => fillCardNumber(""));
   const SSR_TYPES = window.VoyagerHardcode.dropdownValues("ssrTypes");
   // SSR type -> the line's amount column it adds into.
   const TYPE_AMOUNT_FIELD = { Baggage: "baggage", Meal: "meal", Seat: "seat", "Other SSR": "other_ssr" };
@@ -259,26 +297,20 @@
     return out;
   }
 
-  // A line nothing has been entered on yet (no SSR detail, every amount 0).
-  const isBlankLine = (l) => !ssrSummary(l) && EDIT_FIELDS.every((k) => !n(l[k]));
   function openLine(idx) {
     editing = idx;
     const l = lines[idx];
     Object.entries(INFO_FIELDS).forEach(([k, id]) => { $(id).textContent = l[k] || "—"; });
-    // Same as the ticket screen: a blank line's fare figures AND SSR details
-    // auto-fill from the FIRST already-entered line of the same Pax Type
-    // (Adult from the 1st Adult, Child from the 1st Child). SSR Ticket
-    // Numbers are not copied - each passenger's SSR ticket is their own.
-    // Not saved until Save & Apply.
-    const template = !viewMode && isBlankLine(l)
-      ? lines.find((o, i) => i !== idx && o.pax_type === l.pax_type && !isBlankLine(o))
-      : null;
-    const src = template || l;
-    const charges = chargesOf(src);
+    // No auto-fill from another passenger (unlike the ticket screen): SSR
+    // fares and details differ per passenger, so each line is typed by hand.
+    const charges = chargesOf(l);
     SSR_TYPES.forEach((t) => ROW_CHARGES.forEach((k) => { box(t, k).value = fmtN((charges[t] || {})[k] || 0); }));
-    document.querySelectorAll(".m-ssr-item").forEach((el) => { el.value = (src.ssr_items || {})[el.dataset.type] || ""; });
+    document.querySelectorAll(".m-ssr-item").forEach((el) => { el.value = (l.ssr_items || {})[el.dataset.type] || ""; });
     document.querySelectorAll(".m-ssr-tkt").forEach((el) => { el.value = (l.ssr_ticket_numbers || {})[el.dataset.type] || ""; });
     document.querySelectorAll("#ssr-modal input").forEach((el) => { el.disabled = viewMode; });
+    fillFop(l.fop);
+    $("m-fop").disabled = viewMode;
+    fillCardNumber(l.card_number);
     $("m-save-btn").style.display = viewMode ? "none" : "";
     $("m-remove-btn").style.display = viewMode ? "none" : "";
     $("ssr-modal-title").textContent = `SSR #${idx + 1} - ${l.pax_name || ""} (${l.sector || ""})`;
@@ -291,7 +323,10 @@
     // A type with an EMD number or any amount must say what the SSR is.
     const noDetail = SSR_TYPES.find((t) => !l.ssr_items[t] && (l.ssr_ticket_numbers[t] || l.ssr_charges[t]));
     if (noDetail) { voyagerAlert(`Enter the SSR Details for ${noDetail}.`); rowOf(noDetail).querySelector(".m-ssr-item").focus(); return; }
-    lines[editing] = { ...lines[editing], ...l };
+    const fop = $("m-fop").value;
+    const cardNumber = fop === "Cash" ? "" : $("m-card-number").value;
+    if (fop !== "Cash" && !cardNumber) { voyagerAlert(`Select the Card Number for FOP ${fop}.`, { focusEl: $("m-card-number") }); return; }
+    lines[editing] = { ...lines[editing], ...l, fop, card_number: cardNumber };
     close("ssr-modal"); render();
   });
   $("m-remove-btn").addEventListener("click", async () => {
@@ -485,7 +520,8 @@
         original_ticket_line_id: rid ? tl.original_ticket_line_id : p.line_id, reschedule_line_id: rid ? p.line_id : null,
         ticket_no: p.ticket_no, pax_name: p.passenger_name, pax_type: p.pax_type || tl.pax_type || "",
         sector: s.sector, airline_category: tl.airline_category || "", office_id: tl.office_id || "",
-        supplier: tl.supplier_name || t.supplier_name || "", fop: tl.fop || "",
+        // FOP starts as Cash (not the ticket's own) - changed in the SSR popup when the SSR is paid by card.
+        supplier: tl.supplier_name || t.supplier_name || "", fop: "Cash", card_number: "",
         ssr_items: {}, ssr_ticket_numbers: {}, ssr_charges: {}, seat: 0, meal: 0, baggage: 0, other_ssr: 0, markup: 0, service_fee: 0, supp_markup: 0, supp_service_fee: 0,
       }));
     });
@@ -519,6 +555,7 @@
     return {
       company_id: activeCompanyId,
       original_ticket_id: source && source.ticketId, source_reschedule_ticket_id: source && source.rescheduleId,
+      parent_pnr: source && source.parentPnr,   // direct SSR (Auto Push, no booking here) only
       customer_name: source && source.customer,
       invoice_number: $("invoice_number").value.trim(), invoice_date: $("invoice_date").value,
       invoice_type: $("invoice_type").value, user_name: $("user_name").value.trim(),
@@ -530,7 +567,7 @@
       lines: lines.map((l) => ({
         original_ticket_line_id: l.original_ticket_line_id, reschedule_line_id: l.reschedule_line_id,
         ticket_no: l.ticket_no, passenger_name: l.pax_name, pax_type: l.pax_type, airline_category: l.airline_category,
-        sector: l.sector, office_id: l.office_id, supplier_name: l.supplier, fop: l.fop, ssr_items: l.ssr_items || {},
+        sector: l.sector, office_id: l.office_id, supplier_name: l.supplier, fop: l.fop, card_number: l.card_number || "", ssr_items: l.ssr_items || {},
         ssr_ticket_numbers: l.ssr_ticket_numbers || {}, ssr_charges: l.ssr_charges || {},
         seat: n(l.seat), meal: n(l.meal), baggage: n(l.baggage), other_ssr: n(l.other_ssr),
         markup: n(l.markup), service_fee: n(l.service_fee), supp_markup: n(l.supp_markup), supp_service_fee: n(l.supp_service_fee),
@@ -590,6 +627,7 @@
       const d = await res.json();
       if (!res.ok) throw new Error(d.error || "SSR Updation not found.");
       $("page-title").textContent = `View SSR Updation - ${d.invoice_number}`;
+      savedVoucherNo = d.voucher_no || "";
       setInvoiceType(d.invoice_type || "");
       $("invoice_number").value = d.invoice_number || "";
       setDate("invoice_date", d.invoice_date);
@@ -598,9 +636,12 @@
       setDate("ssr_ref_date", d.ssr_ref_date);
       $("payment_mode").value = d.payment_mode || "";
       $("payment_gateway_ref").value = d.payment_gateway_ref || "";
-      source = { ticketId: d.original_ticket_id, rescheduleId: d.source_reschedule_ticket_id, customer: d.customer_name };
+      source = { ticketId: d.original_ticket_id, rescheduleId: d.source_reschedule_ticket_id, customer: d.customer_name,
+                 parentPnr: d.parent_pnr || null };
       await fillHeaderInfo({
-        original_invoice: d.source_reschedule_invoice_number || d.original_invoice_number, customer_name: d.customer_name,
+        // A direct SSR (Auto Push) has no booking here - show the Parent PNR it came with.
+        original_invoice: d.source_reschedule_invoice_number || d.original_invoice_number
+          || (d.parent_pnr ? `Direct - Parent PNR ${d.parent_pnr}` : ""), customer_name: d.customer_name,
         travel_type: d.travel_type, airline_pnr: d.airline_pnr, gds_pnr: d.gds_pnr, currency: d.currency, roe: d.roe,
       });
       lines = (d.lines || []).map((l) => {
@@ -649,6 +690,45 @@
   }
 
   // ---------- J.V ----------
+  // Same layout as the Booking / Reschedule J.V: Journal Voucher, plus FOP
+  // Payment (FOP not Cash) and PG Receipts (Payment Gateway) tabs - shown
+  // only when they have rows. The server builds all three (_ssr_jv_payload).
+  const jvRows = (rows) => rows.map((a, i) => `<tr><td style="text-align:center;">${i + 1}</td><td>${esc(a.ledger_name || "-")}</td>
+      <td class="num">${a.debit ? f2(a.debit) : ""}</td><td class="num">${a.credit ? f2(a.credit) : ""}</td></tr>`).join("");
+  function switchJvTab(name) {
+    document.querySelectorAll("#ssr-jv-tabs .dom-tab").forEach((t) => t.classList.toggle("active", t.dataset.jvTab === name));
+    ["voucher", "fop", "pg"].forEach((k) => { $(`ssr-jv-panel-${k}`).style.display = k === name ? "" : "none"; });
+  }
+  $("ssr-jv-tabs").addEventListener("click", (e) => {
+    const tab = e.target.closest(".dom-tab");
+    if (tab && tab.style.display !== "none") switchJvTab(tab.dataset.jvTab);
+  });
+  function renderJv(d) {
+    const accounts = (d.accounts || []).filter((a) => a.debit || a.credit);
+    $("ssr-jv-title").textContent = savedId ? `Journal Voucher - ${$("invoice_number").value}` : "Journal Voucher (preview)";
+    $("ssr-jv-vno").textContent = $("invoice_number").value.trim() || savedVoucherNo || "Preview";   // the Invoice Number, not ALS-n
+    $("ssr-jv-date").textContent = d.voucher_date ? d.voucher_date.split("-").reverse().join("/") : "-";
+    $("ssr-jv-currency").textContent = d.currency || $("currency").textContent || "INR";
+    document.querySelectorAll(".ssr-jv-cur").forEach((el) => { el.textContent = $("ssr-jv-currency").textContent; });
+    $("ssr-jv-body").innerHTML = jvRows(accounts);
+    $("ssr-jv-total-debit").textContent = f2(d.total_debit);
+    $("ssr-jv-total-credit").textContent = f2(d.total_credit);
+    $("ssr-jv-narration").textContent = d.narration || "-";
+    [["fop", d.fop], ["pg", d.pg]].forEach(([k, tab]) => {
+      const rows = (tab && tab.accounts) || [];
+      $(`ssr-jv-tab-btn-${k}`).style.display = rows.length ? "" : "none";
+      $(`ssr-jv-${k}-body`).innerHTML = jvRows(rows);
+      $(`ssr-jv-${k}-total-debit`).textContent = f2(tab ? tab.total_debit : 0);
+      $(`ssr-jv-${k}-total-credit`).textContent = f2(tab ? tab.total_credit : 0);
+    });
+    switchJvTab("voucher");
+    const balanced = Math.abs(n(d.total_debit) - n(d.total_credit)) < 0.01;
+    $("ssr-jv-verify").innerHTML = !balanced
+      ? `<span style="color:#DC2626;">X Unbalanced - Debit ${f2(d.total_debit)} != Credit ${f2(d.total_credit)}</span>`
+      : !savedId ? `<span style="color:#D97706;">Computed - not yet posted (live preview)</span>`
+      : !viewMode ? `<span style="color:#D97706;">Balanced - live preview of your unsaved changes (Posted ${esc(savedVoucherNo || "-")} updates on Save)</span>`
+      : `<span style="color:#16A34A;">&#10003; Double-Entry Verification: Balanced (Posted ${esc(savedVoucherNo || "-")})</span>`;
+  }
   $("ssr-jv-btn").addEventListener("click", async () => {
     if (!source || !lines.length) { voyagerAlert("Pick the ticket with New and add the SSR first - the J.V is built from it."); return; }
     if (lines.some((l) => !ssrSummary(l))) { voyagerAlert("Enter the SSR detail on every line first (double-click a row)."); return; }
@@ -656,11 +736,7 @@
       const res = await fetch(`${API}ssr-tickets/jv-preview-draft/`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(buildPayload()) });
       const d = await res.json();
       if (!res.ok) throw new Error(d.error || "Could not build the J.V.");
-      $("ssr-jv-title").textContent = savedId ? `Journal Voucher - ${$("invoice_number").value}` : "Journal Voucher (preview)";
-      $("ssr-jv-meta").textContent = `Date: ${d.voucher_date ? d.voucher_date.split("-").reverse().join("/") : "-"}   |   Narration: ${d.narration || "-"}`;
-      $("ssr-jv-body").innerHTML = d.accounts.map((a) => `<tr><td>${esc(a.ledger_name)}</td>
-          <td style="text-align:right;">${a.debit ? f2(a.debit) : ""}</td><td style="text-align:right;">${a.credit ? f2(a.credit) : ""}</td></tr>`).join("")
-        + `<tr style="font-weight:700;"><td>Total</td><td style="text-align:right;">${f2(d.total_debit)}</td><td style="text-align:right;">${f2(d.total_credit)}</td></tr>`;
+      renderJv(d);
       open("ssr-jv-modal");
     } catch (err) {
       voyagerAlert(err.message || "Could not build the J.V. Is the Django backend running?", { icon: "error" });
@@ -718,6 +794,8 @@
     const igst = sum("fullIgst"), cgst = sum("fullCgst"), sgst = sum("fullSgst"), totalTax = igst + cgst + sgst;
     return {
       docTitle: "TAX INVOICE", docTitleCase: "Tax Invoice",
+      // The document's own Invoice Type (Voucher Type name) - Template 3's heading.
+      invoiceType: $("invoice_type").value.trim(),
       company: {
         name: co.company_name, address: co.address, state: co.state, pincode: co.pincode, gst_no: co.gst_no,
         pan_number: co.pan_number, cin_number: co.cin_number, email: co.email, phone: co.mobile || co.telephone || "",

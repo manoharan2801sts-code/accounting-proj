@@ -1,5 +1,5 @@
 from django.urls import path
-from . import views
+from . import views, ticket_import, agent_db_scheduler
 
 urlpatterns = [
     path("ledger-groups/", views.ledger_groups_list, name="ledger-groups-list"),
@@ -24,12 +24,6 @@ urlpatterns = [
     path("trial-balance/", views.trial_balance_report, name="trial-balance-report"),
     path("profit-loss/", views.profit_loss_report, name="profit-loss-report"),
     path("balance-sheet/", views.balance_sheet_report, name="balance-sheet-report"),
-    path("dashboard/", views.dashboard_summary, name="dashboard-summary"),
-    path("seed-database/", views.seed_database, name="seed-database"),
-    path("parties/customers/", views.parties_customers_list, name="parties-customers-list"),
-    path("parties/suppliers/", views.parties_suppliers_list, name="parties-suppliers-list"),
-    path("ledger-groups/<int:group_id>/delete/", views.ledger_group_delete, name="ledger-group-delete"),
-    path("ledger-groups/<int:group_id>/update/", views.ledger_group_update, name="ledger-group-update"),
     path("tickets/", views.tickets_list, name="tickets-list"),
     path("tickets/lookup-for-reschedule/", views.ticket_lookup_for_reschedule, name="ticket-lookup-for-reschedule"),
     path("tickets/lookup-for-cancellation/", views.ticket_lookup_for_cancellation, name="ticket-lookup-for-cancellation"),
@@ -105,4 +99,15 @@ urlpatterns = [
     path("user-management/users/<int:user_id>/access/save/", views.user_menu_access_save, name="user-menu-access-save"),
     path("user-management/menus/", views.menu_master_list, name="menu-master-list"),
     path("airline-dropdowns/", views.airline_dropdowns, name="airline-dropdowns"),
+    # Airline ticket Auto Push import (ticket_import.py) - external systems use the X-Api-Key header.
+    path("import/tickets/push/", ticket_import.push, name="ticket-import-push"),
+    path("import/tickets/process/", ticket_import.process, name="ticket-import-process"),
+    path("import/tickets/retry/", ticket_import.retry, name="ticket-import-retry"),
+    path("import/tickets/status/", ticket_import.status, name="ticket-import-status"),
+    path("import/tickets/error-log/", ticket_import.error_log, name="ticket-import-error-log"),
+    path("import/tickets/invoice-types/", ticket_import.invoice_types, name="ticket-import-invoice-types"),
+    path("import/agent-db/scheduler-log/", agent_db_scheduler.scheduler_log, name="agent-db-scheduler-log"),
+    # dashboard.js calls /api/dashboard?company_id= (no trailing slash).
+    path("dashboard", views.dashboard_summary, name="dashboard-summary"),
+    path("dashboard/", views.dashboard_summary),
 ]

@@ -28,13 +28,67 @@
   const gatewaysCount = document.getElementById("pg-gateways-count");
   const tbody = document.getElementById("pg-tbody");
 
-  // Effective From can't be backdated - blocks it in the calendar picker
-  // itself (min attribute) as well as any typed-in value at save time.
-  function todayISO() {
-    const d = new Date();
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  // Effective From may be any date. Before today, saved documents can be
+  // affected - the server asks first (chooseBackdateMode), same as Ledger Mapping.
+  const fmtISO = (iso) => (iso ? iso.split("-").reverse().join("/") : "");
+  const escHtml = (v) => String(v == null ? "" : v).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const pgSettingsText = (s) => s
+    ? `${escHtml(s.payment_master_ledger_name || "-")} / ${escHtml(s.pg_charges_master_ledger_name || "-")} / ${s.pg_charges_percentage != null ? Number(s.pg_charges_percentage).toFixed(2) + "%" : "-"}`
+    : "-";
+
+  // Back-dated PG Master change (409 needs_backdate_choice) - Replace All /
+  // Retain Old Ledgers / Cancel. Resolves "replace", "retain" or null.
+  function chooseBackdateMode(data) {
+    const d = fmtISO(data.effective_from);
+    const docs = data.documents === 1 ? "1 saved document" : `${data.documents} saved documents`;
+    const replaced = (data.replaced_rows || []).map((r) => `${pgSettingsText(r)} from ${fmtISO(r.effective_from)}`).join("<br>");
+    const modal = document.createElement("div");
+    modal.className = "dom-modal-backdrop open";
+    modal.innerHTML = `
+      <div class="dom-modal-window" style="max-width:560px;">
+        <div class="dom-modal-titlebar">
+          <div>Back-dated PG Master</div>
+          <button type="button" class="dom-titlebar-btn btn-close" data-choice="">&times;</button>
+        </div>
+        <div style="padding:14px 18px; font-size:13px; line-height:1.5; color:#0F172A;">
+          <p style="margin:0 0 8px;"><b>${escHtml(data.gateway_name)}</b> - new settings from <b>${d}</b> (before today).
+            There ${data.documents === 1 ? "is" : "are"} <b>${docs}</b> paid through it dated ${d} or later.</p>
+          <p style="margin:0 0 8px; color:#475569;">In force on ${d} now (Payment Master / PG Charges Master / PG Charges %):
+            ${pgSettingsText(data.current)}</p>
+          ${replaced ? `<p style="margin:0 0 10px; color:#475569;">Replaced from ${d}:<br>${replaced}</p>` : ""}
+          <div style="border:1px solid #D8E1EC; border-radius:6px; padding:8px 10px; margin-bottom:8px;">
+            <b>1. Replace all previous data also</b><br>
+            <span style="color:#475569;">Every document dated ${d} or later - saved ones too - posts with the new settings.</span>
+          </div>
+          <div style="border:1px solid #D8E1EC; border-radius:6px; padding:8px 10px;">
+            <b>2. Retain old ledgers</b><br>
+            <span style="color:#475569;">The ${docs} keep the settings they post with now. Only documents saved
+              (or edited) from now on, dated ${d} or later, take the new settings.</span>
+          </div>
+        </div>
+        <div class="voyager-alert-actions">
+          <button type="button" class="dom-nav-btn" data-choice="">Cancel</button>
+          <button type="button" class="dom-nav-btn btn-primary" data-choice="retain">Retain Old Ledgers</button>
+          <button type="button" class="dom-nav-btn btn-danger" data-choice="replace">Replace All</button>
+        </div>
+      </div>`;
+    document.body.appendChild(modal);
+    return new Promise((resolve) => {
+      const done = (choice) => {
+        document.removeEventListener("keydown", onKey);
+        modal.remove();
+        resolve(choice || null);
+      };
+      const onKey = (e) => { if (e.key === "Escape") done(null); };
+      document.addEventListener("keydown", onKey);
+      modal.addEventListener("click", (e) => {
+        const btn = e.target.closest("[data-choice]");
+        if (btn) done(btn.dataset.choice);
+        else if (e.target === modal) done(null);
+      });
+      modal.querySelector('[data-choice="retain"]').focus({ preventScroll: true });
+    });
   }
-  formChargesEffectiveFrom.min = todayISO();
 
   function populateLedgerOptions(selectedId) {
     formMaster.innerHTML = `<option value="">- Select Ledger from Master -</option>` +
@@ -163,7 +217,7 @@
     document.querySelectorAll(".pg-grid-row").forEach((r) => r.classList.remove("is-selected"));
   }
 
-  async function saveGateway() {
+  async function saveGateway(confirmReplace = false, backdateMode = null) {
     const gatewayName = formName.value.trim();
     if (!gatewayName) {
       voyagerAlert("Enter a Payment Gateway Name.");
@@ -188,12 +242,6 @@
       return;
     }
 
-    if (formChargesEffectiveFrom.value && formChargesEffectiveFrom.value < todayISO()) {
-      voyagerAlert("Effective From cannot be a past date.");
-      formChargesEffectiveFrom.focus();
-      return;
-    }
-
     const payload = {
       company_id: activeCompanyId,
       gateway_name: gatewayName,
@@ -202,6 +250,8 @@
       pg_charges_percentage: chargesPercentageRaw ? Number(chargesPercentageRaw) : null,
       pg_charges_percentage_effective_from: formChargesEffectiveFrom.value || null,
       is_active: isActive,
+      confirm_replace: confirmReplace,
+      backdate_mode: backdateMode || undefined,
     };
 
     if (editingGatewayId) {
@@ -215,8 +265,35 @@
         body: JSON.stringify(payload),
       });
       const data = await res.json();
+      if (res.status === 409 && data.needs_backdate_choice) {
+        const choice = await chooseBackdateMode(data);
+        if (choice) await saveGateway(confirmReplace, choice);
+        return;
+      }
+      // Same Effective From date, different settings: every document dated
+      // from that day would move to them - ask first.
+      if (res.status === 409 && data.needs_confirm) {
+        const d = fmtISO(data.effective_from);
+        const ok = await voyagerConfirm(
+          `"${data.gateway_name}" already has settings from ${d}:
+${pgSettingsText(data.old).replace(/&amp;/g, "&")}
+
+` +
+          `Saving with the same date REPLACES them - every document dated ${d} or later ` +
+          `(already saved ones too) will post with the new settings.
+
+` +
+          `To keep older documents on the old settings, press Cancel and change Effective From ` +
+          `to the date the new settings should start.`,
+          { title: "Replace PG Master settings?", confirmLabel: "Replace", icon: "warning" });
+        if (ok) await saveGateway(true, backdateMode);
+        return;
+      }
       if (!res.ok) {
         throw new Error(data.error || `Save failed (${res.status})`);
+      }
+      if (backdateMode === "retain" && data.documents_retained) {
+        voyagerAlert(`Saved. ${data.documents_retained} saved document(s) keep their old PG settings.`, { icon: "success" });
       }
 
       await loadGateways();
@@ -291,7 +368,7 @@
   });
 
   // Action buttons
-  btnSave.addEventListener("click", saveGateway);
+  btnSave.addEventListener("click", () => saveGateway());
   btnCancel.addEventListener("click", resetForm);
 
   // Initialize Shell & Data

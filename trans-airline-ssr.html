@@ -12,6 +12,18 @@
   /* Same screen layout as New Airline Ticket (ticket-entry.html) - the
      dom-* classes come from app.css; only this page's own bits are here. */
   html, body { height: 100%; overflow: hidden; margin: 0; }
+  /* J.V popup - same look as the Booking / Reschedule J.V (ticket-entry.html). */
+  .ssr-jv-label { color: #64748B; display: block; font-size: 10px; font-weight: 600; }
+  .ssr-jv-table-box { border: 1px solid var(--color-border, #CBD5E1); border-radius: 3px; overflow: hidden; margin-bottom: 12px; }
+  .ssr-jv-table { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+  .ssr-jv-table thead th { background: #3B6DB5; color: #FFFFFF; font-weight: 700; text-align: left; height: 26px;
+    padding: 4px 8px; position: sticky; top: 0; }
+  .ssr-jv-table tbody td { padding: 5px 8px; border-bottom: 1px solid #E2E8F0; }
+  .ssr-jv-table tbody td.num { text-align: right; font-family: var(--font-mono, monospace); }
+  .ssr-jv-table tfoot td { background: #F1F5F9; font-weight: 800; border-top: 2px solid #3B6DB5; height: 28px;
+    padding: 6px 10px; font-size: 11px; letter-spacing: .5px; }
+  .ssr-jv-table tfoot td.ssr-jv-total { width: 110px; padding: 6px 8px; text-align: right;
+    font-family: var(--font-mono, monospace); font-size: 12.5px; color: #3B6DB5; }
   .pax-circle-btn {
     min-width: 62px; height: 22px; border-radius: 3px; cursor: pointer;
     display: inline-flex; align-items: center; justify-content: center;
@@ -362,7 +374,8 @@
           <label>Sector</label><div class="dom-input-readonly" id="m-sector">—</div>
           <label>Office ID</label><div class="dom-input-readonly" id="m-office-id">—</div>
           <label>Supplier</label><div class="dom-input-readonly" id="m-supplier">—</div>
-          <label>FOP</label><div class="dom-input-readonly" id="m-fop">—</div>
+          <label>FOP</label><select class="dom-select" id="m-fop"></select>
+          <label>Card Number</label><select class="dom-select" id="m-card-number"></select>
         </div>
       </div>
 
@@ -418,28 +431,93 @@
   </div>
 </div>
 
-<!-- J.V - the SSR Updation's Journal Voucher (ledgers from Ledger Mapping). -->
+<!-- J.V - the SSR Updation's Journal Voucher (ledgers from Ledger Mapping),
+     same layout as the Booking / Reschedule J.V: Journal Voucher + FOP
+     Payment (FOP not Cash) + PG Receipts (Payment Mode = Payment Gateway). -->
 <div class="dom-modal-backdrop spa-extra-content" id="ssr-jv-modal">
-  <div class="dom-modal-window" style="max-width:760px; width:95%; max-height:90vh;">
+  <div class="dom-modal-window" style="max-width:760px; width:95%; max-height:82vh;">
     <div class="dom-modal-titlebar">
       <div id="ssr-jv-title">Journal Voucher</div>
       <button type="button" class="dom-titlebar-btn btn-close" data-close="ssr-jv-modal" title="Close">&times;</button>
     </div>
-    <div class="dom-modal-body dom-modal-body-scroll" style="display:block; padding:12px; max-height:76vh;">
-      <div id="ssr-jv-meta" style="font-size:11.5px; color:#334155; margin-bottom:8px;"></div>
-      <table class="ssr-pick-table">
-        <thead><tr><th>Ledger</th><th style="text-align:right;">Debit</th><th style="text-align:right;">Credit</th></tr></thead>
-        <tbody id="ssr-jv-body"></tbody>
-      </table>
+
+    <div class="dom-tabs" id="ssr-jv-tabs" style="padding-left:12px; padding-right:12px;">
+      <a class="dom-tab active" data-jv-tab="voucher">Journal Voucher</a>
+      <a class="dom-tab" data-jv-tab="fop" id="ssr-jv-tab-btn-fop">FOP Payment</a>
+      <a class="dom-tab" data-jv-tab="pg" id="ssr-jv-tab-btn-pg">PG Receipts</a>
+    </div>
+
+    <div class="dom-modal-body dom-modal-body-scroll" style="display:block; padding:12px; height:52vh;">
+      <!-- Tab 1: Journal Voucher -->
+      <div id="ssr-jv-panel-voucher" class="ssr-jv-panel">
+        <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:8px; background:var(--color-bg-alt, #F8FAFC); border:1px solid var(--color-border, #CBD5E1); padding:10px; border-radius:3px; margin-bottom:12px; font-size:11.5px;">
+          <div><span class="ssr-jv-label">Voucher No</span><strong id="ssr-jv-vno" style="font-family:var(--font-mono, monospace); font-size:12px; color:#3B6DB5;">—</strong></div>
+          <div><span class="ssr-jv-label">Voucher Date</span><strong id="ssr-jv-date">—</strong></div>
+          <div><span class="ssr-jv-label">Voucher Type</span><span class="pill pill-neutral" style="font-size:10.5px; font-weight:700;">Journal (SSR)</span></div>
+          <div><span class="ssr-jv-label">Currency</span><strong id="ssr-jv-currency">INR</strong></div>
+        </div>
+        <div class="ssr-jv-table-box">
+          <div style="max-height:26vh; overflow-y:auto;">
+            <table class="ssr-jv-table">
+              <thead><tr><th style="width:36px; text-align:center;">#</th><th>Account / General Ledger Head</th>
+                <th style="width:110px; text-align:right;">Debit (<span class="ssr-jv-cur">INR</span>)</th>
+                <th style="width:110px; text-align:right;">Credit (<span class="ssr-jv-cur">INR</span>)</th></tr></thead>
+              <tbody id="ssr-jv-body"></tbody>
+            </table>
+          </div>
+          <table class="ssr-jv-table">
+            <tfoot><tr><td style="width:36px;"></td><td style="text-align:right;">Total Balanced Entry:</td>
+              <td id="ssr-jv-total-debit" class="ssr-jv-total">0.00</td><td id="ssr-jv-total-credit" class="ssr-jv-total">0.00</td></tr></tfoot>
+          </table>
+        </div>
+        <div style="background:var(--color-bg-alt, #F8FAFC); border:1px solid var(--color-border, #CBD5E1); border-radius:3px; padding:8px 10px; font-size:11px;">
+          <strong style="color:#475569; display:block; margin-bottom:2px;">Narration:</strong>
+          <span id="ssr-jv-narration" style="color:#1E293B; font-style:italic;">-</span>
+        </div>
+      </div>
+
+      <!-- Tab 2: FOP Payment - the supplier settled by card (FOP not Cash):
+           Own Card credits the FOP Master card's ledger, Client Card credits Customer. -->
+      <div id="ssr-jv-panel-fop" class="ssr-jv-panel" style="display:none;">
+        <div class="ssr-jv-table-box">
+          <table class="ssr-jv-table">
+            <thead><tr><th style="width:36px; text-align:center;">#</th><th>Account / General Ledger Head</th>
+              <th style="width:110px; text-align:right;">Debit (<span class="ssr-jv-cur">INR</span>)</th>
+              <th style="width:110px; text-align:right;">Credit (<span class="ssr-jv-cur">INR</span>)</th></tr></thead>
+            <tbody id="ssr-jv-fop-body"></tbody>
+            <tfoot><tr><td colspan="2" style="text-align:right;">Total:</td>
+              <td id="ssr-jv-fop-total-debit" class="ssr-jv-total">0.00</td><td id="ssr-jv-fop-total-credit" class="ssr-jv-total">0.00</td></tr></tfoot>
+          </table>
+        </div>
+      </div>
+
+      <!-- Tab 3: PG Receipts - the customer paid through the gateway (Payment Mode = Payment Gateway). -->
+      <div id="ssr-jv-panel-pg" class="ssr-jv-panel" style="display:none;">
+        <div class="ssr-jv-table-box">
+          <table class="ssr-jv-table">
+            <thead><tr><th style="width:36px; text-align:center;">#</th><th>Account / General Ledger Head</th>
+              <th style="width:110px; text-align:right;">Debit (<span class="ssr-jv-cur">INR</span>)</th>
+              <th style="width:110px; text-align:right;">Credit (<span class="ssr-jv-cur">INR</span>)</th></tr></thead>
+            <tbody id="ssr-jv-pg-body"></tbody>
+            <tfoot><tr><td colspan="2" style="text-align:right;">Total:</td>
+              <td id="ssr-jv-pg-total-debit" class="ssr-jv-total">0.00</td><td id="ssr-jv-pg-total-credit" class="ssr-jv-total">0.00</td></tr></tfoot>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="dom-modal-footer" style="display:flex; justify-content:space-between; align-items:center;">
+      <div id="ssr-jv-verify" style="font-size:11px; font-weight:700;"></div>
+      <button type="button" class="dom-nav-btn btn-primary" data-close="ssr-jv-modal" style="font-weight:700;">Close</button>
     </div>
   </div>
 </div>
 
-<script src="assets/js/hardcode.js?v=10"></script>
+<script src="assets/js/hardcode.js?v=12"></script>
 <script src="assets/js/mock-data.js"></script>
-<script src="assets/js/api.js?v=12"></script>
+<script src="assets/js/api.js?v=5"></script>
 <script src="assets/js/util.js?v=6"></script>
-<script src="assets/js/shell.js?v=46"></script>
+<script src="assets/js/shell.js?v=48"></script>
 <script src="assets/js/invoice-templates.js?v=22"></script>
-<script src="assets/js/page-ssr-entry.js?v=41"></script>
+<script src="assets/js/page-ssr-entry.js?v=48"></script>
 </body></html>

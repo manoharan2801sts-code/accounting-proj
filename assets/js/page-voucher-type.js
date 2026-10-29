@@ -1,7 +1,68 @@
 (function () {
   const VOUCHER_TYPE_API = "http://127.0.0.1:8000/api/voucher-type/";
+  const AUTO_PUSH_API = "http://127.0.0.1:8000/api/import/tickets/invoice-types/";
   let activeCompanyId;
   let editingId = null; // null = creating new, number = editing that Voucher Type's id
+
+  // ---------- Auto Push Invoice For ----------
+  // Airline ticket Auto Push saves each pushed Booking Status under the
+  // Invoice Type picked here (one type per status; Confirmed / Rescheduled
+  // need an Airline type, Cancelled a Credit Note type).
+  const AUTO_PUSH_CATEGORY = { Confirmed: "Airline", Rescheduled: "Airline", Cancelled: "Credit Note", SSR: "Airline" };
+  let autoPushAssigned = {}; // { "Confirmed": {voucher_type_id, voucher_type_name}, ... }
+  const autoPushBoxes = () => Array.from(document.querySelectorAll(".vt-auto-push-cb"));
+
+  function syncAutoPushBoxes() {
+    const category = document.getElementById("vt-type").value;
+    const others = [];
+    autoPushBoxes().forEach((cb) => {
+      const allowed = AUTO_PUSH_CATEGORY[cb.value] === category;
+      if (!allowed) cb.checked = false;
+      cb.disabled = !allowed;
+      cb.parentElement.classList.toggle("vt-disabled", !allowed);
+      const holder = autoPushAssigned[cb.value];
+      if (allowed && holder && holder.voucher_type_id !== editingId) others.push(`${cb.value}: ${holder.voucher_type_name}`);
+    });
+    const hint = document.getElementById("vt-auto-push-hint");
+    hint.style.color = "#7C8AA0";
+    hint.textContent = others.length ? `Now set on another type - ${others.join(", ")} (ticking here moves it).` : "";
+  }
+  function setAutoPushChecks(voucherTypeId) {
+    autoPushBoxes().forEach((cb) => {
+      const holder = autoPushAssigned[cb.value];
+      cb.checked = !!(voucherTypeId && holder && holder.voucher_type_id === voucherTypeId);
+    });
+    syncAutoPushBoxes();
+  }
+  async function loadAutoPush() {
+    if (!activeCompanyId) return;
+    try {
+      const res = await fetch(`${AUTO_PUSH_API}?company_id=${activeCompanyId}`);
+      const data = res.ok ? await res.json() : {};
+      autoPushAssigned = {};
+      (data.invoice_types || []).forEach((r) => { autoPushAssigned[r.ticket_status] = r; });
+    } catch (err) {
+      console.error("Could not load the Auto Push Invoice Types", err);
+    }
+    setAutoPushChecks(editingId);
+  }
+  // Saves this type's ticks - only when they changed (or it held a status before).
+  async function saveAutoPush(voucherTypeId) {
+    const wanted = autoPushBoxes().filter((cb) => cb.checked).map((cb) => cb.value);
+    const held = Object.keys(autoPushAssigned).filter((s) => autoPushAssigned[s].voucher_type_id === voucherTypeId);
+    if (wanted.sort().join() === held.sort().join()) return null;
+    const res = await fetch(AUTO_PUSH_API, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ company_id: activeCompanyId, voucher_type_id: voucherTypeId, booking_statuses: wanted }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return data.error || "Could not save Auto Push Invoice For.";
+    autoPushAssigned = {};
+    (data.invoice_types || []).forEach((r) => { autoPushAssigned[r.ticket_status] = r; });
+    return null;
+  }
+  document.getElementById("vt-type").addEventListener("change", syncAutoPushBoxes);
 
   function setHint(msg, ok) {
     const el = document.getElementById("vt-name-hint");
@@ -134,6 +195,7 @@
     document.getElementById("an-prefix").value = "";
     document.getElementById("an-suffix").value = "";
     editingId = null;
+    setAutoPushChecks(null);
     setHint("");
     document.getElementById("vt-name").focus();
   }
@@ -165,6 +227,7 @@
     document.getElementById("an-suffix").value = vt.an_suffix_details || "";
 
     editingId = vt.id;
+    setAutoPushChecks(vt.id);
     setHint("");
     document.getElementById("vt-name").focus();
   }
@@ -263,6 +326,11 @@
       const verb = editingId ? "updated" : "saved";
       // Restart Numbers renumbers this type's old vouchers - say how many.
       const renumbered = data.renumbered ? ` ${data.renumbered} existing voucher${data.renumbered === 1 ? " was" : "s were"} renumbered in date order.` : "";
+      const autoPushError = await saveAutoPush(Number(data.id || editingId));
+      if (autoPushError) {
+        await window.voyagerAlert(`Voucher Type "${data.name}" ${verb}, but Auto Push Invoice For was not saved: ${autoPushError}`, { icon: "warning" });
+        return;
+      }
       await window.voyagerAlert(`Voucher Type "${data.name}" ${verb} successfully.${renumbered}`, { icon: "success" });
       clearForm();
     } catch (err) {
@@ -280,8 +348,9 @@
   (async function () {
     const active = await window.VoyagerShell.init({
       activeKey: "voucher-type",
-      onCompanyChange: (id) => { activeCompanyId = Number(id); },
+      onCompanyChange: (id) => { activeCompanyId = Number(id); loadAutoPush(); },
     });
     if (active) activeCompanyId = Number(active.id);
+    loadAutoPush();
   })();
 })();

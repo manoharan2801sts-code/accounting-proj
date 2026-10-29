@@ -76,6 +76,13 @@
   }
   .vt-hint { font-size: 9.5px; color: #D64545; min-height: 11px; margin-top: -1px; }
 
+  /* Auto Push Invoice For - one checkbox per Booking Status, full row. */
+  #vt-auto-push-field { grid-column: 1 / -1; }
+  .vt-auto-push { gap: 1.2rem; flex-wrap: wrap; height: auto; min-height: 32px; }
+  .vt-auto-push label { font-size: 12.5px; font-weight: 500; letter-spacing: 0; color: #0F172A;
+    display: inline-flex; align-items: center; gap: 0.35rem; cursor: pointer; }
+  .vt-auto-push label.vt-disabled { color: #A0AEC0; cursor: not-allowed; }
+
   /* Yes/No toggle switches for the boolean fields. */
   .vt-toggle-row { display: flex; align-items: center; gap: 0.55rem; height: 32px; }
   .vt-toggle { position: relative; display: inline-block; width: 32px; height: 18px; flex-shrink: 0; }
@@ -203,6 +210,18 @@
               <span class="vt-toggle-text" id="vt-narration-text">Yes</span>
             </div>
           </div>
+          <!-- Airline ticket Auto Push: the Invoice Type each pushed Booking
+               Status is saved under (page-voucher-type.js). -->
+          <div class="vt-field" id="vt-auto-push-field">
+            <label>Auto Push Invoice For</label>
+            <div class="vt-toggle-row vt-auto-push">
+              <label><input type="checkbox" class="vt-auto-push-cb" value="Confirmed" /> Confirmed (C)</label>
+              <label><input type="checkbox" class="vt-auto-push-cb" value="Rescheduled" /> Rescheduled (R)</label>
+              <label><input type="checkbox" class="vt-auto-push-cb" value="Cancelled" /> Cancelled (X)</label>
+              <label><input type="checkbox" class="vt-auto-push-cb" value="SSR" /> SSR Updation (SSR)</label>
+            </div>
+            <div class="vt-hint" id="vt-auto-push-hint"></div>
+          </div>
         </div>
       </div>
 
@@ -310,9 +329,9 @@
   </div>
 </div>
 
-<script src="assets/js/hardcode.js?v=10"></script>
+<script src="assets/js/hardcode.js?v=12"></script>
 <script src="assets/js/mock-data.js"></script>
-<script src="assets/js/api.js?v=12"></script>
-<script src="assets/js/shell.js?v=46"></script>
-<script src="assets/js/page-voucher-type.js?v=5"></script>
+<script src="assets/js/api.js?v=5"></script>
+<script src="assets/js/shell.js?v=48"></script>
+<script src="assets/js/page-voucher-type.js?v=6"></script>
 </body></html>

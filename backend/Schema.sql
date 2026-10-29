@@ -221,7 +221,7 @@ CREATE TABLE AL_Tickets (
     booking_mode          NVARCHAR(20) NOT NULL DEFAULT 'Manual'
         CONSTRAINT ck_tickets_booking_mode
         CHECK (booking_mode IN ('Manual', 'Auto Push')),
-    booking_type          NVARCHAR(30) NULL,
+    booking_type          NVARCHAR(50) NULL,
     booking_status        NVARCHAR(20) NULL
         CONSTRAINT ck_tickets_booking_status
         CHECK (booking_status IN ('Confirmed', 'Re-Scheduled', 'Normal Cancelled')),
@@ -437,7 +437,7 @@ CREATE TABLE Rescheduled_Al_Ticket (
 
     -- The ticket this reschedule was raised against - "Parent PNR" and
     -- every other Parent-tab field comes from here, not a stored copy.
-    original_ticket_id    INT NOT NULL,
+    original_ticket_id    INT NULL,      -- NULL = direct Reschedule (no booking in the software)
 
     invoice_number        NVARCHAR(20) NOT NULL,
     invoice_date          DATE NOT NULL,
@@ -445,7 +445,7 @@ CREATE TABLE Rescheduled_Al_Ticket (
     booking_mode          NVARCHAR(20) NOT NULL DEFAULT 'Manual'
         CONSTRAINT ck_resched_tickets_booking_mode
         CHECK (booking_mode IN ('Manual', 'Auto Push')),
-    booking_type          NVARCHAR(30) NULL,
+    booking_type          NVARCHAR(50) NULL,
     -- Always 'Re-Scheduled' in practice (frozen by enterRescheduleMode() in
     -- page-ticket-entry.js) - kept as a real column, same choices as Tickets.
     booking_status        NVARCHAR(20) NULL
@@ -524,7 +524,7 @@ CREATE TABLE Rescheduled_Al_TicketLines (
     -- The exact original passenger line this reschedule was raised for -
     -- ALWAYS the true original TicketLine, even when chained off a
     -- previous reschedule (based_on_reschedule_line_id below).
-    original_ticket_line_id INT NOT NULL,
+    original_ticket_line_id INT NULL,    -- NULL = direct Reschedule
     -- Set only when this reschedule was created by rescheduling an
     -- ALREADY-RESCHEDULED ticket again (chaining) - points at the
     -- previous reschedule's own line; "Parent PNR Details" is
@@ -1398,6 +1398,16 @@ BEGIN
 END
 GO
 
+-- User Management Print / Export Excel flags (migration 0091).
+IF COL_LENGTH('dbo.UserMenuAccess', 'can_print') IS NULL
+BEGIN
+    ALTER TABLE dbo.UserMenuAccess ADD can_print BIT NOT NULL CONSTRAINT df_uma_can_print DEFAULT 0;
+    ALTER TABLE dbo.UserMenuAccess ADD can_export BIT NOT NULL CONSTRAINT df_uma_can_export DEFAULT 0;
+    -- Existing users keep printing / exporting every menu they can view.
+    EXEC (N'UPDATE dbo.UserMenuAccess SET can_print = can_view, can_export = can_view;');
+END
+GO
+
 -- Login password (migration 0037) - Django PBKDF2 hash, never plain text.
 IF COL_LENGTH('dbo.AppUsers', 'password_hash') IS NULL
     ALTER TABLE dbo.AppUsers ADD password_hash NVARCHAR(256) NULL;
@@ -1547,7 +1557,7 @@ CREATE TABLE dbo.SSR_AL_Tickets (
     id                          INT IDENTITY(1,1) PRIMARY KEY,
     company_id                  INT NOT NULL,
     branch_name                 NVARCHAR(100) NULL,
-    original_ticket_id          INT NOT NULL REFERENCES dbo.AL_Tickets(id),
+    original_ticket_id          INT NULL REFERENCES dbo.AL_Tickets(id),   -- NULL = direct SSR (migration 0090)
     source_reschedule_ticket_id INT NULL REFERENCES dbo.Rescheduled_Al_Ticket(id),
     invoice_number              NVARCHAR(20) NOT NULL,
     invoice_date                DATE NOT NULL,
@@ -1567,19 +1577,30 @@ CREATE TABLE dbo.SSR_AL_Tickets (
     payment_gateway_ref         NVARCHAR(60) NULL,
     created_at                  DATETIMEOFFSET NOT NULL,
     updated_at                  DATETIMEOFFSET NOT NULL,
-    CONSTRAINT uq_ssr_ticket_company_invoice_no UNIQUE (company_id, invoice_number),
-    CONSTRAINT uq_ssr_ticket_company_ssr_ref UNIQUE (company_id, ssr_reference)
+    CONSTRAINT uq_ssr_ticket_company_invoice_no UNIQUE (company_id, invoice_number)
+    -- SSR Reference is NOT unique: one S PNR can have several SSR Updations (migration 0088)
 );
 GO
 -- Gateway Ref (migration 0048) - added after the table first shipped.
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'ssr_ticket_ssr_ref_idx')
+    CREATE INDEX ssr_ticket_ssr_ref_idx ON dbo.SSR_AL_Tickets (company_id, ssr_reference);
 IF COL_LENGTH('dbo.SSR_AL_Tickets', 'payment_gateway_ref') IS NULL
     ALTER TABLE dbo.SSR_AL_Tickets ADD payment_gateway_ref NVARCHAR(60) NULL;
+-- Direct SSR Updation (migration 0090): the Parent PNR it was pushed with.
+IF COL_LENGTH('dbo.SSR_AL_Tickets', 'parent_pnr') IS NULL
+    ALTER TABLE dbo.SSR_AL_Tickets ADD parent_pnr NVARCHAR(30) NULL;
+-- Direct SSR Updation (migration 0090): the Parent PNR it was pushed with.
+IF COL_LENGTH('dbo.SSR_AL_Tickets', 'parent_pnr') IS NULL
+    ALTER TABLE dbo.SSR_AL_Tickets ADD parent_pnr NVARCHAR(30) NULL;
+-- Direct SSR Updation (migration 0090): the Parent PNR it was pushed with.
+IF COL_LENGTH('dbo.SSR_AL_Tickets', 'parent_pnr') IS NULL
+    ALTER TABLE dbo.SSR_AL_Tickets ADD parent_pnr NVARCHAR(30) NULL;
 GO
 IF OBJECT_ID('dbo.SSR_AL_TicketLines', 'U') IS NULL
 CREATE TABLE dbo.SSR_AL_TicketLines (
     id                      INT IDENTITY(1,1) PRIMARY KEY,
     ssr_ticket_id           INT NOT NULL REFERENCES dbo.SSR_AL_Tickets(id),
-    original_ticket_line_id INT NOT NULL REFERENCES dbo.AL_TicketLines(id),
+    original_ticket_line_id INT NULL REFERENCES dbo.AL_TicketLines(id),   -- NULL = direct SSR (migration 0090)
     reschedule_line_id      INT NULL REFERENCES dbo.Rescheduled_Al_TicketLines(id),
     ticket_no               NVARCHAR(20) NULL,
     passenger_name          NVARCHAR(100) NULL,
@@ -1589,6 +1610,7 @@ CREATE TABLE dbo.SSR_AL_TicketLines (
     office_id               NVARCHAR(30) NULL,
     supplier_ledger_id      INT NULL REFERENCES dbo.Ledgers(id),
     fop                     NVARCHAR(20) NULL,
+    card_number             NVARCHAR(40) NULL,     -- FOP Own Card / Client Card (FOP Master), migration 0087
     ssr_items               NVARCHAR(MAX) NULL,
     ssr_ticket_numbers      NVARCHAR(MAX) NULL,
     ssr_charges             NVARCHAR(MAX) NULL,
@@ -1839,19 +1861,29 @@ MERGE dbo.AirlineDropdownValues AS t
 USING (VALUES
     (N'bookingModes', N'MAN', N'Manual', NULL, 10, 1),
     (N'bookingModes', N'AUTO', N'Auto Push', NULL, 20, 0),
-    (N'bookingTypes', N'TD', N'Travel Desk', NULL, 10, 0),
-    (N'bookingTypes', N'IND', N'Indesk', NULL, 20, 0),
-    (N'bookingTypes', N'AGT', N'Agent', NULL, 30, 0),
-    (N'bookingTypes', N'RPA', N'Retrieve PNR Accounting', NULL, 40, 0),
-    (N'bookingTypes', N'MAN', N'Manual Booking', NULL, 50, 0),
-    (N'bookingTypes', N'MOB', N'Mobile Booking', NULL, 60, 0),
-    (N'bookingTypes', N'TCO', N'Travel Co-Ordinator', NULL, 70, 0),
-    (N'bookingTypes', N'SSR', N'SSR Updation', NULL, 80, 0),
-    (N'bookingStatuses', N'CON', N'Confirmed', NULL, 10, 0),
-    (N'bookingStatuses', N'RES', N'Re-Scheduled', NULL, 20, 0),
-    (N'bookingStatuses', N'CAN', N'Normal Cancelled', NULL, 30, 0),
-    (N'travelTypes', N'DOM', N'Domestic', NULL, 10, 0),
-    (N'travelTypes', N'INT', N'International', NULL, 20, 0),
+    (N'bookingTypes', N'TDB', N'Travel Desk Booking', NULL, 10, 0),
+    (N'bookingTypes', N'MB', N'Manual Booking', NULL, 20, 0),
+    (N'bookingTypes', N'RPA', N'Retrieve PNR Accounting', NULL, 30, 0),
+    (N'bookingTypes', N'RPTI', N'Retrieve PNR Ticketing (I)', NULL, 40, 0),
+    (N'bookingTypes', N'RPTQ', N'Retrieve PNR Ticketing (Q)', NULL, 50, 0),
+    (N'bookingTypes', N'APIB', N'API Booking', NULL, 60, 0),
+    (N'bookingTypes', N'ABW', N'Agent Booking (Web)', NULL, 70, 0),
+    (N'bookingTypes', N'TC', N'Travel Co-ordinator', NULL, 80, 0),
+    (N'bookingTypes', N'TCBM', N'Travel Co-ordinator Booking (Mobile)', NULL, 90, 0),
+    (N'bookingTypes', N'EBSBT', N'Employee Booking (SBT)', NULL, 100, 0),
+    (N'bookingTypes', N'MOB', N'Mobile Booking', NULL, 110, 0),
+    (N'bookingTypes', N'IB', N'Indesk Booking', NULL, 120, 0),
+    (N'bookingTypes', N'SUB', N'Super User Booking', NULL, 130, 0),
+    (N'bookingTypes', N'MWB', N'Mobile Web Booking', NULL, 140, 0),
+    (N'bookingTypes', N'EBM', N'Employee Booking (Mobile)', NULL, 150, 0),
+    (N'bookingTypes', N'VTAMB', N'VTA - Mail Booking', NULL, 160, 0),
+    (N'bookingTypes', N'SSR', N'SSR Updation', NULL, 170, 0),
+    (N'bookingStatuses', N'C', N'Confirmed', NULL, 10, 0),
+    (N'bookingStatuses', N'R', N'Re-Scheduled', NULL, 20, 0),
+    (N'bookingStatuses', N'X', N'Normal Cancelled', NULL, 30, 0),
+    (N'bookingStatuses', N'SSR', N'SSR Updated', NULL, 40, 0),
+    (N'travelTypes', N'D', N'Domestic', NULL, 10, 0),
+    (N'travelTypes', N'I', N'International', NULL, 20, 0),
     (N'custDiscountOn', N'BAS', N'Basic', NULL, 10, 0),
     (N'custDiscountOn', N'BYQ', N'Basic + YQ', NULL, 20, 0),
     (N'custDiscountOn', N'BYR', N'Basic + YR', NULL, 30, 0),
@@ -1860,39 +1892,39 @@ USING (VALUES
     (N'custDiscountTypes', N'PCT', N'Percentage', NULL, 10, 0),
     (N'custDiscountTypes', N'FLT', N'Flat', NULL, 20, 0),
     (N'paxTypes', N'ADT', N'Adult', NULL, 10, 0),
-    (N'paxTypes', N'CHD', N'Child', NULL, 20, 0),
-    (N'paxTypes', N'INF', N'Infant', NULL, 30, 0),
-    (N'paymentModes', N'TOP', N'Top-up', NULL, 10, 0),
-    (N'paymentModes', N'PG', N'Payment Gateway', NULL, 20, 0),
+    (N'paxTypes', N'CHLD', N'Child', NULL, 20, 0),
+    (N'paxTypes', N'IFT', N'Infant', NULL, 30, 0),
+    (N'paymentModes', N'1', N'Top-up', NULL, 10, 0),
+    (N'paymentModes', N'2', N'Payment Gateway', NULL, 20, 0),
     (N'airlineCategories', N'LCC', N'LCC', NULL, 10, 0),
     (N'airlineCategories', N'FSC', N'FSC', NULL, 20, 0),
     (N'airlineCategories', N'OSC', N'OSC', NULL, 30, 0),
-    (N'fopOptions', N'OC', N'Own Card', NULL, 10, 0),
-    (N'fopOptions', N'CC', N'Client Card', NULL, 20, 0),
-    (N'fopOptions', N'CASH', N'Cash', NULL, 30, 0),
-    (N'cardTypes', N'OC', N'Own Card', NULL, 10, 0),
-    (N'cardTypes', N'CC', N'Client Card', NULL, 20, 0),
-    (N'cabinOptions', N'Y', N'Economy', NULL, 10, 0),
-    (N'cabinOptions', N'W', N'Premium Economy', NULL, 20, 0),
-    (N'cabinOptions', N'C', N'Business Class', NULL, 30, 0),
-    (N'cabinOptions', N'F', N'First Class', NULL, 40, 0),
-    (N'fareTypeOptions', N'NRM', N'Normal Fare', NULL, 10, 0),
-    (N'fareTypeOptions', N'CRP', N'Corporate Fare', NULL, 20, 0),
-    (N'fareTypeOptions', N'RTL', N'Retail Fare', NULL, 30, 0),
-    (N'fareTypeOptions', N'ECP', N'ECoupon Fare', NULL, 40, 0),
-    (N'fareTypeOptions', N'SPL', N'Special Fare', NULL, 50, 0),
-    (N'fareTypeOptions', N'SME', N'SME Fare', NULL, 60, 0),
-    (N'fareTypeOptions', N'FLX', N'Flexi Fare', NULL, 70, 0),
-    (N'fareTypeOptions', N'MRN', N'Marine Fare', NULL, 80, 0),
-    (N'fareTypeOptions', N'DEF', N'Defence Fare', NULL, 90, 0),
-    (N'fareTypeOptions', N'RTS', N'Roundtrip Special Fare', NULL, 100, 0),
-    (N'fareTypeOptions', N'SMC', N'SME Corporate/Corp Connect Fare', NULL, 110, 0),
-    (N'fareTypeOptions', N'SMR', N'SME Retail Fare', NULL, 120, 0),
-    (N'fareTypeOptions', N'LAB', N'Labour Fare', NULL, 130, 0),
+    (N'fopOptions', N'2', N'Own Card', NULL, 10, 0),
+    (N'fopOptions', N'3', N'Client Card', NULL, 20, 0),
+    (N'fopOptions', N'1', N'Cash', NULL, 30, 0),
+    (N'cardTypes', N'2', N'Own Card', NULL, 10, 0),
+    (N'cardTypes', N'3', N'Client Card', NULL, 20, 0),
+    (N'cabinOptions', N'E', N'Economy', NULL, 10, 0),
+    (N'cabinOptions', N'PE', N'Premium Economy', NULL, 20, 0),
+    (N'cabinOptions', N'BC', N'Business Class', NULL, 30, 0),
+    (N'cabinOptions', N'FC', N'First Class', NULL, 40, 0),
+    (N'fareTypeOptions', N'NF', N'Normal Fare', NULL, 10, 0),
+    (N'fareTypeOptions', N'CF', N'Corporate Fare', NULL, 20, 0),
+    (N'fareTypeOptions', N'RF', N'Retail Fare', NULL, 30, 0),
+    (N'fareTypeOptions', N'ECF', N'ECoupon Fare', NULL, 40, 0),
+    (N'fareTypeOptions', N'SF', N'Special Fare', NULL, 50, 0),
+    (N'fareTypeOptions', N'SMEF', N'SME Fare', NULL, 60, 0),
+    (N'fareTypeOptions', N'FF', N'Flexi Fare', NULL, 70, 0),
+    (N'fareTypeOptions', N'MF', N'Marine Fare', NULL, 80, 0),
+    (N'fareTypeOptions', N'DF', N'Defence Fare', NULL, 90, 0),
+    (N'fareTypeOptions', N'RTF', N'Roundtrip Special Fare', NULL, 100, 0),
+    (N'fareTypeOptions', N'SCCF', N'SME Corporate/Corp Connect Fare', NULL, 110, 0),
+    (N'fareTypeOptions', N'SMERF', N'SME Retail Fare', NULL, 120, 0),
+    (N'fareTypeOptions', N'LF', N'Labour Fare', NULL, 130, 0),
     (N'fareTypeOptions', N'CFX', N'Corporate Flexi', NULL, 140, 0),
-    (N'fareTypeOptions', N'STU', N'Student Fare', NULL, 150, 0),
-    (N'fareTypeOptions', N'DBS', N'Double Seat', NULL, 160, 0),
-    (N'fareTypeOptions', N'SRC', N'Senior Citizen Fare', NULL, 170, 0),
+    (N'fareTypeOptions', N'STF', N'Student Fare', NULL, 150, 0),
+    (N'fareTypeOptions', N'DS', N'Double Seat', NULL, 160, 0),
+    (N'fareTypeOptions', N'SCF', N'Senior Citizen Fare', NULL, 170, 0),
     (N'dsrStatuses', N'CON', N'Confirmed', NULL, 10, 0),
     (N'dsrStatuses', N'RES', N'Re-Scheduled', N'Reschedule', 20, 0),
     (N'dsrStatuses', N'CAN', N'Normal Cancelled', N'Cancellation', 30, 0),
@@ -1936,11 +1968,423 @@ CREATE OR ALTER VIEW dbo.vw_AuditLogChanges AS
 --   SELECT * FROM dbo.vw_AuditLogChanges WHERE user_name = 'Rahul Mehta' ORDER BY changed_at_ist DESC;
 SELECT a.id AS log_id, a.company_id, a.module, a.document_id, a.document_no,
        a.action, a.source, a.user_id, a.user_name,
-       DATEADD(MINUTE, 330, a.changed_at) AS changed_at_ist,   -- stored in UTC; +5:30 = India time
+       CAST(SWITCHOFFSET(a.changed_at, '+05:30') AS DATETIME2(0)) AS changed_at_ist,   -- stored in UTC; shown in India time
        j.scope, j.line AS passenger, j.field, j.old AS old_value, j.new AS new_value
 FROM dbo.AuditLogs a
 OUTER APPLY OPENJSON(NULLIF(a.changes, '[]')) WITH (
     scope NVARCHAR(40) '$.scope', line NVARCHAR(200) '$.line', field NVARCHAR(100) '$.field',
     old NVARCHAR(MAX) '$.old', new NVARCHAR(MAX) '$.new'
 ) j;
+GO
+
+
+-- Airline ticket Auto Push import (migration 0074) - staging table + run log.
+-- See accounting/ticket_import.py.
+IF OBJECT_ID('dbo.Ticket_Import_Staging', 'U') IS NULL
+CREATE TABLE dbo.Ticket_Import_Staging (
+    staging_id                  BIGINT IDENTITY(1,1) PRIMARY KEY,
+
+    -- Source identity. doc_ref groups the passengers of one invoice;
+    -- source_system + source_record_id (one passenger) is never imported twice.
+    batch_id                    NVARCHAR(50)   NULL,
+    source_system               NVARCHAR(50)   NOT NULL,
+    doc_ref                     NVARCHAR(60)   NOT NULL,
+    source_record_id            NVARCHAR(100)  NOT NULL,
+    received_at                 DATETIME2      NOT NULL CONSTRAINT df_tis_received DEFAULT SYSUTCDATETIME(),
+
+    -- Decides the target: Confirmed -> AL_Tickets, Rescheduled -> Rescheduled_Al_Ticket,
+    -- Cancelled -> Cancellation_AL_Tickets (each + its lines + its Journal Voucher).
+    ticket_status               NVARCHAR(20)   NOT NULL
+        CONSTRAINT ck_tis_ticket_status CHECK (ticket_status IN ('Confirmed', 'Rescheduled', 'Cancelled', 'SSR')),
+    company_id                  INT            NOT NULL,
+    doc_key AS (ticket_status + N'|' + CAST(company_id AS NVARCHAR(10)) + N'|' + source_system + N'|' + doc_ref) PERSISTED,
+
+    /* ---- Header ---- */
+    branch_name                 NVARCHAR(100)  NULL,
+    invoice_number              NVARCHAR(20)   NULL,      -- blank = generated from the Invoice Type's numbering
+    invoice_date                DATE           NULL,
+    invoice_type                NVARCHAR(100)  NULL,
+    booking_mode                NVARCHAR(20)   NULL,
+    booking_type                NVARCHAR(50)   NULL,
+    booking_status              NVARCHAR(20)   NULL,
+    customer_name               NVARCHAR(150)  NULL,
+    supplier_name               NVARCHAR(150)  NULL,
+    travel_type                 NVARCHAR(20)   NULL,
+    user_name                   NVARCHAR(100)  NULL,
+    currency                    NVARCHAR(5)    NULL,
+    roe                         DECIMAL(10,4)  NULL,
+    booking_given_by            NVARCHAR(25)   NULL,
+    booking_reference           NVARCHAR(30)   NULL,      -- S PNR (Cancelled -> cancellation_reference)
+    booking_ref_date            DATE           NULL,      -- (Cancelled -> cancellation_ref_date)
+    airline_pnr                 NVARCHAR(13)   NULL,
+    gds_pnr                     NVARCHAR(13)   NULL,
+    office_id                   NVARCHAR(30)   NULL,
+    payment_mode                NVARCHAR(20)   NULL,
+    payment_gateway_ref         NVARCHAR(60)   NULL,
+    airline_category            NVARCHAR(5)    NULL,
+
+    /* ---- Passenger line ---- */
+    original_ticket_no          NVARCHAR(30)   NULL,      -- Rescheduled / Cancelled: the passenger's current live Ticket No.
+    airline_code                NVARCHAR(200)  NULL,
+    airline_name                NVARCHAR(200)  NULL,
+    line_airline_category       NVARCHAR(5)    NULL,
+    flight_no                   NVARCHAR(200)  NULL,      -- multi-city: comma-joined, same order as sector
+    ticket_no                   NVARCHAR(30)   NULL,
+    passenger_name              NVARCHAR(50)   NULL,
+    pax_type                    NVARCHAR(10)   NULL,
+    sector                      NVARCHAR(200)  NULL,      -- e.g. MAA-DXB,DXB-MAA
+    travel_date                 NVARCHAR(200)  NULL,      -- dd/mm/yyyy, comma-joined per sector
+    cabin                       NVARCHAR(200)  NULL,
+    travel_class                NVARCHAR(200)  NULL,
+    fare_type                   NVARCHAR(300)  NULL,
+    line_supplier_name          NVARCHAR(150)  NULL,
+    line_office_id              NVARCHAR(30)   NULL,
+    fop                         NVARCHAR(20)   NULL,
+    card_number                 NVARCHAR(40)   NULL,
+    line_status                 NVARCHAR(15)   NULL,
+
+    /* ---- Fares ---- */
+    basic_fare                  DECIMAL(14,2)  NOT NULL CONSTRAINT df_tis_basic DEFAULT 0,
+    yq                          DECIMAL(14,2)  NOT NULL CONSTRAINT df_tis_yq DEFAULT 0,
+    yr                          DECIMAL(14,2)  NOT NULL CONSTRAINT df_tis_yr DEFAULT 0,
+    k3_tax                      DECIMAL(14,2)  NOT NULL CONSTRAINT df_tis_k3 DEFAULT 0,
+    tax_others                  DECIMAL(14,2)  NOT NULL CONSTRAINT df_tis_taxo DEFAULT 0,
+    seat                        DECIMAL(14,2)  NOT NULL CONSTRAINT df_tis_seat DEFAULT 0,
+    meal                        DECIMAL(14,2)  NOT NULL CONSTRAINT df_tis_meal DEFAULT 0,
+    baggage                     DECIMAL(14,2)  NOT NULL CONSTRAINT df_tis_bag DEFAULT 0,
+    other_ssr                   DECIMAL(14,2)  NOT NULL CONSTRAINT df_tis_ossr DEFAULT 0,
+
+    /* ---- Customer side ---- */
+    disc_on                     NVARCHAR(20)   NULL,
+    disc_type                   NVARCHAR(12)   NULL,
+    disc_value                  DECIMAL(14,2)  NOT NULL CONSTRAINT df_tis_discv DEFAULT 0,
+    tds_per                     DECIMAL(5,2)   NOT NULL CONSTRAINT df_tis_tds DEFAULT 0,
+    pg_charges                  DECIMAL(14,2)  NOT NULL CONSTRAINT df_tis_pg DEFAULT 0,
+    pg_charges_percentage       DECIMAL(5,2)   NOT NULL CONSTRAINT df_tis_pgp DEFAULT 0,
+    markup                      DECIMAL(14,2)  NOT NULL CONSTRAINT df_tis_mk DEFAULT 0,
+    addl_markup                 DECIMAL(14,2)  NOT NULL CONSTRAINT df_tis_amk DEFAULT 0,
+    ssr_markup                  DECIMAL(14,2)  NOT NULL CONSTRAINT df_tis_smk DEFAULT 0,
+    service_fee                 DECIMAL(14,2)  NOT NULL CONSTRAINT df_tis_sf DEFAULT 0,
+    addl_service_fee            DECIMAL(14,2)  NOT NULL CONSTRAINT df_tis_asf DEFAULT 0,
+    ssr_service_fee             DECIMAL(14,2)  NOT NULL CONSTRAINT df_tis_ssf DEFAULT 0,
+    gst_pct                     DECIMAL(5,2)   NOT NULL CONSTRAINT df_tis_gst DEFAULT 0,
+
+    /* ---- Supplier side ---- */
+    supp_comm_on                NVARCHAR(20)   NULL,
+    supp_comm_type              NVARCHAR(12)   NULL,
+    supp_comm_value             DECIMAL(14,2)  NOT NULL CONSTRAINT df_tis_scv DEFAULT 0,
+    supp_tds_per                DECIMAL(5,2)   NOT NULL CONSTRAINT df_tis_stds DEFAULT 0,
+    supp_markup                 DECIMAL(14,2)  NOT NULL CONSTRAINT df_tis_smku DEFAULT 0,
+    supp_addl_markup            DECIMAL(14,2)  NOT NULL CONSTRAINT df_tis_samk DEFAULT 0,
+    supp_ssr_markup             DECIMAL(14,2)  NOT NULL CONSTRAINT df_tis_ssmk DEFAULT 0,
+    supp_service_fee            DECIMAL(14,2)  NOT NULL CONSTRAINT df_tis_ssfe DEFAULT 0,
+    supp_addl_service_fee       DECIMAL(14,2)  NOT NULL CONSTRAINT df_tis_sasf DEFAULT 0,
+    supp_ssr_service_fee        DECIMAL(14,2)  NOT NULL CONSTRAINT df_tis_sssf DEFAULT 0,
+    supp_gst_pct                DECIMAL(5,2)   NOT NULL CONSTRAINT df_tis_sgst DEFAULT 0,
+
+    /* ---- Rescheduled / Cancelled ---- */
+    agent_penalty               DECIMAL(14,2)  NOT NULL CONSTRAINT df_tis_agp DEFAULT 0,
+    reschedule_penalty          DECIMAL(14,2)  NOT NULL CONSTRAINT df_tis_rsp DEFAULT 0,
+    supplier_penalty            DECIMAL(14,2)  NOT NULL CONSTRAINT df_tis_spp DEFAULT 0,
+    cancellation_penalty        DECIMAL(14,2)  NOT NULL CONSTRAINT df_tis_cxp DEFAULT 0,
+    cust_markup_reversal        DECIMAL(14,2)  NOT NULL CONSTRAINT df_tis_cmr DEFAULT 0,
+    cust_addl_markup_reversal   DECIMAL(14,2)  NOT NULL CONSTRAINT df_tis_camr DEFAULT 0,
+    cust_ssr_markup_reversal    DECIMAL(14,2)  NOT NULL CONSTRAINT df_tis_csmr DEFAULT 0,
+    supp_markup_reversal        DECIMAL(14,2)  NOT NULL CONSTRAINT df_tis_smr DEFAULT 0,
+    supp_addl_markup_reversal   DECIMAL(14,2)  NOT NULL CONSTRAINT df_tis_samr DEFAULT 0,
+    supp_ssr_markup_reversal    DECIMAL(14,2)  NOT NULL CONSTRAINT df_tis_ssmr DEFAULT 0,
+    tds_amount_override         DECIMAL(14,2)  NULL,
+    supp_tds_amount_override    DECIMAL(14,2)  NULL,
+
+    total_billed                DECIMAL(14,2)  NULL,      -- as sent by the source
+    raw_payload                 NVARCHAR(MAX)  NULL,      -- {"header": {...}, "passenger": {...}} exactly as received
+
+    /* ---- Processing ---- */
+    process_status              NVARCHAR(20)   NOT NULL CONSTRAINT df_tis_pstatus DEFAULT 'Pending'
+        CONSTRAINT ck_tis_process_status CHECK (process_status IN ('Pending', 'Processing', 'Imported', 'Error', 'Skipped')),
+    retry_count                 INT            NOT NULL CONSTRAINT df_tis_retry DEFAULT 0,
+    error_message               NVARCHAR(1000) NULL,
+    run_id                      BIGINT         NULL,
+    picked_at                   DATETIME2      NULL,
+    processed_at                DATETIME2      NULL,
+    target_header_id            INT            NULL,      -- AL_Tickets.id / Rescheduled_Al_Ticket.id / Cancellation_AL_Tickets.id
+    saved_invoice_number        NVARCHAR(20)   NULL,      -- the Invoice / Credit Note number it was saved under
+    saved_voucher_no            NVARCHAR(30)   NULL,      -- the Journal Voucher posted with it
+
+    CONSTRAINT uq_tis_source_record UNIQUE (source_system, source_record_id)
+);
+GO
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'ix_tis_doc_key' AND object_id = OBJECT_ID('dbo.Ticket_Import_Staging'))
+    CREATE INDEX ix_tis_doc_key ON dbo.Ticket_Import_Staging (doc_key) INCLUDE (process_status);
+GO
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'ix_tis_pending' AND object_id = OBJECT_ID('dbo.Ticket_Import_Staging'))
+    CREATE INDEX ix_tis_pending ON dbo.Ticket_Import_Staging (process_status, company_id, staging_id);
+GO
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'ix_tis_ticket_no' AND object_id = OBJECT_ID('dbo.Ticket_Import_Staging'))
+    CREATE INDEX ix_tis_ticket_no ON dbo.Ticket_Import_Staging (company_id, ticket_no);
+GO
+IF OBJECT_ID('dbo.Ticket_Import_Run_Log', 'U') IS NULL
+CREATE TABLE dbo.Ticket_Import_Run_Log (
+    run_id          BIGINT IDENTITY(1,1) PRIMARY KEY,
+    company_id      INT            NULL,
+    started_at      DATETIME2      NOT NULL CONSTRAINT df_tirl_started DEFAULT SYSUTCDATETIME(),
+    finished_at     DATETIME2      NULL,
+    rows_picked     INT            NOT NULL CONSTRAINT df_tirl_picked DEFAULT 0,
+    docs_imported   INT            NOT NULL CONSTRAINT df_tirl_imported DEFAULT 0,
+    docs_failed     INT            NOT NULL CONSTRAINT df_tirl_failed DEFAULT 0,
+    message         NVARCHAR(1000) NULL
+);
+GO
+
+-- Auto Push validation (migration 0078): error log + the Invoice Type picked per Booking Status.
+IF OBJECT_ID('dbo.Ticket_Import_Error_Log', 'U') IS NULL
+CREATE TABLE dbo.Ticket_Import_Error_Log (
+    error_log_id        BIGINT IDENTITY(1,1) PRIMARY KEY,
+    logged_at           DATETIME2      NOT NULL CONSTRAINT df_tiel_logged DEFAULT SYSUTCDATETIME(),
+    company_id          INT            NULL,
+    source_system       NVARCHAR(50)   NULL,
+    batch_id            NVARCHAR(50)   NULL,
+    doc_key             NVARCHAR(200)  NULL,      -- Ticket_Import_Staging.doc_key when it could be worked out
+    booking_status      NVARCHAR(20)   NULL,      -- as received (C / R / X)
+    booking_reference   NVARCHAR(60)   NULL,
+    parent_pnr          NVARCHAR(60)   NULL,
+    passenger_no        INT            NULL,      -- 1-based position in passengers[]; NULL = invoice level
+    ticket_no           NVARCHAR(60)   NULL,
+    passenger_name      NVARCHAR(100)  NULL,
+    field_name          NVARCHAR(100)  NULL,      -- API parameter, e.g. card_number
+    field_label         NVARCHAR(100)  NULL,      -- screen name, e.g. Card Number
+    received_value      NVARCHAR(500)  NULL,
+    expected_value      NVARCHAR(500)  NULL,
+    error_type          NVARCHAR(30)   NOT NULL,  -- Missing / Invalid Format / Not Mapped / Mismatch / Not Allowed / Duplicate / Unknown Field / Save Failed
+    severity            NVARCHAR(10)   NOT NULL CONSTRAINT df_tiel_severity DEFAULT 'Error',   -- Error / Warning
+    stage               NVARCHAR(20)   NOT NULL,  -- Validation (push rejected) / Import (save refused)
+    error_message       NVARCHAR(1000) NOT NULL,
+    is_resolved         BIT            NOT NULL CONSTRAINT df_tiel_resolved DEFAULT 0,
+    resolved_at         DATETIME2      NULL,
+    resolved_note       NVARCHAR(200)  NULL
+);
+GO
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'ix_tiel_company_logged')
+    CREATE INDEX ix_tiel_company_logged ON dbo.Ticket_Import_Error_Log (company_id, logged_at DESC);
+GO
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'ix_tiel_doc_key')
+    CREATE INDEX ix_tiel_doc_key ON dbo.Ticket_Import_Error_Log (doc_key) WHERE doc_key IS NOT NULL;
+GO
+IF OBJECT_ID('dbo.Ticket_Import_Invoice_Type', 'U') IS NULL
+CREATE TABLE dbo.Ticket_Import_Invoice_Type (
+    id                  INT IDENTITY(1,1) PRIMARY KEY,
+    company_id          INT            NOT NULL,
+    ticket_status       NVARCHAR(20)   NOT NULL
+        CONSTRAINT ck_tiit_ticket_status CHECK (ticket_status IN ('Confirmed', 'Rescheduled', 'Cancelled', 'SSR')),
+    voucher_type_id     INT            NOT NULL
+        CONSTRAINT fk_tiit_voucher_type REFERENCES dbo.VoucherType (id) ON DELETE CASCADE,
+    updated_at          DATETIME2      NOT NULL CONSTRAINT df_tiit_updated DEFAULT SYSUTCDATETIME(),
+    CONSTRAINT uq_tiit_company_status UNIQUE (company_id, ticket_status)
+);
+GO
+
+-- Booking Status SSR (migration 0089) on databases created before it.
+IF EXISTS (SELECT 1 FROM sys.check_constraints WHERE name = 'ck_tis_ticket_status'
+           AND definition NOT LIKE '%SSR%')
+BEGIN
+    ALTER TABLE dbo.Ticket_Import_Staging DROP CONSTRAINT ck_tis_ticket_status;
+    ALTER TABLE dbo.Ticket_Import_Staging ADD CONSTRAINT ck_tis_ticket_status
+        CHECK (ticket_status IN ('Confirmed', 'Rescheduled', 'Cancelled', 'SSR'));
+END
+IF EXISTS (SELECT 1 FROM sys.check_constraints WHERE name = 'ck_tiit_ticket_status'
+           AND definition NOT LIKE '%SSR%')
+BEGIN
+    ALTER TABLE dbo.Ticket_Import_Invoice_Type DROP CONSTRAINT ck_tiit_ticket_status;
+    ALTER TABLE dbo.Ticket_Import_Invoice_Type ADD CONSTRAINT ck_tiit_ticket_status
+        CHECK (ticket_status IN ('Confirmed', 'Rescheduled', 'Cancelled', 'SSR'));
+END
+GO
+
+-- Ledger Mapping pins (migration 0079): "Retain old ledgers" on a back-dated mapping.
+IF OBJECT_ID('dbo.MasterMappingPin', 'U') IS NULL
+CREATE TABLE dbo.MasterMappingPin (
+    id                  INT IDENTITY(1,1) PRIMARY KEY,
+    company_id          INT            NOT NULL,
+    product_type        NVARCHAR(20)   NOT NULL,
+    field_name          NVARCHAR(100)  NOT NULL,
+    doc_type            NVARCHAR(20)   NOT NULL
+        CONSTRAINT ck_mmp_doc_type CHECK (doc_type IN ('ticket', 'reschedule', 'cancellation', 'ssr', 'misc')),
+    doc_id              INT            NOT NULL,
+    doc_date            DATE           NOT NULL,
+    ledger_id           INT            NOT NULL CONSTRAINT fk_mmp_ledger REFERENCES dbo.Ledgers (id),
+    ledger_name         NVARCHAR(200)  NULL,
+    masters_category    NVARCHAR(40)   NULL,
+    effective_from      DATE           NULL,      -- Effective From of the mapping the document was pinned to
+    created_at          DATETIME2      NOT NULL CONSTRAINT df_mmp_created DEFAULT SYSUTCDATETIME(),
+    CONSTRAINT uq_mmp_doc_field UNIQUE (company_id, product_type, field_name, doc_type, doc_id)
+);
+GO
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'ix_mmp_doc')
+    CREATE INDEX ix_mmp_doc ON dbo.MasterMappingPin (doc_type, doc_id);
+GO
+
+-- Auto Push GST amounts (migration 0080): the Agent's own GST, used as sent.
+IF OBJECT_ID('dbo.Ticket_Line_Gst_Amount', 'U') IS NULL
+CREATE TABLE dbo.Ticket_Line_Gst_Amount (
+    line_type                   NVARCHAR(20)   NOT NULL
+        CONSTRAINT ck_tlga_line_type CHECK (line_type IN ('ticket', 'reschedule', 'cancellation')),
+    doc_id                      INT            NOT NULL,      -- AL_Tickets / Rescheduled_Al_Ticket / Cancellation_AL_Tickets id
+    ticket_no                   NVARCHAR(30)   NOT NULL,      -- the line's own Ticket No.
+    service_fee_gst             DECIMAL(14,2)  NULL,          -- NULL = worked out from Ledger Mapping GST %
+    addl_service_fee_gst        DECIMAL(14,2)  NULL,
+    ssr_service_fee_gst         DECIMAL(14,2)  NULL,
+    supp_service_fee_gst        DECIMAL(14,2)  NULL,
+    supp_addl_service_fee_gst   DECIMAL(14,2)  NULL,
+    supp_ssr_service_fee_gst    DECIMAL(14,2)  NULL,
+    source                      NVARCHAR(30)   NOT NULL CONSTRAINT df_tlga_source DEFAULT 'Auto Push',
+    created_at                  DATETIME2      NOT NULL CONSTRAINT df_tlga_created DEFAULT SYSUTCDATETIME(),
+    CONSTRAINT pk_tlga PRIMARY KEY (line_type, doc_id, ticket_no)
+);
+GO
+
+-- Direct Reschedule / Direct Cancellation (migration 0081): a Reschedule or
+-- Cancellation whose booking was never entered in this software has no
+-- original_ticket_id / original_ticket_line_id - only its Parent PNR.
+-- Each column: plain indexes and FK dropped and put back around ALTER COLUMN;
+-- the cancellation line's UNIQUE becomes a filtered unique index.
+DECLARE @t SYSNAME, @c SYSNAME, @drop NVARCHAR(MAX), @create NVARCHAR(MAX);
+DECLARE cols CURSOR LOCAL FAST_FORWARD FOR
+    SELECT t, c FROM (VALUES
+        ('Rescheduled_Al_Ticket', 'original_ticket_id'),
+        ('Rescheduled_Al_TicketLines', 'original_ticket_line_id'),
+        ('Cancellation_AL_Tickets', 'original_ticket_id'),
+        ('Cancellation_Al_TicketLines', 'original_ticket_line_id')) v (t, c);
+OPEN cols;
+FETCH NEXT FROM cols INTO @t, @c;
+WHILE @@FETCH_STATUS = 0
+BEGIN
+    IF EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.' + @t) AND name = @c AND is_nullable = 0)
+    BEGIN
+        SELECT @drop = N'', @create = N'';
+        SELECT @drop += CASE WHEN i.is_unique_constraint = 1
+                             THEN N'ALTER TABLE dbo.' + QUOTENAME(@t) + N' DROP CONSTRAINT ' + QUOTENAME(i.name) + N'; '
+                             ELSE N'DROP INDEX ' + QUOTENAME(i.name) + N' ON dbo.' + QUOTENAME(@t) + N'; ' END,
+               @create += CASE WHEN i.is_unique = 1 THEN N''
+                               ELSE N'CREATE INDEX ' + QUOTENAME(i.name) + N' ON dbo.' + QUOTENAME(@t) + N' (' + QUOTENAME(@c) + N'); ' END
+        FROM sys.indexes i
+        INNER JOIN sys.index_columns ic ON ic.object_id = i.object_id AND ic.index_id = i.index_id
+        INNER JOIN sys.columns cc ON cc.object_id = ic.object_id AND cc.column_id = ic.column_id
+        WHERE i.object_id = OBJECT_ID('dbo.' + @t) AND cc.name = @c AND i.is_primary_key = 0;
+        SELECT @drop += N'ALTER TABLE dbo.' + QUOTENAME(@t) + N' DROP CONSTRAINT ' + QUOTENAME(fk.name) + N'; ',
+               @create += N'ALTER TABLE dbo.' + QUOTENAME(@t) + N' ADD CONSTRAINT ' + QUOTENAME(fk.name) + N' FOREIGN KEY ('
+                          + QUOTENAME(@c) + N') REFERENCES dbo.' + QUOTENAME(OBJECT_NAME(fk.referenced_object_id)) + N' (id); '
+        FROM sys.foreign_keys fk
+        INNER JOIN sys.foreign_key_columns fc ON fc.constraint_object_id = fk.object_id
+        INNER JOIN sys.columns cc ON cc.object_id = fc.parent_object_id AND cc.column_id = fc.parent_column_id
+        WHERE fk.parent_object_id = OBJECT_ID('dbo.' + @t) AND cc.name = @c;
+        EXEC (@drop);
+        EXEC (N'ALTER TABLE dbo.' + @t + N' ALTER COLUMN ' + @c + N' INT NULL;');
+        EXEC (@create);
+    END
+    FETCH NEXT FROM cols INTO @t, @c;
+END
+CLOSE cols;
+DEALLOCATE cols;
+GO
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID('dbo.Cancellation_Al_TicketLines') AND name = 'uq_cancel_line_original_line')
+    CREATE UNIQUE INDEX uq_cancel_line_original_line ON dbo.Cancellation_Al_TicketLines (original_ticket_line_id)
+        WHERE original_ticket_line_id IS NOT NULL;
+IF COL_LENGTH('dbo.Cancellation_AL_Tickets', 'parent_pnr') IS NULL
+    ALTER TABLE dbo.Cancellation_AL_Tickets ADD parent_pnr NVARCHAR(30) NULL;
+IF COL_LENGTH('dbo.Cancellation_Al_TicketLines', 'reschedule_line_id') IS NULL
+    ALTER TABLE dbo.Cancellation_Al_TicketLines ADD reschedule_line_id INT NULL;
+GO
+
+-- Ticket Entry Attributes popup (migration 0083): Field / Value pairs saved with a
+-- Booking / Reschedule / Cancellation under its Invoice Number.
+IF OBJECT_ID('dbo.Ticket_Document_Attribute', 'U') IS NULL
+CREATE TABLE dbo.Ticket_Document_Attribute (
+    attribute_id    INT IDENTITY(1,1) NOT NULL CONSTRAINT pk_tda PRIMARY KEY,
+    company_id      INT            NOT NULL,
+    doc_type        NVARCHAR(20)   NOT NULL
+        CONSTRAINT ck_tda_doc_type CHECK (doc_type IN ('ticket', 'reschedule', 'cancellation')),
+    doc_id          INT            NOT NULL,      -- AL_Tickets / Rescheduled_Al_Ticket / Cancellation_AL_Tickets id
+    invoice_number  NVARCHAR(20)   NULL,          -- the document's Invoice Number when saved
+    sort_order      INT            NOT NULL,      -- row # in the popup
+    field_name      NVARCHAR(100)  NOT NULL,
+    field_value     NVARCHAR(500)  NULL,
+    created_at      DATETIME2      NOT NULL CONSTRAINT df_tda_created DEFAULT SYSUTCDATETIME()
+);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'ix_tda_doc')
+    CREATE INDEX ix_tda_doc ON dbo.Ticket_Document_Attribute (doc_type, doc_id);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'ix_tda_invoice')
+    CREATE INDEX ix_tda_invoice ON dbo.Ticket_Document_Attribute (company_id, invoice_number);
+GO
+
+-- PG Master back-dated change, "Retain old ledgers" (migration 0084): a saved
+-- document kept on the PG settings it used.
+IF OBJECT_ID('dbo.PGMasterPin', 'U') IS NULL
+CREATE TABLE dbo.PGMasterPin (
+    pin_id                          INT IDENTITY(1,1) NOT NULL CONSTRAINT pk_pgmp PRIMARY KEY,
+    company_id                      INT            NOT NULL,
+    gateway_name                    NVARCHAR(100)  NOT NULL,
+    doc_type                        NVARCHAR(20)   NOT NULL
+        CONSTRAINT ck_pgmp_doc_type CHECK (doc_type IN ('ticket', 'reschedule', 'cancellation')),
+    doc_id                          INT            NOT NULL,      -- AL_Tickets / Rescheduled_Al_Ticket / Cancellation_AL_Tickets id
+    doc_date                        DATE           NULL,
+    payment_master_ledger_id        INT            NULL,
+    payment_master_ledger_name      NVARCHAR(200)  NULL,
+    pg_charges_master_ledger_id     INT            NULL,
+    pg_charges_master_ledger_name   NVARCHAR(200)  NULL,
+    pg_charges_percentage           DECIMAL(5,2)   NULL,
+    effective_from                  DATE           NULL,          -- Effective From of the snapshot the document was pinned to
+    created_at                      DATETIME2      NOT NULL CONSTRAINT df_pgmp_created DEFAULT SYSUTCDATETIME(),
+    CONSTRAINT uq_pgmp_doc UNIQUE (company_id, doc_type, doc_id)
+);
+GO
+
+-- Automated Database Scheduler (migration 0085): one row per run that fetched
+-- rows from the Airline_Agent database (agent_db_scheduler.py).
+IF OBJECT_ID('dbo.Agent_DB_Scheduler_Log', 'U') IS NULL
+CREATE TABLE dbo.Agent_DB_Scheduler_Log (
+    log_id              BIGINT IDENTITY(1,1) NOT NULL CONSTRAINT pk_adsl PRIMARY KEY,
+    run_started_at      DATETIME2      NOT NULL,      -- UTC; listed in IST
+    run_finished_at     DATETIME2      NULL,
+    source_database     NVARCHAR(128)  NULL,          -- AGENT_DB_NAME  (.env)
+    source_table        NVARCHAR(128)  NULL,          -- AGENT_DB_TABLE (.env)
+    records_fetched     INT            NOT NULL,      -- passenger rows picked up
+    invoices_fetched    INT            NOT NULL,      -- invoices they make up
+    imported_count      INT            NOT NULL CONSTRAINT df_adsl_imported DEFAULT 0,   -- rows saved as invoices
+    pending_count       INT            NOT NULL CONSTRAINT df_adsl_pending DEFAULT 0,    -- rows queued (waiting for their parent ticket)
+    error_count         INT            NOT NULL CONSTRAINT df_adsl_error DEFAULT 0,      -- rows Rejected / Duplicate / Error
+    message             NVARCHAR(1000) NULL
+);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'ix_adsl_started')
+    CREATE INDEX ix_adsl_started ON dbo.Agent_DB_Scheduler_Log (run_started_at);
+GO
+
+-- Automated Database Scheduler (migration 0086): one row per Agent row
+-- (passenger) picked up - its status, invoice and error. The Agent's own
+-- table (Airline_Agent) holds only the Agent's data.
+IF OBJECT_ID('dbo.Agent_DB_Ticket_Log', 'U') IS NULL
+CREATE TABLE dbo.Agent_DB_Ticket_Log (
+    ticket_log_id       BIGINT IDENTITY(1,1) NOT NULL CONSTRAINT pk_adtl PRIMARY KEY,
+    source_database     NVARCHAR(128)  NOT NULL,      -- AGENT_DB_NAME  (.env)
+    source_table        NVARCHAR(128)  NOT NULL,      -- AGENT_DB_TABLE (.env)
+    agent_row_id        BIGINT         NOT NULL,      -- the Agent row (one passenger)
+    scheduler_log_id    BIGINT         NULL,          -- Agent_DB_Scheduler_Log run that picked it up
+    company_id          INT            NULL,
+    booking_status      NVARCHAR(100)  NULL,          -- as the Agent sent it (C / R / X)
+    booking_reference   NVARCHAR(100)  NULL,
+    ticket_no           NVARCHAR(100)  NULL,
+    pax_name            NVARCHAR(100)  NULL,
+    process_status      NVARCHAR(20)   NOT NULL
+        CONSTRAINT ck_adtl_status CHECK (process_status IN ('Processing', 'Imported', 'Pending', 'Rejected', 'Duplicate', 'Error')),
+    processing_at       DATETIME2      NOT NULL CONSTRAINT df_adtl_processing DEFAULT SYSUTCDATETIME(),   -- picked up (UTC)
+    processed_at        DATETIME2      NULL,          -- result written (UTC)
+    invoice_number      NVARCHAR(30)   NULL,
+    voucher_no          NVARCHAR(30)   NULL,
+    import_doc_key      NVARCHAR(200)  NULL,          -- Ticket_Import_Staging.doc_key
+    error_message       NVARCHAR(2000) NULL,
+    CONSTRAINT uq_adtl_agent_row UNIQUE (source_database, source_table, agent_row_id)
+);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'ix_adtl_status')
+    CREATE INDEX ix_adtl_status ON dbo.Agent_DB_Ticket_Log (process_status, import_doc_key);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'ix_adtl_run')
+    CREATE INDEX ix_adtl_run ON dbo.Agent_DB_Ticket_Log (scheduler_log_id);
 GO

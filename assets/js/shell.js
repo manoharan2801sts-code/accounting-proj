@@ -246,12 +246,9 @@
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.status === 401) {
-        if (!sessionStorage.getItem(PERMS_KEY) && !Store.getUser()) {
-          Store.clear();
-          try { sessionStorage.removeItem(PERMS_KEY); } catch (_) {}
-          window.location.href = "index.html";
-          return null;
-        }
+        Store.clear();
+        try { sessionStorage.removeItem(PERMS_KEY); } catch (_) {}
+        window.location.href = "index.html";
         return null;
       }
       if (res.ok) {
@@ -374,15 +371,18 @@
   // supplier-master's Edit also needs add (it re-creates the rule).
   PAGE_PERMISSION_UI["supplier-master.html"].add.push(".sm-list-edit-btn");
 
-  let pagePerm = { view: true, add: true, edit: true, delete: true };
+  let pagePerm = { view: true, add: true, edit: true, delete: true, print: true, export: true };
   let pageRule = null;
+  // Print / Export Excel buttons hidden when the menu's flag is off.
+  const PRINT_BUTTONS = ['[onclick="window.print()"]', "#po-print", "#print-btn", "#ssr-print-btn"];
+  const EXPORT_BUTTONS = ['[onclick="exportCSV()"]', "#po-export"];
   let lockedSelectors = [];
   let blockedTriggers = [];
 
   function permFor(key) {
-    if (!currentPerms || currentPerms.is_super_admin) return { view: true, add: true, edit: true, delete: true };
+    if (!currentPerms || currentPerms.is_super_admin) return { view: true, add: true, edit: true, delete: true, print: true, export: true };
     const m = currentPerms.menus[key] || {};
-    return { view: !!m.view, add: !!m.add, edit: !!m.edit, delete: !!m.delete };
+    return { view: !!m.view, add: !!m.add, edit: !!m.edit, delete: !!m.delete, print: !!m.print, export: !!m.export };
   }
 
   function applyPagePermissions(activeKey) {
@@ -403,6 +403,9 @@
       if (pageRule.lock && !canSaveHere) lockedSelectors = pageRule.lock.slice();
       if (!p.edit) blockedTriggers = (pageRule.editTriggers || []).slice();
     }
+    // Print / Export Excel flags - the same buttons on every page.
+    if (!pagePerm.print) hide.push(...PRINT_BUTTONS);
+    if (!pagePerm.export) hide.push(...EXPORT_BUTTONS);
     let style = document.getElementById("perm-ui-style");
     if (!style) {
       style = document.createElement("style");
@@ -456,6 +459,8 @@
   });
   document.addEventListener("keydown", (e) => {
     if (isLockedField(e.target) && e.key !== "Tab" && e.key !== "Escape") e.preventDefault();
+    // Ctrl+P blocked too when the menu has no Print access.
+    if ((e.ctrlKey || e.metaKey) && (e.key === "p" || e.key === "P") && pagePerm && !pagePerm.print) e.preventDefault();
   }, true);
   ["click", "dblclick"].forEach((evt) => {
     document.addEventListener(evt, (e) => {
@@ -768,7 +773,9 @@
       // on top of the newly routed page.
       document.querySelectorAll(".dom-modal-backdrop.open").forEach((m) => m.classList.remove("open"));
 
-      const res = await fetch(url);
+      // no-cache: always revalidate the page HTML, so a cached old copy never
+      // pairs with newer page JS (elements missing -> "Cannot set properties of null").
+      const res = await fetch(url, { cache: "no-cache" });
       if (!res.ok) {
         window.location.href = url;
         return;

@@ -16,6 +16,11 @@
      the browser's own scrollbar can never appear, regardless of content.
      The sidebar keeps its own internal scroll (unaffected, unchanged). */
   html, body { height: 100%; overflow: hidden; margin: 0; }
+  /* Customer Name fills from the Agent ID picked - read-only, same look as the other auto-filled fields. */
+  #customer[readonly] {
+    background: #F1F5F9; color: #475569; font-weight: 600; border-color: #CBD5E1;
+    cursor: default; pointer-events: none;
+  }
 
   .dom-addr-view-btn { width: 20px; height: 22px; padding: 0; font-size: 11px; line-height: 1; border: 1px solid #CBD5E1; background: #F1F5F9; cursor: pointer; flex-shrink: 0; }
   .dom-eye-btn {
@@ -173,15 +178,15 @@
               <label class="dom-label">Booking Status<span class="dom-req">*</span></label>
               <select class="dom-select" id="booking_status" required></select>
             </div>
+            <!-- The customer is picked by Agent ID; Customer Name fills from it (read-only). -->
             <div class="dom-field">
-              <label class="dom-label">Customer Name<span class="dom-req">*</span></label>
-              <input class="dom-input" id="customer" list="customer-options" placeholder="Type to search…" autocomplete="off" required />
+              <label class="dom-label">Agent ID<span class="dom-req">*</span></label>
+              <input class="dom-input" id="customer_agent_id" list="customer-options" placeholder="Type to search…" autocomplete="off" required />
               <datalist id="customer-options"></datalist>
-              <div class="field-hint" id="customer_hint" style="display:none;"></div>
             </div>
             <div class="dom-field">
-              <label class="dom-label">Agent ID</label>
-              <div class="dom-input-readonly" id="customer_agent_id">—</div>
+              <label class="dom-label">Customer Name</label>
+              <input class="dom-input" id="customer" placeholder="—" readonly tabindex="-1" />
             </div>
             <div class="dom-field field-address">
               <label class="dom-label">Customer Address</label>
@@ -380,6 +385,7 @@
         <a href="ticket-entry.html" class="dom-nav-btn" id="cancel-link">Discard</a>
         <button type="button" class="dom-nav-btn" id="edit-ticket-btn" style="display:none;" title="Edit this saved ticket">Edit</button>
         <button type="button" class="dom-nav-btn btn-primary" id="jv-btn" style="font-weight:700; min-width:54px;" title="View Journal Voucher (J.V)">J.V</button>
+        <button type="button" class="dom-nav-btn" id="attributes-btn" title="Attributes of this ticket">Attributes</button>
         <button type="button" class="dom-nav-btn" id="print-btn" style="display:none;" title="Print the Tax Invoice / Credit Note">Print</button>
         <a href="dashboard.html" class="dom-nav-btn btn-danger" id="exit-btn">Exit</a>
       </div>
@@ -1112,6 +1118,47 @@
   </div>
 </div>
 
+<!-- Attributes Modal - extra Field / Value pairs for the Booking, Reschedule
+     and Cancellation (same size as the J.V modal). UI only for now - nothing
+     is saved yet. "+" adds another Field / Value row at the bottom. -->
+<div class="dom-modal-backdrop spa-extra-content" id="attributes-modal">
+  <div class="dom-modal-window" style="max-width: 760px; width: 95%; max-height: 82vh;">
+    <div class="dom-modal-titlebar">
+      <div style="font-weight:700; padding-left:10px;">Attributes</div>
+      <button type="button" class="dom-titlebar-btn btn-close" id="attributes-close-x-btn" title="Close">&times;</button>
+    </div>
+
+    <!-- Fixed size: room for 6 rows (header 26px + 6 x 35px rows); a 7th row
+         onwards scrolls inside the table, the header stays put. -->
+    <div class="dom-modal-body" style="display:block; padding:12px;">
+      <div style="border:1px solid var(--color-border, #CBD5E1); border-radius:3px; height:238px; overflow-y:auto;">
+        <table style="width:100%; border-collapse:collapse; font-size:11.5px;">
+          <thead>
+            <tr style="background:#3B6DB5; color:#FFFFFF; font-weight:700; text-align:left; height:26px;">
+              <th style="padding:4px 8px; width:36px; text-align:center; position:sticky; top:0; z-index:1; background:#3B6DB5;">#</th>
+              <th style="padding:4px 8px; position:sticky; top:0; z-index:1; background:#3B6DB5;">Field</th>
+              <th style="padding:4px 8px; position:sticky; top:0; z-index:1; background:#3B6DB5;">Value</th>
+              <th style="padding:4px 8px; width:36px; text-align:center; position:sticky; top:0; z-index:1; background:#3B6DB5;">
+                <button type="button" id="attributes-add-btn" title="Add another Field / Value"
+                        style="background:#FFFFFF; color:#3B6DB5; border:none; border-radius:3px; width:22px; height:20px; font-weight:800; font-size:14px; line-height:1; cursor:pointer;">+</button>
+              </th>
+            </tr>
+          </thead>
+          <tbody id="attributes-table-body">
+            <!-- Rows added by addAttributeRow() in page-ticket-entry.js -->
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="dom-modal-footer" style="display:flex; justify-content:flex-end; align-items:center;">
+      <div style="display:flex; gap:6px;">
+        <button type="button" class="dom-nav-btn btn-primary" id="attributes-ok-btn" style="font-weight:700;">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- Find Ticket Modal -->
 <div class="dom-modal-backdrop spa-extra-content" id="find-modal">
   <div class="dom-modal-window" style="max-width: 720px; width: 95%; max-height: 90vh;">
@@ -1481,13 +1528,13 @@
   </div>
 </div>
 
-<script src="assets/js/hardcode.js?v=10"></script>
+<script src="assets/js/hardcode.js?v=12"></script>
 <script src="assets/js/mock-data.js"></script>
 <script src="assets/js/loader.js?v=5"></script>
-<script src="assets/js/api.js?v=12"></script>
+<script src="assets/js/api.js?v=5"></script>
 <script src="assets/js/util.js?v=6"></script>
-<script src="assets/js/shell.js?v=46"></script>
+<script src="assets/js/shell.js?v=48"></script>
 <script src="assets/js/entry-common.js"></script>
 <script src="assets/js/invoice-templates.js?v=22"></script>
-<script src="assets/js/page-ticket-entry.js?v=171"></script>
+<script src="assets/js/page-ticket-entry.js?v=176"></script>
 </body></html>

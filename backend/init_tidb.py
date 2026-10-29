@@ -166,7 +166,21 @@ def main():
                 print(f"\n[WARNING] Statement {i} failed: {e}")
                 print(f"SQL: {stmt[:120]}...")
 
-    print(f"\n[OK] Executed {success_count} statements successfully!")
+    print(f"\n[OK] Executed {success_count} statements successfully for {target_db}!")
+
+    # Check and initialize Airline_Agent database
+    airline_sql_file = BASE_DIR / "airline_agent_mysql.sql"
+    if airline_sql_file.exists():
+        print("\nInitializing Airline_Agent database & Agent_ticket_data...")
+        with open(airline_sql_file, "r", encoding="utf-8") as af:
+            a_stmts = split_sql_statements(af.read())
+        with conn.cursor() as cursor:
+            for s in a_stmts:
+                try:
+                    cursor.execute(s)
+                except Exception as e:
+                    pass
+        print("[OK] Airline_Agent database and table initialized successfully!")
 
     # Verification queries
     print("\nVerifying database tables & seed data:")
@@ -175,8 +189,10 @@ def main():
         "Ledger_Groups",
         "Ledgers",
         "MasterMapping",
+        "MasterMappingPin",
         "FOPMaster",
         "PGMaster",
+        "PGMasterPin",
         "SupplierCommissionRules",
         "JournalVoucher",
         "Vouchers",
@@ -189,13 +205,19 @@ def main():
         "SSR_AL_Tickets",
         "SSR_AL_TicketLines",
         "Misc_Transactions",
-        "FOPMasterHistory",
-        "MasterMappingHistory",
-        "PGMasterHistory",
+        "AirlineDropdownValues",
+        "AuditLogs",
+        "Ticket_Line_Gst_Amount",
+        "Ticket_Document_Attribute",
+        "Ticket_Import_Staging",
+        "Ticket_Import_Error_Log",
+        "Ticket_Import_Invoice_Type",
+        "Ticket_Import_Run_Log",
+        "Agent_DB_Scheduler_Log",
+        "Agent_DB_Ticket_Log",
+        "AppUsers",
         "MenuMaster",
         "UserMenuAccess",
-        "AppUsers",
-        "django_migrations",
     ]
 
     with conn.cursor() as cursor:
@@ -215,6 +237,16 @@ def main():
             except Exception as e:
                 print(f"{tbl:<30} | {'Not Found':>10}")
         print("-" * 50)
+
+        # Also check Airline_Agent
+        try:
+            cursor.execute("USE `Airline_Agent`;")
+            cursor.execute("SELECT COUNT(*) FROM `Agent_ticket_data`;")
+            cnt = cursor.fetchone()[0]
+            print(f"{'Airline_Agent.Agent_ticket_data':<30} | {cnt:>10}")
+            print("-" * 50)
+        except Exception:
+            pass
 
     conn.close()
     print("\n" + "=" * 70)

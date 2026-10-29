@@ -1132,7 +1132,9 @@ CREATE OR ALTER PROCEDURE dbo.sp_PGMaster
     @PgChargesPercentage                 DECIMAL(5,2)   = NULL,
     @PgChargesPercentageEffectiveFrom    DATE           = NULL,
     @IsActive                            BIT            = NULL,
-    @AsOfDate                            DATE           = NULL
+    @AsOfDate                            DATE           = NULL,
+    @DocType                             NVARCHAR(20)   = NULL,   -- EFFECTIVE_SNAPSHOT: the document asking
+    @DocId                               INT            = NULL    --   (its PGMasterPin wins - "Retain old ledgers")
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -1167,6 +1169,22 @@ BEGIN
         IF @GwId IS NULL
         BEGIN
             SELECT NULL AS payment_master_ledger_id, 'Error' AS status, 'Payment Gateway not found.' AS error;
+            RETURN;
+        END
+
+        -- A saved document kept on its old PG settings by a back-dated change
+        -- ("Retain old ledgers" - dbo.PGMasterPin).
+        IF @DocId IS NOT NULL AND EXISTS (SELECT 1 FROM dbo.PGMasterPin
+                                          WHERE company_id = @CompanyId AND doc_type = @DocType AND doc_id = @DocId
+                                            AND gateway_name = @GatewayName)
+        BEGIN
+            SELECT pin.payment_master_ledger_id, pin.payment_master_ledger_name,
+                   pin.pg_charges_master_ledger_id, pin.pg_charges_master_ledger_name,
+                   ISNULL((SELECT gst_percentage FROM dbo.Ledgers WHERE id = pin.pg_charges_master_ledger_id), 0) AS pg_charges_master_ledger_gst_percentage,
+                   ISNULL(pin.pg_charges_percentage, 0) AS pg_charges_percentage,
+                   pin.effective_from, CAST(1 AS BIT) AS pinned, 'Success' AS status
+            FROM dbo.PGMasterPin pin
+            WHERE pin.company_id = @CompanyId AND pin.doc_type = @DocType AND pin.doc_id = @DocId AND pin.gateway_name = @GatewayName;
             RETURN;
         END
 
@@ -1629,6 +1647,14 @@ RETURN
         SELECT 'Cancellation', c.invoice_number FROM dbo.Cancellation_AL_Tickets c
         WHERE @RescheduleId IS NOT NULL AND c.company_id = @CompanyId
           AND c.original_ticket_id = (SELECT original_ticket_id FROM dbo.Rescheduled_Al_Ticket WHERE id = @RescheduleId)
+        UNION ALL
+        -- A direct Reschedule (no booking in the software) has no
+        -- original_ticket_id - its Cancellation is found through the line.
+        SELECT 'Cancellation', c.invoice_number
+        FROM dbo.Cancellation_AL_TicketLines cl
+        INNER JOIN dbo.Cancellation_AL_Tickets c ON c.id = cl.cancellation_ticket_id
+        WHERE @RescheduleId IS NOT NULL
+          AND cl.reschedule_line_id IN (SELECT id FROM dbo.Rescheduled_Al_TicketLines WHERE reschedule_ticket_id = @RescheduleId)
     ), listed AS (
         SELECT STRING_AGG(kind + ' ' + invoice_number, ', ') WITHIN GROUP (ORDER BY kind, invoice_number) AS used_in
         FROM (SELECT DISTINCT kind, invoice_number FROM chain) d
@@ -1673,7 +1699,7 @@ CREATE OR ALTER PROCEDURE dbo.sp_Ticket
     @InvoiceDate           DATE            = NULL,
     @InvoiceType           NVARCHAR(100)   = NULL,
     @BookingMode           NVARCHAR(20)    = NULL,
-    @BookingType           NVARCHAR(30)    = NULL,
+    @BookingType           NVARCHAR(50)    = NULL,
     @BookingStatus         NVARCHAR(20)    = NULL,
     @TravelType            NVARCHAR(20)    = NULL,
     @UserName              NVARCHAR(100)   = NULL,
@@ -2352,7 +2378,7 @@ CREATE OR ALTER PROCEDURE dbo.sp_RescheduleTicket
     @InvoiceDate           DATE            = NULL,
     @InvoiceType           NVARCHAR(100)   = NULL,
     @BookingMode           NVARCHAR(20)    = NULL,
-    @BookingType           NVARCHAR(30)    = NULL,
+    @BookingType           NVARCHAR(50)    = NULL,
     @BookingStatus         NVARCHAR(20)    = NULL,
     @TravelType            NVARCHAR(20)    = NULL,
     @UserName              NVARCHAR(100)   = NULL,
@@ -2745,8 +2771,9 @@ BEGIN
                 DECLARE @RProtected NVARCHAR(MAX);
                 SELECT @RProtected = STRING_AGG(o.ticket_no, ', ')
                 FROM @OldRLines o
-                WHERE NOT EXISTS (SELECT 1 FROM OPENJSON(@LinesJson) WITH (original_ticket_line_id INT '$.original_ticket_line_id') j
-                                  WHERE j.original_ticket_line_id = o.original_ticket_line_id)
+                WHERE NOT EXISTS (SELECT 1 FROM OPENJSON(@LinesJson) WITH (original_ticket_line_id INT '$.original_ticket_line_id', ticket_no NVARCHAR(30) '$.ticket_no') j
+                                  WHERE j.original_ticket_line_id = o.original_ticket_line_id
+                                     OR (j.original_ticket_line_id IS NULL AND o.original_ticket_line_id IS NULL AND j.ticket_no = o.ticket_no))
                   AND (EXISTS (SELECT 1 FROM dbo.Rescheduled_Al_TicketLines x WHERE x.based_on_reschedule_line_id = o.id)
                        OR EXISTS (SELECT 1 FROM dbo.SSR_AL_TicketLines x WHERE x.reschedule_line_id = o.id));
                 IF @RProtected IS NOT NULL
@@ -2760,8 +2787,9 @@ BEGIN
                 -- place by the MERGE below (their ids never change).
                 DELETE rtl FROM dbo.Rescheduled_Al_TicketLines rtl
                 WHERE rtl.reschedule_ticket_id = @Id
-                  AND NOT EXISTS (SELECT 1 FROM OPENJSON(@LinesJson) WITH (original_ticket_line_id INT '$.original_ticket_line_id') j
-                                  WHERE j.original_ticket_line_id = rtl.original_ticket_line_id);
+                  AND NOT EXISTS (SELECT 1 FROM OPENJSON(@LinesJson) WITH (original_ticket_line_id INT '$.original_ticket_line_id', ticket_no NVARCHAR(30) '$.ticket_no') j
+                                  WHERE j.original_ticket_line_id = rtl.original_ticket_line_id
+                                     OR (j.original_ticket_line_id IS NULL AND rtl.original_ticket_line_id IS NULL AND j.ticket_no = rtl.ticket_no));
             END
             ELSE
             BEGIN
@@ -2782,7 +2810,9 @@ BEGIN
             -- Upsert each line by its original booking passenger
             -- (original_ticket_line_id) - an edited line keeps its own id
             -- (and its "rescheduled" flag), so a later Reschedule / SSR
-            -- Updation built on it stays attached.
+            -- Updation built on it stays attached. A direct Reschedule's line
+            -- (no booking in the software - original_ticket_line_id NULL)
+            -- is matched by its Ticket No. instead.
             MERGE dbo.Rescheduled_Al_TicketLines AS tgt
             USING (
                 SELECT * FROM OPENJSON(@LinesJson) WITH (
@@ -2813,7 +2843,9 @@ BEGIN
                 supplier_name NVARCHAR(150) '$.supplier_name'
             )
             ) AS src
-            ON tgt.reschedule_ticket_id = @ResultId AND tgt.original_ticket_line_id = src.original_ticket_line_id
+            ON tgt.reschedule_ticket_id = @ResultId
+               AND (tgt.original_ticket_line_id = src.original_ticket_line_id
+                    OR (tgt.original_ticket_line_id IS NULL AND src.original_ticket_line_id IS NULL AND tgt.ticket_no = src.ticket_no))
             WHEN MATCHED THEN UPDATE SET
                     based_on_reschedule_line_id = src.based_on_reschedule_line_id,
                     parent_pnr = src.parent_pnr,
@@ -3244,7 +3276,7 @@ CREATE OR ALTER PROCEDURE dbo.sp_CancellationTicket
     @InvoiceDate             DATE            = NULL,
     @InvoiceType             NVARCHAR(100)   = NULL,
     @BookingMode             NVARCHAR(20)    = NULL,
-    @BookingType             NVARCHAR(30)    = NULL,
+    @BookingType             NVARCHAR(50)    = NULL,
     @BookingStatus           NVARCHAR(20)    = NULL,
     @TravelType              NVARCHAR(20)    = NULL,
     @UserName                NVARCHAR(100)   = NULL,
@@ -3252,6 +3284,7 @@ CREATE OR ALTER PROCEDURE dbo.sp_CancellationTicket
     @Roe                     DECIMAL(10,4)   = NULL,
     @BookingGivenBy          NVARCHAR(25)    = NULL,
     @CancellationReference   NVARCHAR(30)    = NULL,
+    @ParentPnr               NVARCHAR(30)    = NULL,   -- direct Cancellation: the Parent PNR as sent (no booking to link)
     @CancellationRefDate     DATE            = NULL,
     @AirlinePnr              NVARCHAR(13)    = NULL,
     @GdsPnr                  NVARCHAR(13)    = NULL,
@@ -3292,7 +3325,8 @@ BEGIN
             SELECT NULL AS id, 'Error' AS status, 'Cancellation not found.' AS error;
             RETURN;
         END
-        SELECT ct.id, ct.original_ticket_id, ct.invoice_number, ct.invoice_date, ct.invoice_type,
+        SELECT ct.id, ct.original_ticket_id, COALESCE(ct.parent_pnr, ot.booking_reference) AS parent_pnr,
+               ct.invoice_number, ct.invoice_date, ct.invoice_type,
                ct.booking_mode, ct.booking_type, ct.booking_status, cust.name AS customer_name,
                ct.travel_type, ct.user_name, ct.currency, ct.roe, ct.booking_given_by,
                ct.cancellation_reference, ct.cancellation_ref_date, ct.airline_pnr, ct.gds_pnr,
@@ -3304,13 +3338,14 @@ BEGIN
         INNER JOIN dbo.Ledgers cust ON cust.id = ct.customer_ledger_id
         LEFT JOIN dbo.Ledgers supp ON supp.id = ct.supplier_ledger_id
         LEFT JOIN dbo.JournalVoucher jv ON jv.source_cancellation_ticket_id = ct.id
+        LEFT JOIN dbo.AL_Tickets ot ON ot.id = ct.original_ticket_id
         WHERE ct.id = @Id AND ct.company_id = @CompanyId;
         RETURN;
     END
 
     IF @Action = 'GET_LINES'
     BEGIN
-        SELECT cl.id, cl.original_ticket_line_id, cl.airline_code, cl.airline_name, cl.airline_category,
+        SELECT cl.id, cl.original_ticket_line_id, cl.reschedule_line_id, cl.airline_code, cl.airline_name, cl.airline_category,
                cl.flight_no, cl.ticket_no, cl.passenger_name, cl.pax_type, cl.sector, cl.travel_date,
                cl.cabin, cl.travel_class, cl.fare_type,
                cl.basic_fare, cl.yq, cl.yr, cl.k3_tax, cl.tax_others, cl.seat, cl.meal, cl.baggage, cl.other_ssr,
@@ -3350,7 +3385,10 @@ BEGIN
             END
         END
 
-        IF NOT EXISTS (SELECT 1 FROM dbo.AL_Tickets WHERE id = @OriginalTicketId AND company_id = @CompanyId)
+        -- @OriginalTicketId NULL = a direct Cancellation: the ticket was never
+        -- booked in this software, only its Parent PNR (@ParentPnr) is kept.
+        IF @OriginalTicketId IS NOT NULL
+           AND NOT EXISTS (SELECT 1 FROM dbo.AL_Tickets WHERE id = @OriginalTicketId AND company_id = @CompanyId)
         BEGIN
             SELECT NULL AS id, 'Error' AS status, 'Original ticket not found.' AS error;
             RETURN;
@@ -3392,7 +3430,7 @@ BEGIN
         DECLARE @BadOriginalTicketNo NVARCHAR(30);
         SELECT TOP 1 @BadOriginalTicketNo = j.ticket_no
         FROM OPENJSON(@LinesJson) WITH (original_ticket_line_id INT '$.original_ticket_line_id', ticket_no NVARCHAR(30) '$.ticket_no') j
-        WHERE NOT EXISTS (
+        WHERE j.original_ticket_line_id IS NOT NULL AND NOT EXISTS (
             SELECT 1 FROM dbo.AL_TicketLines otl WHERE otl.id = j.original_ticket_line_id AND otl.ticket_id = @OriginalTicketId
         );
         IF @BadOriginalTicketNo IS NOT NULL
@@ -3457,19 +3495,19 @@ BEGIN
             BEGIN TRAN;
 
             INSERT INTO dbo.Cancellation_AL_Tickets
-                (company_id, branch_name, original_ticket_id, invoice_number, invoice_date, invoice_type, booking_mode, booking_type, booking_status,
+                (company_id, branch_name, original_ticket_id, parent_pnr, invoice_number, invoice_date, invoice_type, booking_mode, booking_type, booking_status,
                  customer_ledger_id, supplier_ledger_id, travel_type, user_name, currency, roe, booking_given_by,
                  cancellation_reference, cancellation_ref_date, airline_pnr, gds_pnr, office_id, payment_mode, payment_gateway_ref,
                  airline_category, created_at, updated_at)
             VALUES
-                (@CompanyId, @BranchName, @OriginalTicketId, @InvoiceNumber, @InvoiceDate, @InvoiceType, ISNULL(@BookingMode, 'Manual'), @BookingType, @BookingStatus,
+                (@CompanyId, @BranchName, @OriginalTicketId, @ParentPnr, @InvoiceNumber, @InvoiceDate, @InvoiceType, ISNULL(@BookingMode, 'Manual'), @BookingType, @BookingStatus,
                  @CustLedgerId, @SuppLedgerId, @TravelType, @UserName, ISNULL(@Currency, 'INR'), ISNULL(@Roe, 1), @BookingGivenBy,
                  @CancellationReference, @CancellationRefDate, @AirlinePnr, @GdsPnr, @OfficeId, @PaymentMode, @PaymentGatewayRef,
                  @AirlineCategory, SYSUTCDATETIME(), SYSUTCDATETIME());
             DECLARE @ResultId INT = SCOPE_IDENTITY();
 
             INSERT INTO dbo.Cancellation_Al_TicketLines
-                (cancellation_ticket_id, original_ticket_line_id, airline_code, airline_name, airline_category, flight_no, ticket_no, passenger_name, pax_type,
+                (cancellation_ticket_id, original_ticket_line_id, reschedule_line_id, airline_code, airline_name, airline_category, flight_no, ticket_no, passenger_name, pax_type,
                  sector, travel_date, cabin, travel_class, fare_type, basic_fare, yq, yr, k3_tax, tax_others, seat, meal,
                  baggage, other_ssr, disc_on, disc_type, disc_value, tds_per, pg_charges, pg_charges_percentage,
                  markup, addl_markup, ssr_markup, service_fee, addl_service_fee, ssr_service_fee, gst_pct, status,
@@ -3481,7 +3519,7 @@ BEGIN
                  tds_amount_override, supp_tds_amount_override,
                  supplier_ledger_id, created_at, updated_at)
             SELECT
-                @ResultId, j.original_ticket_line_id, j.airline_code, j.airline_name, j.airline_category, j.flight_no, j.ticket_no, j.passenger_name, j.pax_type,
+                @ResultId, j.original_ticket_line_id, j.reschedule_line_id, j.airline_code, j.airline_name, j.airline_category, j.flight_no, j.ticket_no, j.passenger_name, j.pax_type,
                 j.sector, j.travel_date, j.cabin, j.travel_class, j.fare_type, j.basic_fare, j.yq, j.yr, j.k3_tax, j.tax_others, j.seat, j.meal,
                 j.baggage, j.other_ssr, j.disc_on, j.disc_type, j.disc_value, j.tds_per, j.pg_charges, j.pg_charges_percentage,
                 j.markup, j.addl_markup, j.ssr_markup, j.service_fee, j.addl_service_fee, j.ssr_service_fee, j.gst_pct, ISNULL(j.status, 'ISSUED'),
@@ -3495,6 +3533,7 @@ BEGIN
                 SYSUTCDATETIME(), SYSUTCDATETIME()
             FROM OPENJSON(@LinesJson) WITH (
                 original_ticket_line_id INT '$.original_ticket_line_id',
+                reschedule_line_id INT '$.reschedule_line_id',
                 airline_code NVARCHAR(200) '$.airline_code', airline_name NVARCHAR(200) '$.airline_name',
                 airline_category NVARCHAR(5) '$.airline_category', flight_no NVARCHAR(200) '$.flight_no',
                 ticket_no NVARCHAR(30) '$.ticket_no', passenger_name NVARCHAR(50) '$.passenger_name',
@@ -3889,7 +3928,7 @@ GO
 --            come back as all-false instead of being left out),
 --            SAVE (one transaction, upserts every row from @AccessJson -
 --            a JSON array of {menu_key, can_view, can_add, can_edit,
---            can_delete})
+--            can_delete, can_print, can_export})
 -- ==========================================================================
 CREATE OR ALTER PROCEDURE dbo.sp_UserMenuAccess
     @Action      NVARCHAR(50),
@@ -3911,7 +3950,8 @@ BEGIN
         SELECT
             mm.menu_key, mm.title, mm.parent_key, mm.module, mm.sort_order,
             ISNULL(uma.can_view, 0) AS can_view, ISNULL(uma.can_add, 0) AS can_add,
-            ISNULL(uma.can_edit, 0) AS can_edit, ISNULL(uma.can_delete, 0) AS can_delete
+            ISNULL(uma.can_edit, 0) AS can_edit, ISNULL(uma.can_delete, 0) AS can_delete,
+            ISNULL(uma.can_print, 0) AS can_print, ISNULL(uma.can_export, 0) AS can_export
         FROM dbo.MenuMaster mm
         LEFT JOIN dbo.UserMenuAccess uma ON uma.menu_key = mm.menu_key AND uma.user_id = @UserId
         WHERE mm.is_active = 1
@@ -3932,22 +3972,25 @@ BEGIN
 
             MERGE dbo.UserMenuAccess AS target
             USING (
-                SELECT menu_key, can_view, can_add, can_edit, can_delete
+                SELECT menu_key, can_view, can_add, can_edit, can_delete, ISNULL(can_print, 0) AS can_print, ISNULL(can_export, 0) AS can_export
                 FROM OPENJSON(@AccessJson) WITH (
                     menu_key NVARCHAR(60) '$.menu_key',
                     can_view BIT '$.can_view',
                     can_add BIT '$.can_add',
                     can_edit BIT '$.can_edit',
-                    can_delete BIT '$.can_delete'
+                    can_delete BIT '$.can_delete',
+                    can_print BIT '$.can_print',
+                    can_export BIT '$.can_export'
                 )
             ) AS src
             ON target.user_id = @UserId AND target.menu_key = src.menu_key
             WHEN MATCHED THEN
                 UPDATE SET can_view = src.can_view, can_add = src.can_add, can_edit = src.can_edit,
-                           can_delete = src.can_delete, updated_at = SYSUTCDATETIME()
+                           can_delete = src.can_delete, can_print = src.can_print, can_export = src.can_export,
+                           updated_at = SYSUTCDATETIME()
             WHEN NOT MATCHED THEN
-                INSERT (user_id, menu_key, can_view, can_add, can_edit, can_delete, created_by_id, created_at, updated_at)
-                VALUES (@UserId, src.menu_key, src.can_view, src.can_add, src.can_edit, src.can_delete, @CreatedBy, SYSUTCDATETIME(), SYSUTCDATETIME());
+                INSERT (user_id, menu_key, can_view, can_add, can_edit, can_delete, can_print, can_export, created_by_id, created_at, updated_at)
+                VALUES (@UserId, src.menu_key, src.can_view, src.can_add, src.can_edit, src.can_delete, src.can_print, src.can_export, @CreatedBy, SYSUTCDATETIME(), SYSUTCDATETIME());
 
             COMMIT TRAN;
             SELECT @UserId AS user_id, 'Success' AS status;
@@ -3990,6 +4033,8 @@ CREATE OR ALTER PROCEDURE dbo.sp_SSRTicket
     @GdsPnr                    NVARCHAR(13)    = NULL,
     @PaymentMode               NVARCHAR(20)    = NULL,
     @PaymentGatewayRef         NVARCHAR(60)    = NULL,
+    @BookingMode               NVARCHAR(20)    = NULL,
+    @ParentPnr                 NVARCHAR(30)    = NULL,   -- direct SSR (no booking here): the Parent PNR it was pushed with   -- 'Auto Push' from ticket_import; NULL = Manual (the screen)
     @LinesJson                 NVARCHAR(MAX)   = NULL,
     @JvNarration               NVARCHAR(250)   = NULL,
     @JvTotalDebit              DECIMAL(16,2)   = NULL,
@@ -4039,12 +4084,13 @@ BEGIN
                st.invoice_type, st.booking_mode, st.booking_status, cust.name AS customer_name, st.customer_ledger_id,
                cust.state_name AS customer_state, st.travel_type, st.user_name, st.currency, st.roe,
                st.ssr_reference, st.ssr_ref_date, st.airline_pnr, st.gds_pnr, st.payment_mode, st.payment_gateway_ref, st.branch_name,
+               st.parent_pnr,
                ot.invoice_number AS original_invoice_number, rt.invoice_number AS source_reschedule_invoice_number,
                jv.id AS voucher_id, jv.voucher_no, jv.total_debit AS jv_total_debit, jv.total_credit AS jv_total_credit,
                'Success' AS status
         FROM dbo.SSR_AL_Tickets st
         INNER JOIN dbo.Ledgers cust ON cust.id = st.customer_ledger_id
-        INNER JOIN dbo.AL_Tickets ot ON ot.id = st.original_ticket_id
+        LEFT JOIN dbo.AL_Tickets ot ON ot.id = st.original_ticket_id   -- NULL = direct SSR
         LEFT JOIN dbo.Rescheduled_Al_Ticket rt ON rt.id = st.source_reschedule_ticket_id
         LEFT JOIN dbo.JournalVoucher jv ON jv.source_ssr_ticket_id = st.id
         WHERE st.id = @Id AND st.company_id = @CompanyId;
@@ -4055,7 +4101,7 @@ BEGIN
     BEGIN
         SELECT sl.id, sl.original_ticket_line_id, sl.reschedule_line_id, sl.ticket_no, sl.passenger_name,
                sl.pax_type, sl.airline_category, sl.sector, sl.office_id, sl.supplier_ledger_id,
-               supp.name AS supplier_name, supp.state_name AS supplier_state, sl.fop, sl.ssr_items, sl.ssr_ticket_numbers,
+               supp.name AS supplier_name, supp.state_name AS supplier_state, sl.fop, sl.card_number, sl.ssr_items, sl.ssr_ticket_numbers, sl.ssr_charges,
                sl.seat, sl.meal, sl.baggage, sl.other_ssr, sl.markup, sl.service_fee,
                sl.supp_markup, sl.supp_service_fee, sl.total_billed
         FROM dbo.SSR_AL_TicketLines sl
@@ -4085,7 +4131,11 @@ BEGIN
             RETURN;
         END
 
-        IF NOT EXISTS (SELECT 1 FROM dbo.AL_Tickets WHERE id = @OriginalTicketId AND company_id = @CompanyId)
+        -- A direct SSR (Auto Push) has no booking here: it sits on a direct
+        -- Reschedule (@SourceRescheduleTicketId) or only has its Parent PNR.
+        IF (@OriginalTicketId IS NOT NULL AND NOT EXISTS (SELECT 1 FROM dbo.AL_Tickets WHERE id = @OriginalTicketId AND company_id = @CompanyId))
+           OR (@SourceRescheduleTicketId IS NOT NULL AND NOT EXISTS (SELECT 1 FROM dbo.Rescheduled_Al_Ticket WHERE id = @SourceRescheduleTicketId AND company_id = @CompanyId))
+           OR (@OriginalTicketId IS NULL AND @SourceRescheduleTicketId IS NULL AND NULLIF(LTRIM(RTRIM(@ParentPnr)), '') IS NULL)
         BEGIN
             SELECT NULL AS id, 'Error' AS status, 'The original booking for this SSR was not found.' AS error;
             RETURN;
@@ -4101,16 +4151,21 @@ BEGIN
             RETURN;
         END
 
-        IF EXISTS (SELECT 1 FROM dbo.SSR_AL_Tickets WHERE company_id = @CompanyId AND ssr_reference = @SsrReference AND (@Id IS NULL OR id <> @Id))
-        BEGIN
-            SELECT NULL AS id, 'Error' AS status, 'SSR Reference "' + @SsrReference + '" already exists.' AS error;
-            RETURN;
-        END
+        -- SSR Reference (S PNR) may repeat: one booking can have several SSR
+        -- Updations (migration 0088). The Invoice Number above stays unique.
 
-        -- Every line must be a passenger of the original booking.
+        -- Every line must be a passenger of the original booking (direct: of
+        -- the direct Reschedule it sits on, or linked to nothing at all).
         SELECT TOP 1 @BadLine = ISNULL(j.ticket_no, '?')
-        FROM OPENJSON(@LinesJson) WITH (original_ticket_line_id INT '$.original_ticket_line_id', ticket_no NVARCHAR(30) '$.ticket_no') j
-        WHERE NOT EXISTS (SELECT 1 FROM dbo.AL_TicketLines tl WHERE tl.id = j.original_ticket_line_id AND tl.ticket_id = @OriginalTicketId);
+        FROM OPENJSON(@LinesJson) WITH (original_ticket_line_id INT '$.original_ticket_line_id', reschedule_line_id INT '$.reschedule_line_id',
+                                        ticket_no NVARCHAR(30) '$.ticket_no') j
+        WHERE (@OriginalTicketId IS NOT NULL
+               AND NOT EXISTS (SELECT 1 FROM dbo.AL_TicketLines tl WHERE tl.id = j.original_ticket_line_id AND tl.ticket_id = @OriginalTicketId))
+           OR (@OriginalTicketId IS NULL AND j.original_ticket_line_id IS NOT NULL)
+           OR (@OriginalTicketId IS NULL AND @SourceRescheduleTicketId IS NOT NULL
+               AND NOT EXISTS (SELECT 1 FROM dbo.Rescheduled_Al_TicketLines rl
+                               WHERE rl.id = j.reschedule_line_id AND rl.reschedule_ticket_id = @SourceRescheduleTicketId))
+           OR (@OriginalTicketId IS NULL AND @SourceRescheduleTicketId IS NULL AND j.reschedule_line_id IS NOT NULL);
         IF @BadLine IS NOT NULL
         BEGIN
             SELECT NULL AS id, 'Error' AS status, 'Ticket No. ' + @BadLine + ' is not a passenger of the original booking.' AS error;
@@ -4135,11 +4190,12 @@ BEGIN
                 INSERT INTO dbo.SSR_AL_Tickets
                     (company_id, branch_name, original_ticket_id, source_reschedule_ticket_id, invoice_number, invoice_date,
                      invoice_type, booking_mode, booking_status, customer_ledger_id, travel_type, user_name, currency, roe,
-                     ssr_reference, ssr_ref_date, airline_pnr, gds_pnr, payment_mode, payment_gateway_ref, created_at, updated_at)
+                     ssr_reference, ssr_ref_date, airline_pnr, gds_pnr, payment_mode, payment_gateway_ref, parent_pnr, created_at, updated_at)
                 VALUES
                     (@CompanyId, @BranchName, @OriginalTicketId, @SourceRescheduleTicketId, @InvoiceNumber, @InvoiceDate,
-                     @InvoiceType, 'Manual', 'SSR Updated', @CustLedgerId, @TravelType, @UserName, ISNULL(@Currency, 'INR'), ISNULL(@Roe, 1),
-                     @SsrReference, @SsrRefDate, @AirlinePnr, @GdsPnr, @PaymentMode, @PaymentGatewayRef, SYSUTCDATETIME(), SYSUTCDATETIME());
+                     @InvoiceType, ISNULL(NULLIF(@BookingMode, ''), 'Manual'), 'SSR Updated', @CustLedgerId, @TravelType, @UserName, ISNULL(@Currency, 'INR'), ISNULL(@Roe, 1),
+                     @SsrReference, @SsrRefDate, @AirlinePnr, @GdsPnr, @PaymentMode, @PaymentGatewayRef,
+                     CASE WHEN @OriginalTicketId IS NULL THEN NULLIF(LTRIM(RTRIM(@ParentPnr)), '') END, SYSUTCDATETIME(), SYSUTCDATETIME());
                 SET @ResultId = CAST(SCOPE_IDENTITY() AS INT);
             END
             ELSE
@@ -4156,12 +4212,12 @@ BEGIN
 
             INSERT INTO dbo.SSR_AL_TicketLines
                 (ssr_ticket_id, original_ticket_line_id, reschedule_line_id, ticket_no, passenger_name, pax_type,
-                 airline_category, sector, office_id, supplier_ledger_id, fop, ssr_items, ssr_ticket_numbers,
+                 airline_category, sector, office_id, supplier_ledger_id, fop, card_number, ssr_items, ssr_ticket_numbers, ssr_charges,
                  seat, meal, baggage, other_ssr, markup, service_fee, supp_markup, supp_service_fee, total_billed)
             SELECT @ResultId, j.original_ticket_line_id, j.reschedule_line_id, j.ticket_no, j.passenger_name, j.pax_type,
                    j.airline_category, j.sector, j.office_id,
                    (SELECT id FROM dbo.Ledgers WHERE company_id = @CompanyId AND name = j.supplier_name AND ledger_category = 'CREDITOR'),
-                   j.fop, j.ssr_items, j.ssr_ticket_numbers,
+                   j.fop, j.card_number, j.ssr_items, j.ssr_ticket_numbers, j.ssr_charges,
                    ISNULL(j.seat, 0), ISNULL(j.meal, 0), ISNULL(j.baggage, 0), ISNULL(j.other_ssr, 0),
                    ISNULL(j.markup, 0), ISNULL(j.service_fee, 0), ISNULL(j.supp_markup, 0), ISNULL(j.supp_service_fee, 0),
                    ISNULL(j.total_billed, 0)
@@ -4170,8 +4226,8 @@ BEGIN
                 ticket_no NVARCHAR(20) '$.ticket_no', passenger_name NVARCHAR(100) '$.passenger_name',
                 pax_type NVARCHAR(10) '$.pax_type', airline_category NVARCHAR(5) '$.airline_category',
                 sector NVARCHAR(20) '$.sector', office_id NVARCHAR(30) '$.office_id',
-                supplier_name NVARCHAR(150) '$.supplier_name', fop NVARCHAR(20) '$.fop', ssr_items NVARCHAR(MAX) '$.ssr_items',
-                ssr_ticket_numbers NVARCHAR(MAX) '$.ssr_ticket_numbers',
+                supplier_name NVARCHAR(150) '$.supplier_name', fop NVARCHAR(20) '$.fop', card_number NVARCHAR(40) '$.card_number', ssr_items NVARCHAR(MAX) '$.ssr_items',
+                ssr_ticket_numbers NVARCHAR(MAX) '$.ssr_ticket_numbers', ssr_charges NVARCHAR(MAX) '$.ssr_charges',
                 seat DECIMAL(14,2) '$.seat', meal DECIMAL(14,2) '$.meal', baggage DECIMAL(14,2) '$.baggage',
                 other_ssr DECIMAL(14,2) '$.other_ssr', markup DECIMAL(14,2) '$.markup', service_fee DECIMAL(14,2) '$.service_fee',
                 supp_markup DECIMAL(14,2) '$.supp_markup', supp_service_fee DECIMAL(14,2) '$.supp_service_fee',
@@ -4408,5 +4464,1297 @@ BEGIN
         END CATCH
         RETURN;
     END
+END
+GO
+
+-- ============================================================
+-- dbo.sp_AirlineDropdown - airline dropdown lists (Booking, Reschedule,
+-- Cancellation, SSR, Returns / DSR, FOP Master). Each value has a short
+-- code (Confirmed = CON, Adult = ADT ...) for Auto Push / import.
+--   LIST    : active values of every list (or one @ListKey), screen order.
+--   RESOLVE : one value of @ListKey by its @Code or its @Name.
+-- ============================================================
+CREATE OR ALTER PROCEDURE dbo.sp_AirlineDropdown
+    @Action  NVARCHAR(20),
+    @ListKey NVARCHAR(50)  = NULL,
+    @Code    NVARCHAR(10)  = NULL,
+    @Name    NVARCHAR(100) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF @Action = 'LIST'
+    BEGIN
+        SELECT list_key, code, name, ISNULL(display_label, name) AS label, sort_order, is_default
+        FROM dbo.AirlineDropdownValues
+        WHERE is_active = 1 AND (@ListKey IS NULL OR list_key = @ListKey)
+        ORDER BY list_key, sort_order, id;
+        RETURN;
+    END
+
+    IF @Action = 'RESOLVE'
+    BEGIN
+        SELECT TOP 1 list_key, code, name, ISNULL(display_label, name) AS label
+        FROM dbo.AirlineDropdownValues
+        WHERE is_active = 1 AND list_key = @ListKey
+          AND ((@Code IS NOT NULL AND code = @Code) OR (@Code IS NULL AND name = @Name));
+        RETURN;
+    END
+END
+GO
+
+-- ============================================================
+-- dbo.sp_AuditLog - edit history of Booking / Reschedule / Cancellation /
+-- SSR Updation (who changed what, when) - views.audited().
+--   SNAPSHOT : the document straight from its tables, as JSON (header +
+--              lines, with customer / supplier names), before / after a save.
+--   CHAIN    : the follow-up documents of a Booking / Reschedule (same
+--              original booking) - an edit can carry changes down to them.
+--   INSERT   : one log row.
+--   LIST     : log rows of one document (newest first), or of a company.
+-- ============================================================
+CREATE OR ALTER PROCEDURE dbo.sp_AuditLog
+    @Action      NVARCHAR(20),
+    @CompanyId   INT           = NULL,
+    @Module      NVARCHAR(30)  = NULL,
+    @DocumentId  INT           = NULL,
+    @DocumentNo  NVARCHAR(50)  = NULL,
+    @LogAction   NVARCHAR(20)  = NULL,
+    @Source      NVARCHAR(150) = NULL,
+    @UserId      INT           = NULL,
+    @UserName    NVARCHAR(150) = NULL,
+    @ChangeCount INT           = 0,
+    @Changes     NVARCHAR(MAX) = NULL,
+    @Top         INT           = 500
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF @Action = 'SNAPSHOT'
+    BEGIN
+        IF @Module = 'Booking'
+            SELECT
+                (SELECT t.*, c.name AS customer_name, s.name AS supplier_name
+                 FROM dbo.AL_Tickets t
+                 LEFT JOIN dbo.Ledgers c ON c.id = t.customer_ledger_id
+                 LEFT JOIN dbo.Ledgers s ON s.id = t.supplier_ledger_id
+                 WHERE t.id = @DocumentId
+                 FOR JSON PATH, INCLUDE_NULL_VALUES, WITHOUT_ARRAY_WRAPPER) AS header_json,
+                (SELECT l.*, s.name AS supplier_name
+                 FROM dbo.AL_TicketLines l
+                 LEFT JOIN dbo.Ledgers s ON s.id = l.supplier_ledger_id
+                 WHERE l.ticket_id = @DocumentId ORDER BY l.id
+                 FOR JSON PATH, INCLUDE_NULL_VALUES) AS lines_json;
+        ELSE IF @Module = 'Reschedule'
+            SELECT
+                (SELECT t.*, c.name AS customer_name, s.name AS supplier_name
+                 FROM dbo.Rescheduled_Al_Ticket t
+                 LEFT JOIN dbo.Ledgers c ON c.id = t.customer_ledger_id
+                 LEFT JOIN dbo.Ledgers s ON s.id = t.supplier_ledger_id
+                 WHERE t.id = @DocumentId
+                 FOR JSON PATH, INCLUDE_NULL_VALUES, WITHOUT_ARRAY_WRAPPER) AS header_json,
+                (SELECT l.*, s.name AS supplier_name
+                 FROM dbo.Rescheduled_Al_TicketLines l
+                 LEFT JOIN dbo.Ledgers s ON s.id = l.supplier_ledger_id
+                 WHERE l.reschedule_ticket_id = @DocumentId ORDER BY l.id
+                 FOR JSON PATH, INCLUDE_NULL_VALUES) AS lines_json;
+        ELSE IF @Module = 'Cancellation'
+            SELECT
+                (SELECT t.*, c.name AS customer_name, s.name AS supplier_name
+                 FROM dbo.Cancellation_AL_Tickets t
+                 LEFT JOIN dbo.Ledgers c ON c.id = t.customer_ledger_id
+                 LEFT JOIN dbo.Ledgers s ON s.id = t.supplier_ledger_id
+                 WHERE t.id = @DocumentId
+                 FOR JSON PATH, INCLUDE_NULL_VALUES, WITHOUT_ARRAY_WRAPPER) AS header_json,
+                (SELECT l.*, s.name AS supplier_name
+                 FROM dbo.Cancellation_Al_TicketLines l
+                 LEFT JOIN dbo.Ledgers s ON s.id = l.supplier_ledger_id
+                 WHERE l.cancellation_ticket_id = @DocumentId ORDER BY l.id
+                 FOR JSON PATH, INCLUDE_NULL_VALUES) AS lines_json;
+        ELSE IF @Module = 'SSR Updation'
+            SELECT
+                (SELECT t.*, c.name AS customer_name
+                 FROM dbo.SSR_AL_Tickets t
+                 LEFT JOIN dbo.Ledgers c ON c.id = t.customer_ledger_id
+                 WHERE t.id = @DocumentId
+                 FOR JSON PATH, INCLUDE_NULL_VALUES, WITHOUT_ARRAY_WRAPPER) AS header_json,
+                (SELECT l.*, s.name AS supplier_name
+                 FROM dbo.SSR_AL_TicketLines l
+                 LEFT JOIN dbo.Ledgers s ON s.id = l.supplier_ledger_id
+                 WHERE l.ssr_ticket_id = @DocumentId ORDER BY l.id
+                 FOR JSON PATH, INCLUDE_NULL_VALUES) AS lines_json;
+        RETURN;
+    END
+
+    IF @Action = 'CHAIN'
+    BEGIN
+        DECLARE @Root INT = CASE @Module
+            WHEN 'Booking' THEN @DocumentId
+            WHEN 'Reschedule' THEN (SELECT original_ticket_id FROM dbo.Rescheduled_Al_Ticket WHERE id = @DocumentId)
+        END;
+        SELECT module, id FROM (
+            SELECT 'Reschedule' AS module, id FROM dbo.Rescheduled_Al_Ticket WHERE original_ticket_id = @Root
+            UNION ALL SELECT 'Cancellation', id FROM dbo.Cancellation_AL_Tickets WHERE original_ticket_id = @Root
+            UNION ALL SELECT 'SSR Updation', id FROM dbo.SSR_AL_Tickets WHERE original_ticket_id = @Root
+        ) x
+        WHERE @Root IS NOT NULL AND NOT (x.module = @Module AND x.id = @DocumentId)
+        ORDER BY module, id;
+        RETURN;
+    END
+
+    IF @Action = 'INSERT'
+    BEGIN
+        INSERT INTO dbo.AuditLogs
+            (company_id, module, document_id, document_no, action, source, user_id, user_name, change_count, changes, changed_at)
+        VALUES (@CompanyId, @Module, @DocumentId, @DocumentNo, @LogAction, @Source, @UserId, @UserName,
+                ISNULL(@ChangeCount, 0), @Changes, SYSUTCDATETIME());
+        SELECT CAST(SCOPE_IDENTITY() AS INT) AS id;
+        RETURN;
+    END
+
+    IF @Action = 'LIST'
+    BEGIN
+        SELECT TOP (@Top) id, company_id, module, document_id, document_no, action, source,
+               user_id, user_name, change_count, changes, changed_at
+        FROM dbo.AuditLogs
+        WHERE company_id = @CompanyId
+          AND (@Module IS NULL OR module = @Module)
+          AND (@DocumentId IS NULL OR document_id = @DocumentId)
+        ORDER BY changed_at DESC, id DESC;
+        RETURN;
+    END
+END
+GO
+
+
+-- ============================================================================
+-- Airline ticket Auto Push import (migration 0074) - accounting/ticket_import.py
+-- ============================================================================
+CREATE OR ALTER PROCEDURE dbo.sp_TicketImport_Stage
+    -- INSERT_JSON : @RowsJson = JSON array, one object per passenger, keys =
+    --               staging column names (+ raw_payload). A document still
+    --               Pending / Error is replaced by the new push; one already
+    --               Processing / Imported / Skipped is never touched.
+    --               Returns one row per pushed passenger with its outcome.
+    -- DOC_STATUS  : one row per document (filters optional).
+    -- REQUEUE     : Error documents back to Pending (retry_count reset).
+    @Action         NVARCHAR(30),
+    @CompanyId      INT            = NULL,
+    @BatchId        NVARCHAR(50)   = NULL,
+    @RowsJson       NVARCHAR(MAX)  = NULL,
+    @DocKeysJson    NVARCHAR(MAX)  = NULL,
+    @SourceSystem   NVARCHAR(50)   = NULL,
+    @DocRef         NVARCHAR(60)   = NULL,
+    @ProcessStatus  NVARCHAR(20)   = NULL,
+    @Top            INT            = 200
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF @Action = 'INSERT_JSON'
+    BEGIN
+        IF @RowsJson IS NULL OR ISJSON(@RowsJson) = 0
+        BEGIN
+            SELECT 'Error' AS status, 'RowsJson must be a JSON array.' AS error;
+            RETURN;
+        END
+
+        SELECT j.*,
+               j.ticket_status + N'|' + CAST(j.company_id AS NVARCHAR(10)) + N'|' + j.source_system + N'|' + j.doc_ref AS doc_key
+        INTO #Src
+        FROM OPENJSON(@RowsJson) WITH (
+            source_system NVARCHAR(50), doc_ref NVARCHAR(60), source_record_id NVARCHAR(100),
+            ticket_status NVARCHAR(20), company_id INT,
+            branch_name NVARCHAR(100), invoice_number NVARCHAR(20), invoice_date DATE, invoice_type NVARCHAR(100),
+            booking_mode NVARCHAR(20), booking_type NVARCHAR(50), booking_status NVARCHAR(20),
+            customer_name NVARCHAR(150), supplier_name NVARCHAR(150), travel_type NVARCHAR(20), user_name NVARCHAR(100),
+            currency NVARCHAR(5), roe DECIMAL(10,4), booking_given_by NVARCHAR(25), booking_reference NVARCHAR(30),
+            booking_ref_date DATE, airline_pnr NVARCHAR(13), gds_pnr NVARCHAR(13), office_id NVARCHAR(30),
+            payment_mode NVARCHAR(20), payment_gateway_ref NVARCHAR(60), airline_category NVARCHAR(5),
+            original_ticket_no NVARCHAR(30), airline_code NVARCHAR(200), airline_name NVARCHAR(200),
+            line_airline_category NVARCHAR(5), flight_no NVARCHAR(200), ticket_no NVARCHAR(30),
+            passenger_name NVARCHAR(50), pax_type NVARCHAR(10), sector NVARCHAR(200), travel_date NVARCHAR(200),
+            cabin NVARCHAR(200), travel_class NVARCHAR(200), fare_type NVARCHAR(300), line_supplier_name NVARCHAR(150),
+            line_office_id NVARCHAR(30), fop NVARCHAR(20), card_number NVARCHAR(40), line_status NVARCHAR(15),
+            basic_fare DECIMAL(14,2), yq DECIMAL(14,2), yr DECIMAL(14,2), k3_tax DECIMAL(14,2), tax_others DECIMAL(14,2),
+            seat DECIMAL(14,2), meal DECIMAL(14,2), baggage DECIMAL(14,2), other_ssr DECIMAL(14,2),
+            disc_on NVARCHAR(20), disc_type NVARCHAR(12), disc_value DECIMAL(14,2), tds_per DECIMAL(5,2),
+            pg_charges DECIMAL(14,2), pg_charges_percentage DECIMAL(5,2), markup DECIMAL(14,2), addl_markup DECIMAL(14,2),
+            ssr_markup DECIMAL(14,2), service_fee DECIMAL(14,2), addl_service_fee DECIMAL(14,2), ssr_service_fee DECIMAL(14,2),
+            gst_pct DECIMAL(5,2), supp_comm_on NVARCHAR(20), supp_comm_type NVARCHAR(12), supp_comm_value DECIMAL(14,2),
+            supp_tds_per DECIMAL(5,2), supp_markup DECIMAL(14,2), supp_addl_markup DECIMAL(14,2), supp_ssr_markup DECIMAL(14,2),
+            supp_service_fee DECIMAL(14,2), supp_addl_service_fee DECIMAL(14,2), supp_ssr_service_fee DECIMAL(14,2),
+            supp_gst_pct DECIMAL(5,2), agent_penalty DECIMAL(14,2), reschedule_penalty DECIMAL(14,2),
+            supplier_penalty DECIMAL(14,2), cancellation_penalty DECIMAL(14,2), cust_markup_reversal DECIMAL(14,2),
+            cust_addl_markup_reversal DECIMAL(14,2), cust_ssr_markup_reversal DECIMAL(14,2), supp_markup_reversal DECIMAL(14,2),
+            supp_addl_markup_reversal DECIMAL(14,2), supp_ssr_markup_reversal DECIMAL(14,2),
+            tds_amount_override DECIMAL(14,2), supp_tds_amount_override DECIMAL(14,2), total_billed DECIMAL(14,2),
+            raw_payload NVARCHAR(MAX)
+        ) j;
+
+        BEGIN TRY
+            BEGIN TRAN;
+
+            -- Outcome per pushed passenger, decided before anything changes.
+            SELECT s.source_system, s.source_record_id, s.doc_key,
+                   CASE
+                       WHEN t.staging_id IS NOT NULL AND t.process_status IN ('Pending', 'Error') THEN 'Refreshed'
+                       WHEN t.staging_id IS NOT NULL THEN 'Unchanged'
+                       WHEN EXISTS (SELECT 1 FROM dbo.Ticket_Import_Staging d WITH (UPDLOCK, HOLDLOCK)
+                                    WHERE d.doc_key = s.doc_key AND d.process_status IN ('Processing', 'Imported', 'Skipped')) THEN 'Ignored'
+                       ELSE 'Inserted'
+                   END AS outcome
+            INTO #Out
+            FROM #Src s
+            LEFT JOIN dbo.Ticket_Import_Staging t WITH (UPDLOCK, HOLDLOCK)
+                   ON t.source_system = s.source_system AND t.source_record_id = s.source_record_id;
+
+            -- A document pushed again while still Pending / Error is replaced
+            -- as a whole (so a passenger dropped from it is dropped here too).
+            DELETE t FROM dbo.Ticket_Import_Staging t
+            WHERE t.process_status IN ('Pending', 'Error')
+              AND (t.doc_key IN (SELECT doc_key FROM #Out WHERE outcome IN ('Inserted', 'Refreshed'))
+                   OR EXISTS (SELECT 1 FROM #Out o WHERE o.outcome = 'Refreshed'
+                              AND o.source_system = t.source_system AND o.source_record_id = t.source_record_id));
+
+            INSERT INTO dbo.Ticket_Import_Staging (
+                batch_id, source_system, doc_ref, source_record_id, ticket_status, company_id,
+                branch_name, invoice_number, invoice_date, invoice_type, booking_mode, booking_type, booking_status,
+                customer_name, supplier_name, travel_type, user_name, currency, roe, booking_given_by,
+                booking_reference, booking_ref_date, airline_pnr, gds_pnr, office_id, payment_mode, payment_gateway_ref,
+                airline_category, original_ticket_no, airline_code, airline_name, line_airline_category, flight_no,
+                ticket_no, passenger_name, pax_type, sector, travel_date, cabin, travel_class, fare_type,
+                line_supplier_name, line_office_id, fop, card_number, line_status,
+                basic_fare, yq, yr, k3_tax, tax_others, seat, meal, baggage, other_ssr,
+                disc_on, disc_type, disc_value, tds_per, pg_charges, pg_charges_percentage,
+                markup, addl_markup, ssr_markup, service_fee, addl_service_fee, ssr_service_fee, gst_pct,
+                supp_comm_on, supp_comm_type, supp_comm_value, supp_tds_per, supp_markup, supp_addl_markup,
+                supp_ssr_markup, supp_service_fee, supp_addl_service_fee, supp_ssr_service_fee, supp_gst_pct,
+                agent_penalty, reschedule_penalty, supplier_penalty, cancellation_penalty,
+                cust_markup_reversal, cust_addl_markup_reversal, cust_ssr_markup_reversal,
+                supp_markup_reversal, supp_addl_markup_reversal, supp_ssr_markup_reversal,
+                tds_amount_override, supp_tds_amount_override, total_billed, raw_payload)
+            SELECT
+                @BatchId, s.source_system, s.doc_ref, s.source_record_id, s.ticket_status, s.company_id,
+                s.branch_name, s.invoice_number, s.invoice_date, s.invoice_type, s.booking_mode, s.booking_type, s.booking_status,
+                s.customer_name, s.supplier_name, s.travel_type, s.user_name, s.currency, s.roe, s.booking_given_by,
+                s.booking_reference, s.booking_ref_date, s.airline_pnr, s.gds_pnr, s.office_id, s.payment_mode, s.payment_gateway_ref,
+                s.airline_category, s.original_ticket_no, s.airline_code, s.airline_name, s.line_airline_category, s.flight_no,
+                s.ticket_no, s.passenger_name, s.pax_type, s.sector, s.travel_date, s.cabin, s.travel_class, s.fare_type,
+                s.line_supplier_name, s.line_office_id, s.fop, s.card_number, s.line_status,
+                ISNULL(s.basic_fare, 0), ISNULL(s.yq, 0), ISNULL(s.yr, 0), ISNULL(s.k3_tax, 0), ISNULL(s.tax_others, 0),
+                ISNULL(s.seat, 0), ISNULL(s.meal, 0), ISNULL(s.baggage, 0), ISNULL(s.other_ssr, 0),
+                s.disc_on, s.disc_type, ISNULL(s.disc_value, 0), ISNULL(s.tds_per, 0), ISNULL(s.pg_charges, 0), ISNULL(s.pg_charges_percentage, 0),
+                ISNULL(s.markup, 0), ISNULL(s.addl_markup, 0), ISNULL(s.ssr_markup, 0), ISNULL(s.service_fee, 0),
+                ISNULL(s.addl_service_fee, 0), ISNULL(s.ssr_service_fee, 0), ISNULL(s.gst_pct, 0),
+                s.supp_comm_on, s.supp_comm_type, ISNULL(s.supp_comm_value, 0), ISNULL(s.supp_tds_per, 0),
+                ISNULL(s.supp_markup, 0), ISNULL(s.supp_addl_markup, 0), ISNULL(s.supp_ssr_markup, 0),
+                ISNULL(s.supp_service_fee, 0), ISNULL(s.supp_addl_service_fee, 0), ISNULL(s.supp_ssr_service_fee, 0), ISNULL(s.supp_gst_pct, 0),
+                ISNULL(s.agent_penalty, 0), ISNULL(s.reschedule_penalty, 0), ISNULL(s.supplier_penalty, 0), ISNULL(s.cancellation_penalty, 0),
+                ISNULL(s.cust_markup_reversal, 0), ISNULL(s.cust_addl_markup_reversal, 0), ISNULL(s.cust_ssr_markup_reversal, 0),
+                ISNULL(s.supp_markup_reversal, 0), ISNULL(s.supp_addl_markup_reversal, 0), ISNULL(s.supp_ssr_markup_reversal, 0),
+                s.tds_amount_override, s.supp_tds_amount_override, s.total_billed, s.raw_payload
+            FROM #Src s
+            INNER JOIN #Out o ON o.source_system = s.source_system AND o.source_record_id = s.source_record_id
+            WHERE o.outcome IN ('Inserted', 'Refreshed');
+
+            COMMIT TRAN;
+        END TRY
+        BEGIN CATCH
+            IF @@TRANCOUNT > 0 ROLLBACK TRAN;
+            SELECT 'Error' AS status, ERROR_MESSAGE() AS error;
+            RETURN;
+        END CATCH
+
+        SELECT o.doc_key, o.source_record_id, o.outcome, t.staging_id, t.process_status,
+               t.saved_invoice_number, t.error_message
+        FROM #Out o
+        LEFT JOIN dbo.Ticket_Import_Staging t
+               ON t.source_system = o.source_system AND t.source_record_id = o.source_record_id;
+        RETURN;
+    END
+
+    IF @Action = 'DOC_STATUS'
+    BEGIN
+        SELECT TOP (@Top)
+               doc_key, MAX(company_id) AS company_id, MAX(source_system) AS source_system, MAX(doc_ref) AS doc_ref,
+               MAX(ticket_status) AS ticket_status, MAX(batch_id) AS batch_id, COUNT(*) AS passengers,
+               MAX(process_status) AS process_status, MAX(retry_count) AS retry_count, MAX(error_message) AS error_message,
+               MAX(saved_invoice_number) AS invoice_number, MAX(saved_voucher_no) AS voucher_no,
+               MAX(target_header_id) AS target_header_id, MAX(invoice_type) AS invoice_type,
+               MIN(received_at) AS received_at, MAX(processed_at) AS processed_at
+        FROM dbo.Ticket_Import_Staging
+        WHERE (@CompanyId IS NULL OR company_id = @CompanyId)
+          AND (@BatchId IS NULL OR batch_id = @BatchId)
+          AND (@SourceSystem IS NULL OR source_system = @SourceSystem)
+          AND (@DocRef IS NULL OR doc_ref = @DocRef)
+          AND (@ProcessStatus IS NULL OR process_status = @ProcessStatus)
+          AND (@DocKeysJson IS NULL OR doc_key IN (SELECT [value] FROM OPENJSON(@DocKeysJson)))
+        GROUP BY doc_key
+        ORDER BY MAX(staging_id) DESC;
+        RETURN;
+    END
+
+    IF @Action = 'REQUEUE'
+    BEGIN
+        UPDATE dbo.Ticket_Import_Staging
+        SET process_status = 'Pending', retry_count = 0, error_message = NULL, run_id = NULL, picked_at = NULL
+        WHERE process_status = 'Error'
+          AND (@CompanyId IS NULL OR company_id = @CompanyId)
+          AND (@DocKeysJson IS NULL OR doc_key IN (SELECT [value] FROM OPENJSON(@DocKeysJson)));
+        SELECT @@ROWCOUNT AS rows_requeued, 'Success' AS status;
+        RETURN;
+    END
+
+    SELECT 'Error' AS status, 'Unknown @Action ' + ISNULL(@Action, '') AS error;
+END
+GO
+
+CREATE OR ALTER PROCEDURE dbo.sp_TicketImport_Scheduler
+    -- START_RUN       : opens a run log row, returns run_id.
+    -- RESET_STUCK     : Processing for over @StuckMinutes (crashed run) -> Pending.
+    -- FETCH_PENDING   : claims up to @BatchSize whole documents (Processing) and
+    --                   returns their rows, Confirmed first, then Rescheduled,
+    --                   then Cancelled. A Rescheduled / Cancelled document waits
+    --                   while the ticket it changes is itself still queued here.
+    -- RESOLVE_PARENTS : the CURRENT live line of each Ticket No. in
+    --                   @TicketNosJson (a reschedule line not yet rescheduled /
+    --                   cancelled, else the original booking line) + its header.
+    -- MARK_IMPORTED / MARK_ERROR / MARK_SKIPPED : by @DocKey.
+    -- FINISH_RUN      : closes the run log row.
+    @Action          NVARCHAR(30),
+    @CompanyId       INT            = NULL,
+    @RunId           BIGINT         = NULL,
+    @BatchSize       INT            = 50,
+    @StuckMinutes    INT            = 30,
+    @DocKey          NVARCHAR(200)  = NULL,
+    @TicketNosJson   NVARCHAR(MAX)  = NULL,
+    @TargetHeaderId  INT            = NULL,
+    @InvoiceNumber   NVARCHAR(20)   = NULL,
+    @VoucherNo       NVARCHAR(30)   = NULL,
+    @ErrorMessage    NVARCHAR(1000) = NULL,
+    @MaxRetry        INT            = 3,
+    @DocsImported    INT            = NULL,
+    @DocsFailed      INT            = NULL,
+    @Message         NVARCHAR(1000) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF @Action = 'START_RUN'
+    BEGIN
+        INSERT INTO dbo.Ticket_Import_Run_Log (company_id) VALUES (@CompanyId);
+        SELECT CAST(SCOPE_IDENTITY() AS BIGINT) AS run_id, 'Success' AS status;
+        RETURN;
+    END
+
+    IF @Action = 'RESET_STUCK'
+    BEGIN
+        UPDATE dbo.Ticket_Import_Staging
+        SET process_status = 'Pending', picked_at = NULL, run_id = NULL,
+            error_message = 'Reset after being stuck in Processing for over ' + CAST(@StuckMinutes AS NVARCHAR(10)) + ' minutes.'
+        WHERE process_status = 'Processing'
+          AND picked_at < DATEADD(MINUTE, -@StuckMinutes, SYSUTCDATETIME())
+          AND (@CompanyId IS NULL OR company_id = @CompanyId);
+        SELECT @@ROWCOUNT AS rows_reset, 'Success' AS status;
+        RETURN;
+    END
+
+    IF @Action = 'FETCH_PENDING'
+    BEGIN
+        DECLARE @Claimed TABLE (staging_id BIGINT PRIMARY KEY);
+
+        SET XACT_ABORT ON;
+        BEGIN TRAN;
+        -- One claimer at a time, so two runs never split one document.
+        EXEC sp_getapplock @Resource = 'TicketImport_Fetch', @LockMode = 'Exclusive', @LockOwner = 'Transaction', @LockTimeout = 30000;
+
+        DECLARE @Candidates TABLE (staging_id BIGINT PRIMARY KEY, doc_key NVARCHAR(200), status_order INT, ready BIT);
+        INSERT INTO @Candidates (staging_id, doc_key, status_order, ready)
+        SELECT s.staging_id, s.doc_key,
+               CASE s.ticket_status WHEN 'Confirmed' THEN 1 WHEN 'Rescheduled' THEN 2 WHEN 'SSR' THEN 3 ELSE 4 END,
+               CASE WHEN s.ticket_status = 'Confirmed' THEN 1
+                    WHEN EXISTS (SELECT 1 FROM dbo.Rescheduled_Al_TicketLines rl
+                                 INNER JOIN dbo.Rescheduled_Al_Ticket rt ON rt.id = rl.reschedule_ticket_id
+                                 WHERE rt.company_id = s.company_id AND rl.ticket_no = s.original_ticket_no
+                                   AND rl.rescheduled = 0 AND rl.canceled = 0) THEN 1
+                    WHEN EXISTS (SELECT 1 FROM dbo.AL_TicketLines tl
+                                 INNER JOIN dbo.AL_Tickets t ON t.id = tl.ticket_id
+                                 WHERE t.company_id = s.company_id AND tl.ticket_no = s.original_ticket_no
+                                   AND tl.rescheduled = 0 AND tl.canceled = 0) THEN 1
+                    -- Parent not live yet but still queued here -> wait for it.
+                    WHEN EXISTS (SELECT 1 FROM dbo.Ticket_Import_Staging w
+                                 WHERE w.company_id = s.company_id AND w.ticket_no = s.original_ticket_no
+                                   AND w.staging_id <> s.staging_id AND w.process_status IN ('Pending', 'Processing')) THEN 0
+                    -- Nowhere at all -> hand it out so it fails with a clear message.
+                    ELSE 1 END
+        FROM dbo.Ticket_Import_Staging s
+        WHERE s.process_status = 'Pending'
+          AND (@CompanyId IS NULL OR s.company_id = @CompanyId)
+          AND (@RunId IS NULL OR s.run_id IS NULL OR s.run_id <> @RunId);   -- failed earlier in this run -> next run
+
+        UPDATE s
+        SET process_status = 'Processing', picked_at = SYSUTCDATETIME(), run_id = @RunId
+        OUTPUT inserted.staging_id INTO @Claimed (staging_id)
+        FROM dbo.Ticket_Import_Staging s
+        INNER JOIN @Candidates c ON c.staging_id = s.staging_id
+        WHERE s.process_status = 'Pending'
+          AND c.doc_key IN (SELECT TOP (@BatchSize) doc_key FROM @Candidates
+                            GROUP BY doc_key HAVING MIN(CAST(ready AS INT)) = 1
+                            ORDER BY MIN(status_order), MIN(staging_id));
+        COMMIT TRAN;
+
+        IF @RunId IS NOT NULL
+            UPDATE dbo.Ticket_Import_Run_Log SET rows_picked = rows_picked + (SELECT COUNT(*) FROM @Claimed) WHERE run_id = @RunId;
+
+        SELECT s.*
+        FROM dbo.Ticket_Import_Staging s
+        INNER JOIN @Claimed k ON k.staging_id = s.staging_id
+        ORDER BY CASE s.ticket_status WHEN 'Confirmed' THEN 1 WHEN 'Rescheduled' THEN 2 WHEN 'SSR' THEN 3 ELSE 4 END, s.doc_key, s.staging_id;
+        RETURN;
+    END
+
+    IF @Action = 'RESOLVE_PARENTS'
+    BEGIN
+        SELECT n.ticket_no AS lookup_ticket_no,
+               CASE k.pri WHEN 1 THEN 'Reschedule' ELSE 'Booking' END AS parent_kind,
+               k.line_id AS live_line_id,
+               COALESCE(rt.original_ticket_id, t.id) AS original_ticket_id,
+               COALESCE(rl.original_ticket_line_id, tl.id) AS original_ticket_line_id,
+               rt.id AS reschedule_ticket_id,
+               -- header of the live document (h_ = header field)
+               COALESCE(rt.invoice_number, t.invoice_number) AS h_invoice_number,
+               COALESCE(rt.invoice_type, t.invoice_type) AS h_invoice_type,
+               COALESCE(rt.branch_name, t.branch_name) AS h_branch_name,
+               COALESCE(rt.booking_type, t.booking_type) AS h_booking_type,
+               COALESCE(rt.travel_type, t.travel_type) AS h_travel_type,
+               COALESCE(rt.user_name, t.user_name) AS h_user_name,
+               COALESCE(rt.currency, t.currency) AS h_currency,
+               COALESCE(rt.roe, t.roe) AS h_roe,
+               COALESCE(rt.booking_given_by, t.booking_given_by) AS h_booking_given_by,
+               COALESCE(rt.booking_reference, t.booking_reference) AS h_booking_reference,
+               COALESCE(rt.airline_pnr, t.airline_pnr) AS h_airline_pnr,
+               COALESCE(rt.gds_pnr, t.gds_pnr) AS h_gds_pnr,
+               COALESCE(rt.office_id, t.office_id) AS h_office_id,
+               COALESCE(rt.payment_mode, t.payment_mode) AS h_payment_mode,
+               COALESCE(rt.payment_gateway_ref, t.payment_gateway_ref) AS h_payment_gateway_ref,
+               COALESCE(rt.airline_category, t.airline_category) AS h_airline_category,
+               hc.name AS h_customer_name, hs.name AS h_supplier_name,
+               -- the live passenger line (same names as the Ticket Entry line fields)
+               COALESCE(rl.airline_code, tl.airline_code) AS airline_code,
+               COALESCE(rl.airline_name, tl.airline_name) AS airline_name,
+               COALESCE(rl.airline_category, tl.airline_category) AS airline_category,
+               COALESCE(rl.flight_no, tl.flight_no) AS flight_no,
+               COALESCE(rl.ticket_no, tl.ticket_no) AS ticket_no,
+               COALESCE(rl.passenger_name, tl.passenger_name) AS passenger_name,
+               COALESCE(rl.pax_type, tl.pax_type) AS pax_type,
+               COALESCE(rl.sector, tl.sector) AS sector,
+               COALESCE(rl.travel_date, tl.travel_date) AS travel_date,
+               COALESCE(rl.cabin, tl.cabin) AS cabin,
+               COALESCE(rl.travel_class, tl.travel_class) AS travel_class,
+               COALESCE(rl.fare_type, tl.fare_type) AS fare_type,
+               COALESCE(rl.basic_fare, tl.basic_fare) AS basic_fare,
+               COALESCE(rl.yq, tl.yq) AS yq,
+               COALESCE(rl.yr, tl.yr) AS yr,
+               COALESCE(rl.k3_tax, tl.k3_tax) AS k3_tax,
+               COALESCE(rl.tax_others, tl.tax_others) AS tax_others,
+               COALESCE(rl.seat, tl.seat) AS seat,
+               COALESCE(rl.meal, tl.meal) AS meal,
+               COALESCE(rl.baggage, tl.baggage) AS baggage,
+               COALESCE(rl.other_ssr, tl.other_ssr) AS other_ssr,
+               COALESCE(rl.disc_on, tl.disc_on) AS disc_on,
+               COALESCE(rl.disc_type, tl.disc_type) AS disc_type,
+               COALESCE(rl.disc_value, tl.disc_value) AS disc_value,
+               COALESCE(rl.tds_per, tl.tds_per) AS tds_per,
+               COALESCE(rl.pg_charges, tl.pg_charges) AS pg_charges,
+               COALESCE(rl.pg_charges_percentage, tl.pg_charges_percentage) AS pg_charges_percentage,
+               COALESCE(rl.markup, tl.markup) AS markup,
+               COALESCE(rl.addl_markup, tl.addl_markup) AS addl_markup,
+               COALESCE(rl.ssr_markup, tl.ssr_markup) AS ssr_markup,
+               COALESCE(rl.service_fee, tl.service_fee) AS service_fee,
+               COALESCE(rl.addl_service_fee, tl.addl_service_fee) AS addl_service_fee,
+               COALESCE(rl.ssr_service_fee, tl.ssr_service_fee) AS ssr_service_fee,
+               COALESCE(rl.gst_pct, tl.gst_pct) AS gst_pct,
+               COALESCE(rl.status, tl.status) AS status,
+               COALESCE(rl.office_id, tl.office_id) AS office_id,
+               COALESCE(rl.fop, tl.fop) AS fop,
+               COALESCE(rl.card_number, tl.card_number) AS card_number,
+               COALESCE(rl.supp_comm_on, tl.supp_comm_on) AS supp_comm_on,
+               COALESCE(rl.supp_comm_type, tl.supp_comm_type) AS supp_comm_type,
+               COALESCE(rl.supp_comm_value, tl.supp_comm_value) AS supp_comm_value,
+               COALESCE(rl.supp_tds_per, tl.supp_tds_per) AS supp_tds_per,
+               COALESCE(rl.supp_markup, tl.supp_markup) AS supp_markup,
+               COALESCE(rl.supp_addl_markup, tl.supp_addl_markup) AS supp_addl_markup,
+               COALESCE(rl.supp_service_fee, tl.supp_service_fee) AS supp_service_fee,
+               COALESCE(rl.supp_addl_service_fee, tl.supp_addl_service_fee) AS supp_addl_service_fee,
+               COALESCE(rl.supp_gst_pct, tl.supp_gst_pct) AS supp_gst_pct,
+               COALESCE(rl.supp_ssr_markup, tl.supp_ssr_markup) AS supp_ssr_markup,
+               COALESCE(rl.supp_ssr_service_fee, tl.supp_ssr_service_fee) AS supp_ssr_service_fee,
+               COALESCE(rl.total_billed, tl.total_billed) AS total_billed,
+               ls.name AS supplier_name
+        FROM (SELECT DISTINCT CAST([value] AS NVARCHAR(30)) AS ticket_no FROM OPENJSON(@TicketNosJson)) n
+        CROSS APPLY (
+            SELECT TOP 1 x.pri, x.line_id FROM (
+                SELECT 1 AS pri, rl0.id AS line_id
+                FROM dbo.Rescheduled_Al_TicketLines rl0
+                INNER JOIN dbo.Rescheduled_Al_Ticket rt0 ON rt0.id = rl0.reschedule_ticket_id
+                WHERE rt0.company_id = @CompanyId AND rl0.ticket_no = n.ticket_no AND rl0.rescheduled = 0 AND rl0.canceled = 0
+                UNION ALL
+                SELECT 2, tl0.id
+                FROM dbo.AL_TicketLines tl0
+                INNER JOIN dbo.AL_Tickets t0 ON t0.id = tl0.ticket_id
+                WHERE t0.company_id = @CompanyId AND tl0.ticket_no = n.ticket_no AND tl0.rescheduled = 0 AND tl0.canceled = 0
+            ) x
+            ORDER BY x.pri, x.line_id DESC
+        ) k
+        LEFT JOIN dbo.Rescheduled_Al_TicketLines rl ON k.pri = 1 AND rl.id = k.line_id
+        LEFT JOIN dbo.Rescheduled_Al_Ticket rt ON rt.id = rl.reschedule_ticket_id
+        LEFT JOIN dbo.AL_TicketLines tl ON k.pri = 2 AND tl.id = k.line_id
+        LEFT JOIN dbo.AL_Tickets t ON t.id = tl.ticket_id
+        LEFT JOIN dbo.Ledgers hc ON hc.id = COALESCE(rt.customer_ledger_id, t.customer_ledger_id)
+        LEFT JOIN dbo.Ledgers hs ON hs.id = COALESCE(rt.supplier_ledger_id, t.supplier_ledger_id)
+        LEFT JOIN dbo.Ledgers ls ON ls.id = COALESCE(rl.supplier_ledger_id, tl.supplier_ledger_id);
+        RETURN;
+    END
+
+    IF @Action = 'MARK_IMPORTED'
+    BEGIN
+        UPDATE dbo.Ticket_Import_Staging
+        SET process_status = 'Imported', processed_at = SYSUTCDATETIME(), target_header_id = @TargetHeaderId,
+            saved_invoice_number = @InvoiceNumber, saved_voucher_no = @VoucherNo, error_message = NULL
+        WHERE doc_key = @DocKey AND process_status = 'Processing';
+        SELECT @@ROWCOUNT AS rows_marked, 'Imported' AS process_status;
+        RETURN;
+    END
+
+    IF @Action = 'MARK_ERROR'
+    BEGIN
+        -- Back to Pending until @MaxRetry tries, then Error for a person to look at.
+        UPDATE dbo.Ticket_Import_Staging
+        SET retry_count = retry_count + 1,
+            process_status = CASE WHEN retry_count + 1 >= @MaxRetry THEN 'Error' ELSE 'Pending' END,
+            error_message = LEFT(ISNULL(@ErrorMessage, 'Import failed.'), 1000),
+            processed_at = SYSUTCDATETIME(), picked_at = NULL
+        WHERE doc_key = @DocKey AND process_status = 'Processing';
+        SELECT @@ROWCOUNT AS rows_marked,
+               (SELECT MAX(process_status) FROM dbo.Ticket_Import_Staging WHERE doc_key = @DocKey) AS process_status;
+        RETURN;
+    END
+
+    IF @Action = 'MARK_SKIPPED'
+    BEGIN
+        UPDATE dbo.Ticket_Import_Staging
+        SET process_status = 'Skipped', processed_at = SYSUTCDATETIME(), error_message = @ErrorMessage
+        WHERE doc_key = @DocKey AND process_status IN ('Processing', 'Pending', 'Error');
+        SELECT @@ROWCOUNT AS rows_marked, 'Skipped' AS process_status;
+        RETURN;
+    END
+
+    IF @Action = 'FINISH_RUN'
+    BEGIN
+        UPDATE dbo.Ticket_Import_Run_Log
+        SET finished_at = SYSUTCDATETIME(), docs_imported = ISNULL(@DocsImported, docs_imported),
+            docs_failed = ISNULL(@DocsFailed, docs_failed), message = @Message
+        WHERE run_id = @RunId;
+        SELECT @RunId AS run_id, 'Success' AS status;
+        RETURN;
+    END
+
+    SELECT 'Error' AS status, 'Unknown @Action ' + ISNULL(@Action, '') AS error;
+END
+GO
+
+CREATE OR ALTER PROCEDURE dbo.sp_TicketImport_ErrorLog
+    -- INSERT_JSON : @RowsJson = [ {company_id, source_system, ..., error_message}, ... ]
+    -- LIST        : newest first; @FromDate / @ToDate are IST dates; @Resolved
+    --               NULL = all, 0 = open, 1 = resolved; @Search matches the
+    --               booking reference / parent PNR / ticket no / field / message.
+    --               @Source: API = everything but the Agent DB scheduler
+    --               (the Error Log page's "API Push" tab), AGENT_DB = only the
+    --               scheduler's rows ("Automated Database Scheduler" tab).
+    -- RESOLVE     : closes the open rows of @DocKey (it was imported later).
+    @Action         NVARCHAR(20),
+    @RowsJson       NVARCHAR(MAX)  = NULL,
+    @CompanyId      INT            = NULL,
+    @FromDate       DATE           = NULL,
+    @ToDate         DATE           = NULL,
+    @BookingStatus  NVARCHAR(20)   = NULL,
+    @ErrorType      NVARCHAR(30)   = NULL,
+    @Stage          NVARCHAR(20)   = NULL,
+    @Resolved       BIT            = NULL,
+    @Search         NVARCHAR(100)  = NULL,
+    @DocKey         NVARCHAR(200)  = NULL,
+    @Note           NVARCHAR(200)  = NULL,
+    @Top            INT            = 500,
+    @Source         NVARCHAR(20)   = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF @Action = 'INSERT_JSON'
+    BEGIN
+        INSERT INTO dbo.Ticket_Import_Error_Log (
+            company_id, source_system, batch_id, doc_key, booking_status, booking_reference, parent_pnr,
+            passenger_no, ticket_no, passenger_name, field_name, field_label, received_value, expected_value,
+            error_type, severity, stage, error_message)
+        SELECT j.company_id, j.source_system, j.batch_id, j.doc_key, j.booking_status, j.booking_reference, j.parent_pnr,
+               j.passenger_no, j.ticket_no, j.passenger_name, j.field_name, j.field_label,
+               LEFT(j.received_value, 500), LEFT(j.expected_value, 500),
+               j.error_type, ISNULL(j.severity, 'Error'), j.stage, LEFT(j.error_message, 1000)
+        FROM OPENJSON(@RowsJson) WITH (
+            company_id INT, source_system NVARCHAR(50), batch_id NVARCHAR(50), doc_key NVARCHAR(200),
+            booking_status NVARCHAR(20), booking_reference NVARCHAR(60), parent_pnr NVARCHAR(60),
+            passenger_no INT, ticket_no NVARCHAR(60), passenger_name NVARCHAR(100),
+            field_name NVARCHAR(100), field_label NVARCHAR(100),
+            received_value NVARCHAR(MAX), expected_value NVARCHAR(MAX),
+            error_type NVARCHAR(30), severity NVARCHAR(10), stage NVARCHAR(20), error_message NVARCHAR(MAX)
+        ) j;
+        SELECT @@ROWCOUNT AS rows_logged, 'Success' AS status;
+        RETURN;
+    END
+
+    IF @Action = 'LIST'
+    BEGIN
+        SELECT TOP (@Top)
+               e.error_log_id,
+               CONVERT(DATETIME2(0), SWITCHOFFSET(CONVERT(DATETIMEOFFSET, e.logged_at), '+05:30')) AS logged_at,
+               e.company_id, e.source_system, e.batch_id, e.doc_key, e.booking_status, e.booking_reference,
+               e.parent_pnr, e.passenger_no, e.ticket_no, e.passenger_name, e.field_name, e.field_label,
+               e.received_value, e.expected_value, e.error_type, e.severity, e.stage, e.error_message, e.is_resolved,
+               CONVERT(DATETIME2(0), SWITCHOFFSET(CONVERT(DATETIMEOFFSET, e.resolved_at), '+05:30')) AS resolved_at,
+               e.resolved_note
+        FROM dbo.Ticket_Import_Error_Log e
+        WHERE (@CompanyId IS NULL OR e.company_id = @CompanyId OR e.company_id IS NULL)
+          AND (@FromDate IS NULL OR e.logged_at >= DATEADD(MINUTE, -330, CAST(@FromDate AS DATETIME2)))
+          AND (@ToDate IS NULL OR e.logged_at < DATEADD(MINUTE, -330, CAST(DATEADD(DAY, 1, @ToDate) AS DATETIME2)))
+          AND (@BookingStatus IS NULL OR e.booking_status = @BookingStatus)
+          AND (@ErrorType IS NULL OR e.error_type = @ErrorType)
+          AND (@Stage IS NULL OR e.stage = @Stage)
+          AND (@Resolved IS NULL OR e.is_resolved = @Resolved)
+          AND (@Source IS NULL
+               OR (@Source = 'AGENT_DB' AND e.source_system = 'AGENT_DB')
+               OR (@Source = 'API' AND ISNULL(e.source_system, '') <> 'AGENT_DB'))
+          AND (@Search IS NULL
+               OR e.booking_reference LIKE '%' + @Search + '%' OR e.parent_pnr LIKE '%' + @Search + '%'
+               OR e.ticket_no LIKE '%' + @Search + '%' OR e.passenger_name LIKE '%' + @Search + '%'
+               OR e.field_name LIKE '%' + @Search + '%' OR e.field_label LIKE '%' + @Search + '%'
+               OR e.received_value LIKE '%' + @Search + '%' OR e.error_message LIKE '%' + @Search + '%')
+        ORDER BY e.error_log_id DESC;
+        RETURN;
+    END
+
+    IF @Action = 'RESOLVE'
+    BEGIN
+        UPDATE dbo.Ticket_Import_Error_Log
+        SET is_resolved = 1, resolved_at = SYSUTCDATETIME(), resolved_note = @Note
+        WHERE doc_key = @DocKey AND is_resolved = 0;
+        SELECT @@ROWCOUNT AS rows_resolved, 'Success' AS status;
+        RETURN;
+    END
+
+    SELECT 'Error' AS status, 'Unknown @Action ' + ISNULL(@Action, '') AS error;
+END
+GO
+
+CREATE OR ALTER PROCEDURE dbo.sp_TicketImport_InvoiceType
+    -- LIST : the Invoice Type picked for each Booking Status (Confirmed /
+    --        Rescheduled / Cancelled / SSR) of @CompanyId.
+    -- SET  : @VoucherTypeId becomes the Auto Push Invoice Type of every status
+    --        in @TicketStatusesJson (taking it over from any other type) and
+    --        stops being it for every status left out. Confirmed / Rescheduled /
+    --        SSR need an Airline voucher type, Cancelled a Credit Note one.
+    @Action              NVARCHAR(10),
+    @CompanyId           INT            = NULL,
+    @VoucherTypeId       INT            = NULL,
+    @TicketStatusesJson  NVARCHAR(MAX)  = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF @Action = 'SET'
+    BEGIN
+        DECLARE @Category NVARCHAR(20), @Name NVARCHAR(100);
+        SELECT @Category = voucher_category, @Name = name
+        FROM dbo.VoucherType WHERE id = @VoucherTypeId AND company_id = @CompanyId;
+        IF @Name IS NULL
+        BEGIN
+            SELECT 'Error' AS status, 'Voucher Type not found.' AS error;
+            RETURN;
+        END
+
+        DECLARE @Wanted TABLE (ticket_status NVARCHAR(20) PRIMARY KEY);
+        INSERT INTO @Wanted (ticket_status)
+        SELECT DISTINCT [value] FROM OPENJSON(ISNULL(@TicketStatusesJson, '[]'));
+
+        IF EXISTS (SELECT 1 FROM @Wanted WHERE ticket_status NOT IN ('Confirmed', 'Rescheduled', 'Cancelled', 'SSR'))
+        BEGIN
+            SELECT 'Error' AS status, 'Booking Status must be Confirmed, Rescheduled, Cancelled or SSR.' AS error;
+            RETURN;
+        END
+        IF @Category <> 'Airline' AND EXISTS (SELECT 1 FROM @Wanted WHERE ticket_status IN ('Confirmed', 'Rescheduled', 'SSR'))
+        BEGIN
+            SELECT 'Error' AS status,
+                   'Only an Airline voucher type can be the Auto Push Invoice Type for Confirmed / Rescheduled / SSR tickets.' AS error;
+            RETURN;
+        END
+        IF @Category <> 'Credit Note' AND EXISTS (SELECT 1 FROM @Wanted WHERE ticket_status = 'Cancelled')
+        BEGIN
+            SELECT 'Error' AS status,
+                   'Only a Credit Note voucher type can be the Auto Push Invoice Type for Cancelled tickets.' AS error;
+            RETURN;
+        END
+
+        BEGIN TRAN;
+        DELETE FROM dbo.Ticket_Import_Invoice_Type
+        WHERE company_id = @CompanyId AND voucher_type_id = @VoucherTypeId
+          AND ticket_status NOT IN (SELECT ticket_status FROM @Wanted);
+
+        MERGE dbo.Ticket_Import_Invoice_Type AS t
+        USING (SELECT ticket_status FROM @Wanted) AS w
+           ON t.company_id = @CompanyId AND t.ticket_status = w.ticket_status
+        WHEN MATCHED THEN UPDATE SET voucher_type_id = @VoucherTypeId, updated_at = SYSUTCDATETIME()
+        WHEN NOT MATCHED THEN INSERT (company_id, ticket_status, voucher_type_id) VALUES (@CompanyId, w.ticket_status, @VoucherTypeId);
+        COMMIT TRAN;
+        SET @Action = 'LIST';
+    END
+
+    IF @Action = 'LIST'
+    BEGIN
+        SELECT t.ticket_status, t.voucher_type_id, v.name AS voucher_type_name, v.voucher_category, v.is_active,
+               'Success' AS status
+        FROM dbo.Ticket_Import_Invoice_Type t
+        INNER JOIN dbo.VoucherType v ON v.id = t.voucher_type_id
+        WHERE t.company_id = @CompanyId
+        ORDER BY CASE t.ticket_status WHEN 'Confirmed' THEN 1 WHEN 'Rescheduled' THEN 2 WHEN 'SSR' THEN 3 ELSE 4 END;
+        RETURN;
+    END
+
+    SELECT 'Error' AS status, 'Unknown @Action ' + ISNULL(@Action, '') AS error;
+END
+GO
+
+CREATE OR ALTER PROCEDURE dbo.sp_MasterMappingPin
+    -- LIST                 : every pin of @CompanyId, with the pinned ledger's GST %.
+    -- DOCUMENTS            : saved documents of @CompanyId dated @FromDate or later that
+    --                        @ProductType's mapping applies to (Airline: Booking,
+    --                        Reschedule, Cancellation, SSR Updation and Miscellaneous -
+    --                        Misc falls back to Airline for Output / Input GST;
+    --                        Miscellaneous: Miscellaneous only). doc_date = the date
+    --                        the document's mappings are resolved for.
+    -- SAVE_JSON            : @RowsJson pins; a document already pinned for the field keeps its pin.
+    -- DELETE_FIELD         : pins of @FieldName on documents dated @FromDate or later.
+    -- DELETE_DOCUMENT      : every pin of one document (@DocType, @DocId) - it was edited.
+    -- DELETE_HISTORY_AFTER : Ledger Mapping history rows of @FieldName dated after @FromDate.
+    @Action        NVARCHAR(30),
+    @CompanyId     INT            = NULL,
+    @ProductType   NVARCHAR(20)   = NULL,
+    @FieldName     NVARCHAR(100)  = NULL,
+    @FromDate      DATE           = NULL,
+    @DocType       NVARCHAR(20)   = NULL,
+    @DocId         INT            = NULL,
+    @RowsJson      NVARCHAR(MAX)  = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF @Action = 'LIST'
+    BEGIN
+        SELECT p.product_type, p.field_name, p.doc_type, p.doc_id, p.doc_date, p.ledger_id,
+               COALESCE(NULLIF(l.alias_name, ''), l.name, p.ledger_name) AS ledger_name,
+               ISNULL(l.gst_percentage, 0) AS ledger_gst_percentage, p.masters_category, p.effective_from
+        FROM dbo.MasterMappingPin p
+        LEFT JOIN dbo.Ledgers l ON l.id = p.ledger_id
+        WHERE p.company_id = @CompanyId;
+        RETURN;
+    END
+
+    IF @Action = 'DOCUMENTS'
+    BEGIN
+        SELECT doc_type, doc_id, doc_no, doc_date FROM (
+            SELECT 'ticket' AS doc_type, id AS doc_id, invoice_number AS doc_no,
+                   COALESCE(invoice_date, booking_ref_date) AS doc_date
+            FROM dbo.AL_Tickets WHERE company_id = @CompanyId AND @ProductType = 'Airline'
+            UNION ALL
+            SELECT 'reschedule', id, invoice_number, COALESCE(invoice_date, booking_ref_date)
+            FROM dbo.Rescheduled_Al_Ticket WHERE company_id = @CompanyId AND @ProductType = 'Airline'
+            UNION ALL
+            SELECT 'cancellation', id, invoice_number, COALESCE(invoice_date, cancellation_ref_date)
+            FROM dbo.Cancellation_AL_Tickets WHERE company_id = @CompanyId AND @ProductType = 'Airline'
+            UNION ALL
+            SELECT 'ssr', id, invoice_number, invoice_date
+            FROM dbo.SSR_AL_Tickets WHERE company_id = @CompanyId AND @ProductType = 'Airline'
+            UNION ALL
+            SELECT 'misc', id, invoice_number, invoice_date
+            FROM dbo.Misc_Transactions WHERE company_id = @CompanyId AND @ProductType IN ('Airline', 'Miscellaneous')
+        ) d
+        WHERE d.doc_date >= @FromDate
+        ORDER BY d.doc_date, d.doc_type, d.doc_id;
+        RETURN;
+    END
+
+    IF @Action = 'SAVE_JSON'
+    BEGIN
+        INSERT INTO dbo.MasterMappingPin
+            (company_id, product_type, field_name, doc_type, doc_id, doc_date, ledger_id, ledger_name, masters_category, effective_from)
+        SELECT j.company_id, j.product_type, j.field_name, j.doc_type, j.doc_id, j.doc_date, j.ledger_id, j.ledger_name,
+               j.masters_category, j.effective_from
+        FROM OPENJSON(@RowsJson) WITH (
+            company_id INT, product_type NVARCHAR(20), field_name NVARCHAR(100), doc_type NVARCHAR(20), doc_id INT,
+            doc_date DATE, ledger_id INT, ledger_name NVARCHAR(200), masters_category NVARCHAR(40), effective_from DATE
+        ) j
+        WHERE NOT EXISTS (SELECT 1 FROM dbo.MasterMappingPin p
+                          WHERE p.company_id = j.company_id AND p.product_type = j.product_type
+                            AND p.field_name = j.field_name AND p.doc_type = j.doc_type AND p.doc_id = j.doc_id);
+        SELECT @@ROWCOUNT AS rows_pinned, 'Success' AS status;
+        RETURN;
+    END
+
+    IF @Action = 'DELETE_FIELD'
+    BEGIN
+        DELETE FROM dbo.MasterMappingPin
+        WHERE company_id = @CompanyId AND product_type = @ProductType AND field_name = @FieldName AND doc_date >= @FromDate;
+        SELECT @@ROWCOUNT AS rows_deleted, 'Success' AS status;
+        RETURN;
+    END
+
+    IF @Action = 'DELETE_DOCUMENT'
+    BEGIN
+        DELETE FROM dbo.MasterMappingPin WHERE doc_type = @DocType AND doc_id = @DocId;
+        SELECT @@ROWCOUNT AS rows_deleted, 'Success' AS status;
+        RETURN;
+    END
+
+    IF @Action = 'DELETE_HISTORY_AFTER'
+    BEGIN
+        DELETE FROM dbo.MasterMappingHistory
+        WHERE company_id = @CompanyId AND product_type = @ProductType AND field_name = @FieldName
+          AND effective_from > @FromDate;
+        SELECT @@ROWCOUNT AS rows_deleted, 'Success' AS status;
+        RETURN;
+    END
+
+    SELECT 'Error' AS status, 'Unknown @Action ' + ISNULL(@Action, '') AS error;
+END
+GO
+
+CREATE OR ALTER PROCEDURE dbo.sp_TicketLineGstAmount
+    -- LIST            : every line's GST amounts.
+    -- SAVE_JSON       : @RowsJson rows (insert or replace by line_type + doc_id + ticket_no).
+    -- DELETE_DOCUMENT : every row of one document (@LineType, @DocId) - it was edited on screen.
+    @Action      NVARCHAR(20),
+    @RowsJson    NVARCHAR(MAX) = NULL,
+    @LineType    NVARCHAR(20)  = NULL,
+    @DocId       INT           = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF @Action = 'LIST'
+    BEGIN
+        SELECT line_type, doc_id, ticket_no, service_fee_gst, addl_service_fee_gst, ssr_service_fee_gst,
+               supp_service_fee_gst, supp_addl_service_fee_gst, supp_ssr_service_fee_gst
+        FROM dbo.Ticket_Line_Gst_Amount;
+        RETURN;
+    END
+
+    IF @Action = 'SAVE_JSON'
+    BEGIN
+        MERGE dbo.Ticket_Line_Gst_Amount AS t
+        USING (
+            SELECT * FROM OPENJSON(@RowsJson) WITH (
+                line_type NVARCHAR(20), doc_id INT, ticket_no NVARCHAR(30),
+                service_fee_gst DECIMAL(14,2), addl_service_fee_gst DECIMAL(14,2), ssr_service_fee_gst DECIMAL(14,2),
+                supp_service_fee_gst DECIMAL(14,2), supp_addl_service_fee_gst DECIMAL(14,2), supp_ssr_service_fee_gst DECIMAL(14,2)
+            )
+        ) AS s ON t.line_type = s.line_type AND t.doc_id = s.doc_id AND t.ticket_no = s.ticket_no
+        WHEN MATCHED THEN UPDATE SET
+            service_fee_gst = s.service_fee_gst, addl_service_fee_gst = s.addl_service_fee_gst,
+            ssr_service_fee_gst = s.ssr_service_fee_gst, supp_service_fee_gst = s.supp_service_fee_gst,
+            supp_addl_service_fee_gst = s.supp_addl_service_fee_gst, supp_ssr_service_fee_gst = s.supp_ssr_service_fee_gst
+        WHEN NOT MATCHED THEN INSERT
+            (line_type, doc_id, ticket_no, service_fee_gst, addl_service_fee_gst, ssr_service_fee_gst,
+             supp_service_fee_gst, supp_addl_service_fee_gst, supp_ssr_service_fee_gst)
+            VALUES (s.line_type, s.doc_id, s.ticket_no, s.service_fee_gst, s.addl_service_fee_gst, s.ssr_service_fee_gst,
+                    s.supp_service_fee_gst, s.supp_addl_service_fee_gst, s.supp_ssr_service_fee_gst);
+        SELECT @@ROWCOUNT AS rows_saved, 'Success' AS status;
+        RETURN;
+    END
+
+    IF @Action = 'DELETE_DOCUMENT'
+    BEGIN
+        DELETE FROM dbo.Ticket_Line_Gst_Amount WHERE line_type = @LineType AND doc_id = @DocId;
+        SELECT @@ROWCOUNT AS rows_deleted, 'Success' AS status;
+        RETURN;
+    END
+
+    SELECT 'Error' AS status, 'Unknown @Action ' + ISNULL(@Action, '') AS error;
+END
+GO
+
+-- ==========================================================================
+-- Procedure : dbo.sp_TicketImport_KnownTickets (migration 0082)
+-- Auto Push direct Reschedule / Cancellation: which Ticket Nos. this software
+-- already has (Booking, Reschedule or Cancellation, any state). A ticket not
+-- found anywhere is saved direct; a known one that is no longer live is refused.
+-- ==========================================================================
+CREATE OR ALTER PROCEDURE dbo.sp_TicketImport_KnownTickets
+    @CompanyId      INT,
+    @TicketNosJson  NVARCHAR(MAX)            -- ["6E123", ...]
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT n.ticket_no,
+           CASE WHEN EXISTS (SELECT 1 FROM dbo.Cancellation_Al_TicketLines cl
+                             INNER JOIN dbo.Cancellation_AL_Tickets c ON c.id = cl.cancellation_ticket_id
+                             WHERE c.company_id = @CompanyId AND cl.ticket_no = n.ticket_no) THEN 'Cancellation'
+                WHEN EXISTS (SELECT 1 FROM dbo.Rescheduled_Al_TicketLines rl
+                             INNER JOIN dbo.Rescheduled_Al_Ticket r ON r.id = rl.reschedule_ticket_id
+                             WHERE r.company_id = @CompanyId AND rl.ticket_no = n.ticket_no) THEN 'Reschedule'
+                ELSE 'Booking' END AS found_on
+    FROM (SELECT DISTINCT CAST([value] AS NVARCHAR(30)) AS ticket_no FROM OPENJSON(@TicketNosJson)) n
+    WHERE EXISTS (SELECT 1 FROM dbo.AL_TicketLines tl INNER JOIN dbo.AL_Tickets t ON t.id = tl.ticket_id
+                  WHERE t.company_id = @CompanyId AND tl.ticket_no = n.ticket_no)
+       OR EXISTS (SELECT 1 FROM dbo.Rescheduled_Al_TicketLines rl INNER JOIN dbo.Rescheduled_Al_Ticket r ON r.id = rl.reschedule_ticket_id
+                  WHERE r.company_id = @CompanyId AND rl.ticket_no = n.ticket_no)
+       OR EXISTS (SELECT 1 FROM dbo.Cancellation_Al_TicketLines cl INNER JOIN dbo.Cancellation_AL_Tickets c ON c.id = cl.cancellation_ticket_id
+                  WHERE c.company_id = @CompanyId AND cl.ticket_no = n.ticket_no);
+END
+GO
+
+-- ==========================================================================
+-- Procedure : dbo.sp_DocumentAttribute (migration 0083)
+-- Ticket Entry Attributes popup - LIST / SAVE_JSON of a document's Field / Value rows.
+-- ==========================================================================
+CREATE OR ALTER PROCEDURE dbo.sp_DocumentAttribute
+    -- LIST      : one document's Field / Value rows, in order.
+    -- SAVE_JSON : replaces one document's rows with @RowsJson
+    --             ([{"field_name", "field_value"}, ...] - rows without a Field are skipped).
+    @Action         NVARCHAR(20),
+    @CompanyId      INT            = NULL,
+    @DocType        NVARCHAR(20)   = NULL,
+    @DocId          INT            = NULL,
+    @InvoiceNumber  NVARCHAR(20)   = NULL,
+    @RowsJson       NVARCHAR(MAX)  = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF @Action = 'LIST'
+    BEGIN
+        SELECT attribute_id, company_id, doc_type, doc_id, invoice_number, sort_order, field_name, field_value
+        FROM dbo.Ticket_Document_Attribute
+        WHERE doc_type = @DocType AND doc_id = @DocId
+        ORDER BY sort_order, attribute_id;
+        RETURN;
+    END
+
+    IF @Action = 'SAVE_JSON'
+    BEGIN
+        BEGIN TRY
+            BEGIN TRAN;
+            DELETE FROM dbo.Ticket_Document_Attribute WHERE doc_type = @DocType AND doc_id = @DocId;
+            INSERT INTO dbo.Ticket_Document_Attribute (company_id, doc_type, doc_id, invoice_number, sort_order, field_name, field_value)
+            SELECT @CompanyId, @DocType, @DocId, @InvoiceNumber,
+                   ROW_NUMBER() OVER (ORDER BY CAST(j.[key] AS INT)),
+                   LTRIM(RTRIM(v.field_name)), NULLIF(LTRIM(RTRIM(v.field_value)), '')
+            FROM OPENJSON(@RowsJson) j
+            CROSS APPLY OPENJSON(j.[value]) WITH (
+                field_name  NVARCHAR(100) '$.field_name',
+                field_value NVARCHAR(500) '$.field_value'
+            ) v
+            WHERE NULLIF(LTRIM(RTRIM(v.field_name)), '') IS NOT NULL;
+            DECLARE @Saved INT = @@ROWCOUNT;
+            COMMIT TRAN;
+            SELECT 'Success' AS status, @Saved AS saved;
+        END TRY
+        BEGIN CATCH
+            IF @@TRANCOUNT > 0 ROLLBACK TRAN;
+            SELECT 'Error' AS status, ERROR_MESSAGE() AS error;
+        END CATCH
+        RETURN;
+    END
+END
+GO
+
+-- ==========================================================================
+-- Procedure : dbo.sp_PGMasterBackdate (migration 0084)
+-- PG Master Effective From before today - Replace / Retain (like Ledger Mapping).
+-- ==========================================================================
+CREATE OR ALTER PROCEDURE dbo.sp_PGMasterBackdate
+    -- PG Master Effective From before today (like Ledger Mapping):
+    -- DOCUMENTS            : saved Booking / Reschedule / Cancellation paid through @GatewayName, dated @FromDate or later.
+    -- LATER_HISTORY        : the gateway's history rows dated @FromDate or later (replaced by the new values).
+    -- DELETE_HISTORY_AFTER : drops the gateway's history rows dated after @FromDate.
+    -- PINS_SAVE_JSON       : "Retain old ledgers" - @RowsJson pins (one per document, insert or replace).
+    -- PINS_DELETE_GATEWAY  : "Replace all" - the gateway's pins on documents dated @FromDate or later.
+    -- PINS_DELETE_DOCUMENT : a document edited on screen takes today's PG settings.
+    @Action        NVARCHAR(30),
+    @CompanyId     INT            = NULL,
+    @GatewayName   NVARCHAR(100)  = NULL,
+    @FromDate      DATE           = NULL,
+    @DocType       NVARCHAR(20)   = NULL,
+    @DocId         INT            = NULL,
+    @RowsJson      NVARCHAR(MAX)  = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF @Action = 'DOCUMENTS'
+    BEGIN
+        SELECT 'ticket' AS doc_type, t.id AS doc_id, t.invoice_number, COALESCE(t.invoice_date, t.booking_ref_date) AS doc_date
+        FROM dbo.AL_Tickets t
+        WHERE t.company_id = @CompanyId AND t.payment_mode = 'Payment Gateway' AND t.payment_gateway_ref = @GatewayName
+          AND COALESCE(t.invoice_date, t.booking_ref_date) >= @FromDate
+        UNION ALL
+        SELECT 'reschedule', r.id, r.invoice_number, COALESCE(r.invoice_date, r.booking_ref_date)
+        FROM dbo.Rescheduled_Al_Ticket r
+        WHERE r.company_id = @CompanyId AND r.payment_mode = 'Payment Gateway' AND r.payment_gateway_ref = @GatewayName
+          AND COALESCE(r.invoice_date, r.booking_ref_date) >= @FromDate
+        UNION ALL
+        SELECT 'cancellation', c.id, c.invoice_number, COALESCE(c.invoice_date, c.cancellation_ref_date)
+        FROM dbo.Cancellation_AL_Tickets c
+        WHERE c.company_id = @CompanyId AND c.payment_mode = 'Payment Gateway' AND c.payment_gateway_ref = @GatewayName
+          AND COALESCE(c.invoice_date, c.cancellation_ref_date) >= @FromDate
+        ORDER BY doc_date, doc_type, doc_id;
+        RETURN;
+    END
+
+    IF @Action = 'LATER_HISTORY'
+    BEGIN
+        SELECT h.effective_from, h.payment_master_ledger_name, h.pg_charges_master_ledger_name, h.pg_charges_percentage
+        FROM dbo.PGMasterHistory h
+        INNER JOIN dbo.PGMaster p ON p.id = h.pg_master_id
+        WHERE p.company_id = @CompanyId AND p.gateway_name = @GatewayName AND h.effective_from >= @FromDate
+        ORDER BY h.effective_from;
+        RETURN;
+    END
+
+    IF @Action = 'DELETE_HISTORY_AFTER'
+    BEGIN
+        DELETE h FROM dbo.PGMasterHistory h
+        INNER JOIN dbo.PGMaster p ON p.id = h.pg_master_id
+        WHERE p.company_id = @CompanyId AND p.gateway_name = @GatewayName AND h.effective_from > @FromDate;
+        SELECT @@ROWCOUNT AS deleted;
+        RETURN;
+    END
+
+    IF @Action = 'PINS_SAVE_JSON'
+    BEGIN
+        MERGE dbo.PGMasterPin AS tgt
+        USING (
+            SELECT * FROM OPENJSON(@RowsJson) WITH (
+                company_id INT '$.company_id', gateway_name NVARCHAR(100) '$.gateway_name',
+                doc_type NVARCHAR(20) '$.doc_type', doc_id INT '$.doc_id', doc_date DATE '$.doc_date',
+                payment_master_ledger_id INT '$.payment_master_ledger_id',
+                payment_master_ledger_name NVARCHAR(200) '$.payment_master_ledger_name',
+                pg_charges_master_ledger_id INT '$.pg_charges_master_ledger_id',
+                pg_charges_master_ledger_name NVARCHAR(200) '$.pg_charges_master_ledger_name',
+                pg_charges_percentage DECIMAL(5,2) '$.pg_charges_percentage',
+                effective_from DATE '$.effective_from'
+            )
+        ) AS src
+        ON tgt.company_id = src.company_id AND tgt.doc_type = src.doc_type AND tgt.doc_id = src.doc_id
+        WHEN MATCHED THEN UPDATE SET
+            gateway_name = src.gateway_name, doc_date = src.doc_date,
+            payment_master_ledger_id = src.payment_master_ledger_id, payment_master_ledger_name = src.payment_master_ledger_name,
+            pg_charges_master_ledger_id = src.pg_charges_master_ledger_id, pg_charges_master_ledger_name = src.pg_charges_master_ledger_name,
+            pg_charges_percentage = src.pg_charges_percentage, effective_from = src.effective_from
+        WHEN NOT MATCHED THEN INSERT
+            (company_id, gateway_name, doc_type, doc_id, doc_date, payment_master_ledger_id, payment_master_ledger_name,
+             pg_charges_master_ledger_id, pg_charges_master_ledger_name, pg_charges_percentage, effective_from)
+        VALUES
+            (src.company_id, src.gateway_name, src.doc_type, src.doc_id, src.doc_date, src.payment_master_ledger_id,
+             src.payment_master_ledger_name, src.pg_charges_master_ledger_id, src.pg_charges_master_ledger_name,
+             src.pg_charges_percentage, src.effective_from);
+        SELECT @@ROWCOUNT AS saved;
+        RETURN;
+    END
+
+    IF @Action = 'PINS_DELETE_GATEWAY'
+    BEGIN
+        DELETE FROM dbo.PGMasterPin
+        WHERE company_id = @CompanyId AND gateway_name = @GatewayName AND (@FromDate IS NULL OR doc_date >= @FromDate);
+        SELECT @@ROWCOUNT AS deleted;
+        RETURN;
+    END
+
+    IF @Action = 'PINS_DELETE_DOCUMENT'
+    BEGIN
+        DELETE FROM dbo.PGMasterPin WHERE doc_type = @DocType AND doc_id = @DocId;
+        SELECT @@ROWCOUNT AS deleted;
+        RETURN;
+    END
+END
+GO
+
+-- ==========================================================================
+-- Procedure : dbo.sp_AgentDbScheduler_Log (migration 0085)
+-- Runs of the Automated Database Scheduler (Airline_Agent -> invoices).
+-- ==========================================================================
+CREATE OR ALTER PROCEDURE dbo.sp_AgentDbScheduler_Log
+    -- INSERT : one scheduler run that fetched rows from the Airline_Agent
+    --          database (a run with nothing to fetch is not logged).
+    -- LIST   : newest first; times in IST; @FromDate / @ToDate are IST dates.
+    @Action           NVARCHAR(20),
+    @RunStartedAt     DATETIME2      = NULL,
+    @RunFinishedAt    DATETIME2      = NULL,
+    @SourceDatabase   NVARCHAR(128)  = NULL,
+    @SourceTable      NVARCHAR(128)  = NULL,
+    @RecordsFetched   INT            = NULL,
+    @InvoicesFetched  INT            = NULL,
+    @ImportedCount    INT            = NULL,
+    @PendingCount     INT            = NULL,
+    @ErrorCount       INT            = NULL,
+    @Message          NVARCHAR(1000) = NULL,
+    @FromDate         DATE           = NULL,
+    @ToDate           DATE           = NULL,
+    @Top              INT            = 200
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF @Action = 'INSERT'
+    BEGIN
+        INSERT INTO dbo.Agent_DB_Scheduler_Log (
+            run_started_at, run_finished_at, source_database, source_table, records_fetched, invoices_fetched,
+            imported_count, pending_count, error_count, message)
+        VALUES (@RunStartedAt, @RunFinishedAt, @SourceDatabase, @SourceTable, ISNULL(@RecordsFetched, 0),
+                ISNULL(@InvoicesFetched, 0), ISNULL(@ImportedCount, 0), ISNULL(@PendingCount, 0),
+                ISNULL(@ErrorCount, 0), @Message);
+        SELECT CAST(SCOPE_IDENTITY() AS BIGINT) AS log_id, 'Success' AS status;
+        RETURN;
+    END
+
+    IF @Action = 'LIST'
+    BEGIN
+        SELECT TOP (@Top)
+               l.log_id,
+               CONVERT(DATETIME2(0), SWITCHOFFSET(CONVERT(DATETIMEOFFSET, l.run_started_at), '+05:30')) AS run_started_at,
+               CONVERT(DATETIME2(0), SWITCHOFFSET(CONVERT(DATETIMEOFFSET, l.run_finished_at), '+05:30')) AS run_finished_at,
+               l.source_database, l.source_table, l.records_fetched, l.invoices_fetched,
+               l.imported_count, l.pending_count, l.error_count, l.message
+        FROM dbo.Agent_DB_Scheduler_Log l
+        WHERE (@FromDate IS NULL OR l.run_started_at >= DATEADD(MINUTE, -330, CAST(@FromDate AS DATETIME2)))
+          AND (@ToDate IS NULL OR l.run_started_at < DATEADD(MINUTE, -330, CAST(DATEADD(DAY, 1, @ToDate) AS DATETIME2)))
+        ORDER BY l.log_id DESC;
+        RETURN;
+    END
+
+    SELECT 'Error' AS status, 'Unknown @Action ' + ISNULL(@Action, '') AS error;
+END
+GO
+
+-- ==========================================================================
+-- Procedure : dbo.sp_AgentDbTicketLog (migration 0086)
+-- Automated Database Scheduler - one log row per Agent row picked up.
+-- ==========================================================================
+CREATE OR ALTER PROCEDURE dbo.sp_AgentDbTicketLog
+    -- One row per Agent row (passenger) the Automated Database Scheduler
+    -- picked up - the Agent's own table is only read, never written.
+    -- CLAIM_JSON  : first drops 'Processing' rows older than @StuckMinutes (a
+    --               run that died - they are picked up again), then inserts
+    --               @RowsJson [{agent_row_id, company_id, booking_status,
+    --               booking_reference, ticket_no, pax_name}] as 'Processing';
+    --               returns the agent_row_ids claimed (already logged = skipped).
+    -- RESULT_JSON : @RowsJson [{agent_row_id, process_status, invoice_number,
+    --               voucher_no, import_doc_key, error_message}].
+    -- RELEASE_JSON: deletes the 'Processing' rows of @RowsJson [{agent_row_id}]
+    --               (the run failed - they are picked up again).
+    -- SET_RUN     : @SchedulerLogId on the rows of @RowsJson [{agent_row_id}].
+    -- WAITING     : company_id + import_doc_key of rows still Pending / Error.
+    -- REFRESH     : the final import status of @DocKey (saved later by the
+    --               Ticket Import Scheduler) onto its Pending / Error rows.
+    @Action          NVARCHAR(20),
+    @SourceDatabase  NVARCHAR(128)  = NULL,
+    @SourceTable     NVARCHAR(128)  = NULL,
+    @RowsJson        NVARCHAR(MAX)  = NULL,
+    @StuckMinutes    INT            = 30,
+    @SchedulerLogId  BIGINT         = NULL,
+    @DocKey          NVARCHAR(200)  = NULL,
+    @ProcessStatus   NVARCHAR(20)   = NULL,
+    @InvoiceNumber   NVARCHAR(30)   = NULL,
+    @VoucherNo       NVARCHAR(30)   = NULL,
+    @ErrorMessage    NVARCHAR(2000) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF @Action = 'CLAIM_JSON'
+    BEGIN
+        DELETE FROM dbo.Agent_DB_Ticket_Log
+        WHERE source_database = @SourceDatabase AND source_table = @SourceTable
+          AND process_status = 'Processing' AND processing_at < DATEADD(MINUTE, -@StuckMinutes, SYSUTCDATETIME());
+
+        INSERT INTO dbo.Agent_DB_Ticket_Log (
+            source_database, source_table, agent_row_id, company_id, booking_status, booking_reference,
+            ticket_no, pax_name, process_status)
+        OUTPUT inserted.agent_row_id
+        SELECT @SourceDatabase, @SourceTable, j.agent_row_id, j.company_id, j.booking_status, j.booking_reference,
+               j.ticket_no, j.pax_name, 'Processing'
+        FROM OPENJSON(@RowsJson) WITH (
+            agent_row_id BIGINT, company_id INT, booking_status NVARCHAR(100), booking_reference NVARCHAR(100),
+            ticket_no NVARCHAR(100), pax_name NVARCHAR(100)
+        ) j
+        WHERE NOT EXISTS (SELECT 1 FROM dbo.Agent_DB_Ticket_Log l
+                          WHERE l.source_database = @SourceDatabase AND l.source_table = @SourceTable
+                            AND l.agent_row_id = j.agent_row_id);
+        RETURN;
+    END
+
+    IF @Action = 'RESULT_JSON'
+    BEGIN
+        UPDATE l
+        SET process_status = j.process_status, processed_at = SYSUTCDATETIME(), invoice_number = j.invoice_number,
+            voucher_no = j.voucher_no, import_doc_key = j.import_doc_key, error_message = LEFT(j.error_message, 2000)
+        FROM dbo.Agent_DB_Ticket_Log l
+        JOIN OPENJSON(@RowsJson) WITH (
+            agent_row_id BIGINT, process_status NVARCHAR(20), invoice_number NVARCHAR(30), voucher_no NVARCHAR(30),
+            import_doc_key NVARCHAR(200), error_message NVARCHAR(MAX)
+        ) j ON j.agent_row_id = l.agent_row_id
+        WHERE l.source_database = @SourceDatabase AND l.source_table = @SourceTable;
+        SELECT @@ROWCOUNT AS updated;
+        RETURN;
+    END
+
+    IF @Action = 'RELEASE_JSON'
+    BEGIN
+        DELETE l
+        FROM dbo.Agent_DB_Ticket_Log l
+        JOIN OPENJSON(@RowsJson) WITH (agent_row_id BIGINT) j ON j.agent_row_id = l.agent_row_id
+        WHERE l.source_database = @SourceDatabase AND l.source_table = @SourceTable AND l.process_status = 'Processing';
+        SELECT @@ROWCOUNT AS released;
+        RETURN;
+    END
+
+    IF @Action = 'SET_RUN'
+    BEGIN
+        UPDATE l SET scheduler_log_id = @SchedulerLogId
+        FROM dbo.Agent_DB_Ticket_Log l
+        JOIN OPENJSON(@RowsJson) WITH (agent_row_id BIGINT) j ON j.agent_row_id = l.agent_row_id
+        WHERE l.source_database = @SourceDatabase AND l.source_table = @SourceTable;
+        SELECT @@ROWCOUNT AS updated;
+        RETURN;
+    END
+
+    IF @Action = 'WAITING'
+    BEGIN
+        SELECT DISTINCT company_id, import_doc_key
+        FROM dbo.Agent_DB_Ticket_Log
+        WHERE process_status IN ('Pending', 'Error') AND import_doc_key IS NOT NULL;
+        RETURN;
+    END
+
+    IF @Action = 'REFRESH'
+    BEGIN
+        UPDATE dbo.Agent_DB_Ticket_Log
+        SET process_status = @ProcessStatus, processed_at = SYSUTCDATETIME(), invoice_number = @InvoiceNumber,
+            voucher_no = @VoucherNo, error_message = @ErrorMessage
+        WHERE import_doc_key = @DocKey AND process_status IN ('Pending', 'Error')
+          AND (process_status <> @ProcessStatus OR ISNULL(error_message, N'') <> ISNULL(@ErrorMessage, N''));
+        SELECT @@ROWCOUNT AS updated;
+        RETURN;
+    END
+
+    SELECT 'Error' AS status, 'Unknown @Action ' + ISNULL(@Action, '') AS error;
 END
 GO

@@ -359,8 +359,6 @@
     const uniq = (vals) => [...new Set(vals.flatMap((v) => String(v || "").split(",")).map((v) => v.trim()).filter(Boolean))];
     const PAX = { ADULT: "ADT", CHILD: "CHD", INFANT: "INF" };
     const yq = (l) => num(l.yq ?? (l.taxParts || {}).YQ);
-    const otherTax = (l) => num(l.tax) - yq(l);
-    const rowTotal = (l) => num(l.fare) + yq(l) + otherTax(l) + num(l.baggage) + num(l.seat) + num(l.meal) + num(l.otherSsr);
     const sum = (f) => d.lines.reduce((s, l) => s + f(l), 0);
     const r2 = (v) => Math.round(v * 100) / 100;
 
@@ -371,6 +369,19 @@
       : l.fullCgst != null ? num(l.fullIgst) + num(l.fullCgst) + num(l.fullSgst)
       : num(l.fareGst ?? l.gst));
     const svc = (l) => num(l.t2ServiceFee ?? l.fareServiceFee ?? l.serviceFee);
+    // Markup & other charges (markups, penalties; on a Credit Note the
+    // markups / penalties kept back, net of any markup reversal) have no
+    // summary row - they sit inside each passenger's Other Taxes, so the
+    // passenger Total and Gross carry them. Worked out per passenger as
+    // what's left of its amount once fare, Discount, Service Fee, GST and
+    // TDS are accounted for, so the summary always adds up to Net Amount.
+    // Same for Booking, Reschedule, Cancellation and SSR Updation.
+    const baseTotal = (l) => num(l.fare) + num(l.tax) + num(l.baggage) + num(l.seat) + num(l.meal) + num(l.otherSsr);
+    const otherCharges = (l) => r2(d.creditNote
+      ? num(l.amount) - (baseTotal(l) - num(l.discount) - svc(l) - lineGst(l) + num(l.custTds))
+      : num(l.amount) - (baseTotal(l) - num(l.discount) + svc(l) + lineGst(l) + num(l.custTds)));
+    const otherTax = (l) => num(l.tax) - yq(l) + otherCharges(l);
+    const rowTotal = (l) => num(l.fare) + yq(l) + otherTax(l) + num(l.baggage) + num(l.seat) + num(l.meal) + num(l.otherSsr);
     const gross = r2(sum(rowTotal));
     const commission = r2(sum((l) => num(l.discount)));
     const serviceFee = r2(sum(svc));
@@ -383,19 +394,19 @@
     const half = (Number(d.gstRate) || 0) / 2;
     const summary = [["", "Gross:", gross, true]];
     if (d.creditNote) {
-      // Credit Note: what's refunded = Gross - Commission + TDS - the
-      // cancellation charges (markups, service fees, GST, penalties, net of
-      // any markup reversal) kept back.
-      summary.push(["Less", "Discount", commission], ["Add", "TDS Deducted", tdsAmt]);
-      const charges = r2(gross - commission + tdsAmt - net);
-      if (charges) summary.push([charges > 0 ? "Less" : "Add", "Cancellation Charges", Math.abs(charges)]);
+      // Credit Note - the same rows as a Booking / Reschedule (one template
+      // for Booking, Reschedule, Cancellation and SSR Updation): Service Fee
+      // and its CGST / SGST / IGST each on their own row, kept back from the
+      // refund (Less). Markups / penalties are inside Other Taxes (above).
+      summary.push(["Less", "Discount", commission],
+        ["Less", "Service Fee", serviceFee],
+        ["Less", `CGST @${half.toFixed(2)}%`, cgst], ["Less", `SGST @${half.toFixed(2)}%`, sgst],
+        ["Less", `IGST @${(d.intraState ? 0 : Number(d.gstRate) || 0).toFixed(2)}%`, igst],
+        ["Add", "TDS Deducted", tdsAmt]);
     } else {
-      summary.push(["Less", "Discount", commission]);
-      // Markups / penalties have no row of their own in the reference - one
-      // line, only when there are any, so the summary adds up to Net Amount.
-      const other = r2(net - (gross - commission + serviceFee + gstAmt + tdsAmt));
-      if (other) summary.push([other > 0 ? "Add" : "Less", "Markup & Other Charges", Math.abs(other)]);
-      summary.push(["Add", "Service Fee", serviceFee],
+      // Markups / penalties are inside Other Taxes (above) - no row of their own.
+      summary.push(["Less", "Discount", commission],
+        ["Add", "Service Fee", serviceFee],
         ["Add", `CGST @${half.toFixed(2)}%`, cgst], ["Add", `SGST @${half.toFixed(2)}%`, sgst],
         ["Add", `IGST @${(d.intraState ? 0 : Number(d.gstRate) || 0).toFixed(2)}%`, igst],
         ["Add", "TDS Deducted", tdsAmt]);
@@ -459,7 +470,7 @@
         .terms ul { margin: 0; padding-left: 18px; line-height: 1.7; }
       </style></head><body>
       <div class="page">
-        <h1>${d.creditNote ? "CREDIT NOTE" : "PERFORMA INVOICE"}</h1>
+        <h1>${esc(String(d.invoiceType || (d.creditNote ? "Credit Note" : "Performa Invoice")).toUpperCase())}</h1>
         <table class="bar"><tr><td>${esc(d.invoiceDateLabel)}: ${esc(d.invoiceDate)}</td><td class="r">${esc(d.invoiceNoLabel)}: ${esc(d.invoiceNo)}</td></tr></table>
         <table class="parties"><tr>
           ${party("From", { name: c.name, address: companyLine(c) || "N/A", email: c.email, phone: c.phone, pan: c.pan_number, state: c.state, gst_no: c.gst_no })}

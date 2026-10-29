@@ -8,7 +8,7 @@
   const API = "http://127.0.0.1:8000/api/user-management/";
   const MODULE_ORDER = ["Masters", "Transactions", "Reports", "Control Panel"];
   const MODULE_LABEL = { Transactions: "Transactions › Airline" };
-  const FLAGS = ["can_view", "can_add", "can_edit", "can_delete"];
+  const FLAGS = ["can_view", "can_add", "can_edit", "can_delete", "can_print", "can_export"];
 
   let users = [];
   let editingUserId = null;
@@ -83,7 +83,7 @@
         <td><span class="status-badge ${u.is_active ? "badge-active" : "badge-inactive"}">${u.is_active ? "Active" : "Inactive"}</span></td>
         <td class="row-actions">
           <button type="button" class="um-edit-btn" title="Edit">${ICONS.edit}</button>
-          <button type="button" class="um-access-btn" title="Menu Access">${ICONS.lock}</button>
+          <button type="button" class="um-access-btn" title="Access Control">${ICONS.lock}</button>
           <button type="button" class="um-toggle-btn" title="${u.is_active ? "Deactivate" : "Activate"}">${u.is_active ? ICONS.deactivate : ICONS.activate}</button>
           <button type="button" class="um-delete-btn" title="Delete">${ICONS.trash}</button>
         </td>
@@ -97,7 +97,7 @@
     const user = users.find((u) => u.id === Number(row.dataset.id));
     if (!user) return;
     if (btn.classList.contains("um-edit-btn")) openUserModal(user);
-    else if (btn.classList.contains("um-access-btn")) openAccessModal(user);
+    else if (btn.classList.contains("um-access-btn")) window.location.href = `access-control.html?user=${user.id}`;
     else if (btn.classList.contains("um-toggle-btn")) toggleActive(user);
     else if (btn.classList.contains("um-delete-btn")) deleteUser(user);
   });
@@ -262,11 +262,11 @@
     }).join("");
   }
 
-  // Add/Edit/Delete implies View; clearing View clears the rest.
+  // Add/Edit/Delete/Print/Export implies View; clearing View clears the rest.
   function setFlag(row, flag, value) {
     row[flag] = value;
     if (value && flag !== "can_view") row.can_view = true;
-    if (!value && flag === "can_view") { row.can_add = false; row.can_edit = false; row.can_delete = false; }
+    if (!value && flag === "can_view") FLAGS.forEach((fl) => { row[fl] = false; });
   }
 
   uaTbody.addEventListener("change", (e) => {
@@ -305,6 +305,7 @@
           created_by: signedIn && signedIn.id ? signedIn.id : null,
           access: accessRows.map((r) => ({
             menu_key: r.menu_key, can_view: r.can_view, can_add: r.can_add, can_edit: r.can_edit, can_delete: r.can_delete,
+            can_print: r.can_print, can_export: r.can_export,
           })),
         }),
       });

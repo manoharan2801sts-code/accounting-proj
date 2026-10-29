@@ -202,5 +202,5 @@ def ticket_chain_lock_message(company_id, ticket_id=None, reschedule_id=None):
 
 
 # Register every procedure's handlers.
-from . import ledger_masters, setup_masters, tickets_vouchers, reschedule_cancellation, user_management, ssr, misc, dropdown_audit  # noqa: E402,F401
+from . import ledger_masters, setup_masters, tickets_vouchers, reschedule_cancellation, user_management, ssr, misc, dropdown_audit, ticket_import_agent  # noqa: E402,F401
 

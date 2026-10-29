@@ -104,7 +104,23 @@ DATABASES = {
     }
 }
 
+# Airline ticket Auto Push import - X-Api-Key header for /api/import/tickets/...
+TICKET_IMPORT_API_KEY = config("TICKET_IMPORT_API_KEY", default="")
+
+AGENT_DB_NAME = config("AGENT_DB_NAME", default="Airline_Agent")
+AGENT_DB_TABLE = config("AGENT_DB_TABLE", default="Agent_ticket_data")
+AGENT_DB_SCHEDULER_MINUTES = config("AGENT_DB_SCHEDULER_MINUTES", default=5, cast=int)
+AGENT_DB_SCHEDULER_ENABLED = config("AGENT_DB_SCHEDULER_ENABLED", default=True, cast=bool)
+AGENT_DB_BATCH_SIZE = config("AGENT_DB_BATCH_SIZE", default=200, cast=int)
+
+DATABASES["agent_db"] = {
+    **DATABASES["default"],
+    "NAME": AGENT_DB_NAME,
+}
+
 DEFAULT_AUTO_FIELD = "django.db.models.AutoField"
+
+DATA_UPLOAD_MAX_MEMORY_SIZE = 15 * 1024 * 1024
 
 # ---------------------------------------------------------------------------
 # Static files & Frontend assets (WhiteNoise)

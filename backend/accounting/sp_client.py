@@ -438,14 +438,16 @@ def pg_master_history_list(gateway_id, company_id):
     return exec_sp("dbo.sp_PGMaster", {"Action": "HISTORY_LIST", "Id": gateway_id, "CompanyId": company_id})
 
 
-def pg_master_effective_snapshot(company_id, gateway_name, as_of_date=None):
+def pg_master_effective_snapshot(company_id, gateway_name, as_of_date=None, doc=None):
     """
     The ledger/percentage snapshot in force for `gateway_name` on
     `as_of_date` - views._pg_master_effective_snapshot(). None if the
-    gateway itself doesn't exist for this company.
+    gateway itself doesn't exist for this company. doc = (doc_type, id) of
+    the saved document asking - its PGMasterPin ("Retain old ledgers") wins.
     """
     row = exec_sp_one("dbo.sp_PGMaster", {
         "Action": "EFFECTIVE_SNAPSHOT", "CompanyId": company_id, "GatewayName": gateway_name, "AsOfDate": as_of_date,
+        "DocType": doc[0] if doc else None, "DocId": doc[1] if doc else None,
     })
     if row and row.get("status") == "Error":
         return None
@@ -777,7 +779,7 @@ def cancellation_ticket_get(cancellation_id, company_id):
 
 
 def cancellation_ticket_save(company_id, original_ticket_id, customer_name, header_fields, lines,
-                             jv_narration, jv_total_debit, jv_total_credit):
+                             jv_narration, jv_total_debit, jv_total_credit, parent_pnr=None):
     """
     Creates a Cancellation_AL_Tickets + its lines + its own Cancellation
     Journal Voucher, all in ONE atomic dbo.sp_CancellationTicket SAVE call -
@@ -789,10 +791,13 @@ def cancellation_ticket_save(company_id, original_ticket_id, customer_name, head
     supplier, duplicate invoice/reference/ticket_no, a line not belonging to
     the original ticket, a line already cancelled, or an unbalanced/missing
     JV). Returns {"id", "line_ids": [..], "voucher_id", "voucher_no"}.
+    original_ticket_id None + parent_pnr = a direct Cancellation (booking not
+    in this software).
     """
     import json as _json
     params = {
-        "Action": "SAVE", "CompanyId": company_id, "OriginalTicketId": original_ticket_id, "CustomerName": customer_name,
+        "Action": "SAVE", "CompanyId": company_id, "OriginalTicketId": original_ticket_id, "ParentPnr": parent_pnr,
+        "CustomerName": customer_name,
         "SupplierName": header_fields.get("supplier_name"), "BranchName": header_fields.get("branch_name"),
         "InvoiceNumber": header_fields.get("invoice_number"), "InvoiceDate": header_fields.get("invoice_date"),
         "InvoiceType": header_fields.get("invoice_type"), "BookingMode": header_fields.get("booking_mode"),
@@ -914,7 +919,8 @@ def user_menu_access_get(user_id):
 
 def user_menu_access_save(user_id, access_list, created_by=None):
     """
-    Upserts every {menu_key, can_view, can_add, can_edit, can_delete} row
+    Upserts every {menu_key, can_view, can_add, can_edit, can_delete,
+    can_print, can_export} row
     in `access_list` for this user, in one transaction - views.user_menu_access_save.
     Raises StoredProcedureError if the user doesn't exist.
     """
@@ -978,6 +984,7 @@ def ssr_ticket_save(company_id, header_fields, lines, jv_narration, jv_total_deb
         "SsrRefDate": header_fields.get("ssr_ref_date"), "AirlinePnr": header_fields.get("airline_pnr"),
         "GdsPnr": header_fields.get("gds_pnr"), "PaymentMode": header_fields.get("payment_mode"),
         "PaymentGatewayRef": header_fields.get("payment_gateway_ref"),
+        "BookingMode": header_fields.get("booking_mode"), "ParentPnr": header_fields.get("parent_pnr"),
         "LinesJson": _json.dumps(lines, default=str),
         "JvNarration": jv_narration, "JvTotalDebit": jv_total_debit, "JvTotalCredit": jv_total_credit,
     }
@@ -1042,6 +1049,7 @@ def misc_save(company_id, fields, jv_narration, jv_total_debit, jv_total_credit,
     return {"id": row["id"], "voucher_id": row.get("voucher_id"), "voucher_no": row.get("voucher_no")}
 
 
+
 # ==========================================================================
 # Airline dropdown lists (dbo.sp_AirlineDropdown)
 # ==========================================================================
@@ -1054,7 +1062,6 @@ def airline_dropdown_list(list_key=None):
 def airline_dropdown_resolve(list_key, code=None, name=None):
     """One value of a list by its short code (e.g. paxTypes / ADT) or its name - for Auto Push / import."""
     return exec_sp_one("dbo.sp_AirlineDropdown", {"Action": "RESOLVE", "ListKey": list_key, "Code": code, "Name": name})
-
 
 # ==========================================================================
 # Edit history / audit log (dbo.sp_AuditLog)
@@ -1084,83 +1091,316 @@ def audit_list(company_id, module=None, document_id=None, top=500):
 
 
 # ==========================================================================
-# User Management (dbo.sp_AppUser / sp_MenuMaster / sp_UserMenuAccess)
+# Airline ticket Auto Push import (dbo.sp_TicketImport_Stage /
+# dbo.sp_TicketImport_Scheduler) - see ticket_import.py
 # ==========================================================================
 
-def app_user_get(user_id):
-    """One user by id - views.app_user_list's ?id= branch. None if not found."""
-    return exec_sp_one("dbo.sp_AppUser", {"Action": "LIST", "Id": user_id})
+def _ticket_import_json(value):
+    import json as _json
+    return _json.dumps(value, default=str)
 
 
-def app_user_get_by_email(email):
-    """One user by email, including password_hash - views.auth_login only. None if not found."""
-    return exec_sp_one("dbo.sp_AppUser", {"Action": "GET_BY_EMAIL", "Email": email})
+def ticket_import_stage(batch_id, rows):
+    """Stages passenger rows; one outcome row per passenger (Inserted / Refreshed / Unchanged / Ignored)."""
+    rows_out = exec_sp("dbo.sp_TicketImport_Stage", {
+        "Action": "INSERT_JSON", "BatchId": batch_id, "RowsJson": _ticket_import_json(rows),
+    })
+    if rows_out and rows_out[0].get("status") == "Error":
+        raise StoredProcedureError(rows_out[0].get("error") or "Could not stage the tickets.")
+    return rows_out
 
 
-def app_user_list():
-    """Every user, ordered by name - views.app_user_list's bare GET."""
-    return exec_sp("dbo.sp_AppUser", {"Action": "LIST"})
+def ticket_import_doc_status(company_id=None, batch_id=None, source_system=None, doc_ref=None,
+                             process_status=None, doc_keys=None, top=200):
+    """One row per staged document with its import status / saved invoice number."""
+    return exec_sp("dbo.sp_TicketImport_Stage", {
+        "Action": "DOC_STATUS", "CompanyId": company_id, "BatchId": batch_id, "SourceSystem": source_system,
+        "DocRef": doc_ref, "ProcessStatus": process_status,
+        "DocKeysJson": _ticket_import_json(doc_keys) if doc_keys else None, "Top": top,
+    })
 
 
-def app_user_save(fields, user_id=None):
-    """
-    Upserts an AppUsers row - views.app_user_save. `fields` is the
-    already-normalized dict views.py builds (full_name, email, role, ...).
-    Raises StoredProcedureError on validation/duplicate-email failure, or
-    if this would leave zero active Super Admins.
-    """
-    params = {
-        "Action": "SAVE", "Id": user_id,
-        "FullName": fields.get("full_name"), "Email": fields.get("email"),
-        "Role": fields.get("role"), "BranchName": fields.get("branch_name"),
-        "IsSuperAdmin": fields.get("is_super_admin"), "IsActive": fields.get("is_active"),
-        "PasswordHash": fields.get("password_hash"),
-    }
-    row = exec_sp_one("dbo.sp_AppUser", params)
-    if row and row.get("status") == "Error":
-        raise StoredProcedureError(row.get("error") or "Could not save this user.")
-    return row
+def ticket_import_requeue(company_id=None, doc_keys=None):
+    """Error documents back to Pending - returns how many passenger rows were requeued."""
+    row = exec_sp_one("dbo.sp_TicketImport_Stage", {
+        "Action": "REQUEUE", "CompanyId": company_id,
+        "DocKeysJson": _ticket_import_json(doc_keys) if doc_keys else None,
+    })
+    return (row or {}).get("rows_requeued", 0)
 
 
-def app_user_delete(user_id):
-    """Deletes an AppUsers row - views.app_user_delete. Raises StoredProcedureError if not found or last Super Admin."""
-    row = exec_sp_one("dbo.sp_AppUser", {"Action": "DELETE", "Id": user_id})
-    if row and row.get("status") == "Error":
-        raise StoredProcedureError(row.get("error") or "Could not delete this user.")
-    return row
+def ticket_import_start_run(company_id=None):
+    return exec_sp_one("dbo.sp_TicketImport_Scheduler", {"Action": "START_RUN", "CompanyId": company_id})["run_id"]
 
 
-def menu_master_list():
-    """Every active menu, ordered for grouped rendering - views.menu_master_list."""
-    return exec_sp("dbo.sp_MenuMaster", {"Action": "LIST"})
+def ticket_import_reset_stuck(company_id=None, stuck_minutes=30):
+    return exec_sp_one("dbo.sp_TicketImport_Scheduler", {
+        "Action": "RESET_STUCK", "CompanyId": company_id, "StuckMinutes": stuck_minutes,
+    })["rows_reset"]
 
 
-def user_menu_access_get(user_id):
-    """
-    Every active menu for one user, each with its can_view/add/edit/delete
-    flags (false for any menu never explicitly granted) - views.user_menu_access_get.
-    Raises StoredProcedureError if the user doesn't exist.
-    """
-    rows = exec_sp("dbo.sp_UserMenuAccess", {"Action": "GET", "UserId": user_id})
+def ticket_import_fetch_pending(company_id, run_id, batch_size=50):
+    """Claims up to batch_size whole documents and returns their passenger rows (dependency order)."""
+    return exec_sp("dbo.sp_TicketImport_Scheduler", {
+        "Action": "FETCH_PENDING", "CompanyId": company_id, "RunId": run_id, "BatchSize": batch_size,
+    })
+
+
+def ticket_import_resolve_parents(company_id, ticket_nos):
+    """{ticket_no: live line + its header} for the tickets a Reschedule / Cancellation changes."""
+    rows = exec_sp("dbo.sp_TicketImport_Scheduler", {
+        "Action": "RESOLVE_PARENTS", "CompanyId": company_id, "TicketNosJson": _ticket_import_json(list(ticket_nos)),
+    })
+    return {r["lookup_ticket_no"]: r for r in rows}
+
+
+def ticket_import_known_tickets(company_id, ticket_nos):
+    """{ticket_no: "Booking" / "Reschedule" / "Cancellation"} - the tickets this software already has, in any state."""
+    rows = exec_sp("dbo.sp_TicketImport_KnownTickets", {
+        "CompanyId": company_id, "TicketNosJson": _ticket_import_json(list(ticket_nos)),
+    })
+    return {r["ticket_no"]: r["found_on"] for r in rows}
+
+
+def ticket_import_mark_imported(doc_key, target_header_id, invoice_number, voucher_no):
+    return exec_sp_one("dbo.sp_TicketImport_Scheduler", {
+        "Action": "MARK_IMPORTED", "DocKey": doc_key, "TargetHeaderId": target_header_id,
+        "InvoiceNumber": invoice_number, "VoucherNo": voucher_no,
+    })
+
+
+def ticket_import_mark_error(doc_key, message, max_retry=3):
+    """Returns the document's process_status afterwards (Pending = will retry, Error = parked)."""
+    row = exec_sp_one("dbo.sp_TicketImport_Scheduler", {
+        "Action": "MARK_ERROR", "DocKey": doc_key, "ErrorMessage": message, "MaxRetry": max_retry,
+    })
+    return (row or {}).get("process_status") or "Error"
+
+
+def ticket_import_finish_run(run_id, docs_imported, docs_failed, message=None):
+    return exec_sp_one("dbo.sp_TicketImport_Scheduler", {
+        "Action": "FINISH_RUN", "RunId": run_id, "DocsImported": docs_imported, "DocsFailed": docs_failed,
+        "Message": message,
+    })
+
+
+def ticket_import_error_log_insert(rows):
+    """Writes problems found in a push / an import (dbo.Ticket_Import_Error_Log) - returns how many."""
+    if not rows:
+        return 0
+    row = exec_sp_one("dbo.sp_TicketImport_ErrorLog", {"Action": "INSERT_JSON", "RowsJson": _ticket_import_json(rows)})
+    return (row or {}).get("rows_logged", 0)
+
+
+def ticket_import_error_log_list(company_id=None, from_date=None, to_date=None, booking_status=None, error_type=None,
+                                 stage=None, resolved=None, search=None, top=500, source=None):
+    """Error log rows, newest first (logged_at / resolved_at in IST). source: API / AGENT_DB / None = both."""
+    return exec_sp("dbo.sp_TicketImport_ErrorLog", {
+        "Action": "LIST", "CompanyId": company_id, "FromDate": from_date, "ToDate": to_date,
+        "BookingStatus": booking_status, "ErrorType": error_type, "Stage": stage, "Resolved": resolved,
+        "Search": search, "Top": top, "Source": source,
+    })
+
+
+def ticket_import_error_log_resolve(doc_key, note=None):
+    """Closes the open error log rows of a document that has now been imported."""
+    row = exec_sp_one("dbo.sp_TicketImport_ErrorLog", {"Action": "RESOLVE", "DocKey": doc_key, "Note": note})
+    return (row or {}).get("rows_resolved", 0)
+
+
+def ticket_import_invoice_types(company_id):
+    """{ticket_status: row} - the Invoice Type the admin picked for each Booking Status (Voucher Type page)."""
+    rows = exec_sp("dbo.sp_TicketImport_InvoiceType", {"Action": "LIST", "CompanyId": company_id})
+    return {r["ticket_status"]: r for r in rows if r.get("ticket_status")}
+
+
+def ticket_import_invoice_type_set(company_id, voucher_type_id, ticket_statuses):
+    """Makes voucher_type_id the Auto Push Invoice Type of exactly these Booking Statuses."""
+    rows = exec_sp("dbo.sp_TicketImport_InvoiceType", {
+        "Action": "SET", "CompanyId": company_id, "VoucherTypeId": voucher_type_id,
+        "TicketStatusesJson": _ticket_import_json(list(ticket_statuses)),
+    })
     if rows and rows[0].get("status") == "Error":
-        raise StoredProcedureError(rows[0].get("error") or "Could not load this user's access.")
+        raise StoredProcedureError(rows[0].get("error") or "Could not save the Auto Push Invoice Type.")
     return rows
 
 
-def user_menu_access_save(user_id, access_list, created_by=None):
-    """
-    Upserts every {menu_key, can_view, can_add, can_edit, can_delete} row
-    in `access_list` for this user, in one transaction - views.user_menu_access_save.
-    Raises StoredProcedureError if the user doesn't exist.
-    """
+# ==========================================================================
+# Ledger Mapping pins (dbo.sp_MasterMappingPin) - a back-dated mapping saved
+# with "Retain old ledgers" keeps each already-saved document on its old ledger
+# ==========================================================================
+
+def master_mapping_pins(company_id):
+    return exec_sp("dbo.sp_MasterMappingPin", {"Action": "LIST", "CompanyId": company_id})
+
+
+def master_mapping_pin_documents(company_id, product_type, from_date):
+    """Saved documents dated from_date or later that product_type's mapping applies to."""
+    return exec_sp("dbo.sp_MasterMappingPin", {
+        "Action": "DOCUMENTS", "CompanyId": company_id, "ProductType": product_type, "FromDate": from_date,
+    })
+
+
+def master_mapping_pins_save(rows):
+    if not rows:
+        return 0
+    row = exec_sp_one("dbo.sp_MasterMappingPin", {"Action": "SAVE_JSON", "RowsJson": _ticket_import_json(rows)})
+    return (row or {}).get("rows_pinned", 0)
+
+
+def master_mapping_pins_delete_field(company_id, product_type, field_name, from_date):
+    row = exec_sp_one("dbo.sp_MasterMappingPin", {
+        "Action": "DELETE_FIELD", "CompanyId": company_id, "ProductType": product_type, "FieldName": field_name,
+        "FromDate": from_date,
+    })
+    return (row or {}).get("rows_deleted", 0)
+
+
+def master_mapping_pins_delete_document(doc_type, doc_id):
+    row = exec_sp_one("dbo.sp_MasterMappingPin", {"Action": "DELETE_DOCUMENT", "DocType": doc_type, "DocId": doc_id})
+    return (row or {}).get("rows_deleted", 0)
+
+
+def master_mapping_history_delete_after(company_id, product_type, field_name, from_date):
+    """Removes a field's Ledger Mapping history rows dated after from_date."""
+    row = exec_sp_one("dbo.sp_MasterMappingPin", {
+        "Action": "DELETE_HISTORY_AFTER", "CompanyId": company_id, "ProductType": product_type, "FieldName": field_name,
+        "FromDate": from_date,
+    })
+    return (row or {}).get("rows_deleted", 0)
+
+
+# ==========================================================================
+# Auto Push GST amounts (dbo.sp_TicketLineGstAmount) - the Agent's own GST
+# amounts per line, used instead of fee x Ledger Mapping GST %
+# ==========================================================================
+
+def ticket_line_gst_amounts():
+    return exec_sp("dbo.sp_TicketLineGstAmount", {"Action": "LIST"})
+
+
+def ticket_line_gst_amounts_save(rows):
+    if not rows:
+        return 0
+    row = exec_sp_one("dbo.sp_TicketLineGstAmount", {"Action": "SAVE_JSON", "RowsJson": _ticket_import_json(rows)})
+    return (row or {}).get("rows_saved", 0)
+
+
+def ticket_line_gst_amounts_delete_document(line_type, doc_id):
+    row = exec_sp_one("dbo.sp_TicketLineGstAmount", {"Action": "DELETE_DOCUMENT", "LineType": line_type, "DocId": doc_id})
+    return (row or {}).get("rows_deleted", 0)
+
+
+def document_attributes(doc_type, doc_id):
+    """The Attributes popup's Field / Value rows of one document (doc_type: ticket / reschedule / cancellation)."""
+    return exec_sp("dbo.sp_DocumentAttribute", {"Action": "LIST", "DocType": doc_type, "DocId": doc_id})
+
+
+def document_attributes_save(company_id, doc_type, doc_id, invoice_number, rows):
+    """Replaces one document's Attributes with rows ([{"field_name", "field_value"}, ...]) under its Invoice Number."""
     import json as _json
-    params = {
-        "Action": "SAVE", "UserId": user_id, "CreatedBy": created_by,
-        "AccessJson": _json.dumps(access_list, default=str),
-    }
-    row = exec_sp_one("dbo.sp_UserMenuAccess", params)
+    row = exec_sp_one("dbo.sp_DocumentAttribute", {
+        "Action": "SAVE_JSON", "CompanyId": company_id, "DocType": doc_type, "DocId": doc_id,
+        "InvoiceNumber": invoice_number, "RowsJson": _json.dumps(rows, default=str),
+    })
     if row and row.get("status") == "Error":
-        raise StoredProcedureError(row.get("error") or "Could not save this user's access.")
+        raise StoredProcedureError(row.get("error") or "Could not save the Attributes.")
     return row
 
 
+def _pg_backdate(action, **params):
+    return exec_sp("dbo.sp_PGMasterBackdate", {"Action": action, **params})
+
+
+def pg_master_backdate_documents(company_id, gateway_name, from_date):
+    """Saved Booking / Reschedule / Cancellation paid through gateway_name, dated from_date or later."""
+    return _pg_backdate("DOCUMENTS", CompanyId=company_id, GatewayName=gateway_name, FromDate=from_date)
+
+
+def pg_master_later_history(company_id, gateway_name, from_date):
+    """The gateway's PG Master history rows dated from_date or later."""
+    return _pg_backdate("LATER_HISTORY", CompanyId=company_id, GatewayName=gateway_name, FromDate=from_date)
+
+
+def pg_master_history_delete_after(company_id, gateway_name, from_date):
+    return _pg_backdate("DELETE_HISTORY_AFTER", CompanyId=company_id, GatewayName=gateway_name, FromDate=from_date)
+
+
+def pg_master_pins_save(rows):
+    """"Retain old ledgers" - one PGMasterPin per saved document (insert or replace)."""
+    import json as _json
+    if not rows:
+        return None
+    return exec_sp_one("dbo.sp_PGMasterBackdate", {"Action": "PINS_SAVE_JSON", "RowsJson": _json.dumps(rows, default=str)})
+
+
+def pg_master_pins_delete_gateway(company_id, gateway_name, from_date=None):
+    """"Replace all" - drops the gateway's pins on documents dated from_date or later."""
+    return exec_sp_one("dbo.sp_PGMasterBackdate", {
+        "Action": "PINS_DELETE_GATEWAY", "CompanyId": company_id, "GatewayName": gateway_name, "FromDate": from_date,
+    })
+
+
+def pg_master_pins_delete_document(doc_type, doc_id):
+    """A document edited on screen takes today's PG Master settings. Returns how many pins went."""
+    row = exec_sp_one("dbo.sp_PGMasterBackdate", {"Action": "PINS_DELETE_DOCUMENT", "DocType": doc_type, "DocId": doc_id})
+    return (row or {}).get("deleted") or 0
+
+
+def agent_db_scheduler_log_add(run_started_at, run_finished_at, source_database, source_table, records_fetched,
+                               invoices_fetched, imported_count, pending_count, error_count, message=None):
+    """One Agent DB scheduler run that fetched rows (runs with nothing to fetch are not logged)."""
+    return exec_sp_one("dbo.sp_AgentDbScheduler_Log", {
+        "Action": "INSERT", "RunStartedAt": run_started_at, "RunFinishedAt": run_finished_at,
+        "SourceDatabase": source_database, "SourceTable": source_table, "RecordsFetched": records_fetched,
+        "InvoicesFetched": invoices_fetched, "ImportedCount": imported_count, "PendingCount": pending_count,
+        "ErrorCount": error_count, "Message": message,
+    })
+
+
+def agent_db_scheduler_log_list(from_date=None, to_date=None, top=200):
+    """The scheduler runs, newest first (times in IST)."""
+    return exec_sp("dbo.sp_AgentDbScheduler_Log", {"Action": "LIST", "FromDate": from_date, "ToDate": to_date, "Top": top})
+
+
+def _agent_ticket_log(action, source_database=None, source_table=None, rows=None, one=True, **params):
+    import json as _json
+    call = exec_sp_one if one else exec_sp
+    return call("dbo.sp_AgentDbTicketLog", {
+        "Action": action, "SourceDatabase": source_database, "SourceTable": source_table,
+        "RowsJson": _json.dumps(rows, default=str) if rows is not None else None, **params,
+    })
+
+
+def agent_ticket_log_claim(source_database, source_table, rows, stuck_minutes=30):
+    """Logs the Agent rows a run picks up as 'Processing'. Returns the agent_row_ids claimed (already logged = skipped)."""
+    claimed = _agent_ticket_log("CLAIM_JSON", source_database, source_table, rows, one=False, StuckMinutes=stuck_minutes)
+    return {r["agent_row_id"] for r in claimed}
+
+
+def agent_ticket_log_result(source_database, source_table, rows):
+    """[{agent_row_id, process_status, invoice_number, voucher_no, import_doc_key, error_message}, ...]"""
+    return _agent_ticket_log("RESULT_JSON", source_database, source_table, rows) if rows else None
+
+
+def agent_ticket_log_release(source_database, source_table, agent_row_ids):
+    """A failed run: its 'Processing' rows are dropped, so the next run picks them up again."""
+    if agent_row_ids:
+        _agent_ticket_log("RELEASE_JSON", source_database, source_table, [{"agent_row_id": i} for i in agent_row_ids])
+
+
+def agent_ticket_log_set_run(source_database, source_table, agent_row_ids, scheduler_log_id):
+    if agent_row_ids and scheduler_log_id:
+        _agent_ticket_log("SET_RUN", source_database, source_table, [{"agent_row_id": i} for i in agent_row_ids],
+                          SchedulerLogId=scheduler_log_id)
+
+
+def agent_ticket_log_waiting():
+    """company_id + import_doc_key of the logged Agent rows still Pending / Error."""
+    return _agent_ticket_log("WAITING", one=False)
+
+
+def agent_ticket_log_refresh(doc_key, process_status, invoice_number=None, voucher_no=None, error_message=None):
+    row = _agent_ticket_log("REFRESH", DocKey=doc_key, ProcessStatus=process_status, InvoiceNumber=invoice_number,
+                            VoucherNo=voucher_no, ErrorMessage=error_message)
+    return (row or {}).get("updated") or 0

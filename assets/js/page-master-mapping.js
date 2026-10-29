@@ -259,7 +259,62 @@
     await renderAllCategories();
   });
 
-  async function saveRow(row, confirmReplace = false) {
+  // Effective From before today on an already-mapped field: documents dated
+  // from then on may already be saved - the user picks what happens to them.
+  // Resolves "replace" / "retain", or null (Cancel).
+  function chooseBackdateMode(data, newLedger) {
+    const fmt = (iso) => iso.split("-").reverse().join("/");
+    const esc = (v) => String(v == null ? "" : v).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+    const d = fmt(data.effective_from);
+    const replaced = (data.replaced_rows || []).map((r) => `${esc(r.ledger_name)} from ${fmt(r.effective_from)}`).join(", ");
+    const docs = data.documents === 1 ? "1 saved document" : `${data.documents} saved documents`;
+    const modal = document.createElement("div");
+    modal.className = "dom-modal-backdrop open";
+    modal.innerHTML = `
+      <div class="dom-modal-window" style="max-width:560px;">
+        <div class="dom-modal-titlebar">
+          <div>Back-dated Ledger Mapping</div>
+          <button type="button" class="dom-titlebar-btn btn-close" data-choice="">&times;</button>
+        </div>
+        <div style="padding:14px 18px; font-size:13px; line-height:1.5; color:#0F172A;">
+          <p style="margin:0 0 8px;"><b>${esc(data.field_name)}</b> &rarr; <b>${esc(newLedger)}</b> from <b>${d}</b>
+            (before today). There ${data.documents === 1 ? "is" : "are"} <b>${docs}</b> dated ${d} or later.</p>
+          ${replaced ? `<p style="margin:0 0 10px; color:#475569;">Mapping replaced from ${d}: ${replaced}.</p>` : ""}
+          <div style="border:1px solid #D8E1EC; border-radius:6px; padding:8px 10px; margin-bottom:8px;">
+            <b>1. Replace all previous data also</b><br>
+            <span style="color:#475569;">Every document dated ${d} or later - saved ones too - posts to "${esc(newLedger)}".</span>
+          </div>
+          <div style="border:1px solid #D8E1EC; border-radius:6px; padding:8px 10px;">
+            <b>2. Retain old ledgers</b><br>
+            <span style="color:#475569;">The ${docs} keep the ledger they post to now. Only documents saved
+              (or edited) from now on, dated ${d} or later, post to "${esc(newLedger)}".</span>
+          </div>
+        </div>
+        <div class="voyager-alert-actions">
+          <button type="button" class="dom-nav-btn" data-choice="">Cancel</button>
+          <button type="button" class="dom-nav-btn btn-primary" data-choice="retain">Retain Old Ledgers</button>
+          <button type="button" class="dom-nav-btn btn-danger" data-choice="replace">Replace All</button>
+        </div>
+      </div>`;
+    document.body.appendChild(modal);
+    return new Promise((resolve) => {
+      const done = (choice) => {
+        document.removeEventListener("keydown", onKey);
+        modal.remove();
+        resolve(choice || null);
+      };
+      const onKey = (e) => { if (e.key === "Escape") done(null); };
+      document.addEventListener("keydown", onKey);
+      modal.addEventListener("click", (e) => {
+        const btn = e.target.closest("[data-choice]");
+        if (btn) done(btn.dataset.choice);
+        else if (e.target === modal) done(null);
+      });
+      modal.querySelector('[data-choice="retain"]').focus({ preventScroll: true });
+    });
+  }
+
+  async function saveRow(row, confirmReplace = false, backdateMode = null) {
     const product = productSel.value;
     const ledgerSel = row.querySelector(".mm-ledger-select");
     const ledgerId = ledgerSel.value;
@@ -275,9 +330,15 @@
           company_id: activeCompanyId, product_type: product, masters_category: row.dataset.category,
           rows: [{ field_name: row.dataset.field, ledger_id: Number(ledgerId), effective_from: effectiveFrom }],
           confirm_replace: confirmReplace,
+          backdate_mode: backdateMode || undefined,
         }),
       });
       const data = await res.json().catch(() => null);
+      if (res.status === 409 && data && data.needs_backdate_choice) {
+        const choice = await chooseBackdateMode(data, ledgerSel.options[ledgerSel.selectedIndex].text);
+        if (choice) await saveRow(row, confirmReplace, choice);
+        return;
+      }
       // Same Effective From date, different ledger: that would move every
       // document dated from that day to the new ledger - ask first.
       if (res.status === 409 && data && data.needs_confirm) {
@@ -294,6 +355,9 @@
         return;
       }
       if (!res.ok) throw new Error((data && data.error) || `Save failed: ${res.status}`);
+      if (backdateMode === "retain" && data && data[0] && data[0].documents_retained) {
+        voyagerAlert(`Saved. ${data[0].documents_retained} saved document(s) keep their old ledger.`, { icon: "success" });
+      }
     } catch (err) {
       console.error("Could not save Master Mapping", err);
       voyagerAlert(err.message || "Could not save. Is the Django backend running?", { icon: "error" });

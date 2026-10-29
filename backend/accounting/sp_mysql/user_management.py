@@ -171,7 +171,9 @@ def user_menu_access_get(p):
             COALESCE(uma.can_view, 0) AS can_view,
             COALESCE(uma.can_add, 0) AS can_add,
             COALESCE(uma.can_edit, 0) AS can_edit,
-            COALESCE(uma.can_delete, 0) AS can_delete
+            COALESCE(uma.can_delete, 0) AS can_delete,
+            COALESCE(uma.can_print, 0) AS can_print,
+            COALESCE(uma.can_export, 0) AS can_export
         FROM MenuMaster mm
         LEFT JOIN UserMenuAccess uma ON uma.menu_key = mm.menu_key AND uma.user_id = %s
         WHERE mm.is_active = 1
@@ -179,7 +181,7 @@ def user_menu_access_get(p):
     """
     rows = query(sql, [uid])
     for r in rows:
-        bits(r, "can_view", "can_add", "can_edit", "can_delete")
+        bits(r, "can_view", "can_add", "can_edit", "can_delete", "can_print", "can_export")
     return rows
 
 
@@ -207,16 +209,20 @@ def user_menu_access_save(p):
             can_add = 1 if to_bool_param(item.get("can_add")) else 0
             can_edit = 1 if to_bool_param(item.get("can_edit")) else 0
             can_delete = 1 if to_bool_param(item.get("can_delete")) else 0
+            can_print = 1 if to_bool_param(item.get("can_print")) else 0
+            can_export = 1 if to_bool_param(item.get("can_export")) else 0
 
             execute("""
-                INSERT INTO UserMenuAccess (user_id, menu_key, can_view, can_add, can_edit, can_delete, created_by_id, created_at, updated_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                INSERT INTO UserMenuAccess (user_id, menu_key, can_view, can_add, can_edit, can_delete, can_print, can_export, created_by_id, created_at, updated_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON DUPLICATE KEY UPDATE
                     can_view = VALUES(can_view),
                     can_add = VALUES(can_add),
                     can_edit = VALUES(can_edit),
                     can_delete = VALUES(can_delete),
+                    can_print = VALUES(can_print),
+                    can_export = VALUES(can_export),
                     updated_at = VALUES(updated_at)
-            """, [uid, menu_key, can_view, can_add, can_edit, can_delete, created_by, now, now])
+            """, [uid, menu_key, can_view, can_add, can_edit, can_delete, can_print, can_export, created_by, now, now])
 
     return [{"user_id": uid, "status": "Success"}]

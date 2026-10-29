@@ -86,7 +86,7 @@
         </button>
         <button type="button" class="dom-nav-btn btn-primary" onclick="exportCSV()">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4m14-7l-5 5-5-5m5 5V3"/></svg>
-          Export CSV
+          Export Excel
         </button>
       </div>
 
@@ -126,9 +126,10 @@
   </div>
 
   <script src="assets/js/mock-data.js"></script>
-  <script src="assets/js/api.js?v=12"></script>
-  <script src="assets/js/hardcode.js?v=10"></script>
-  <script src="assets/js/shell.js?v=46"></script>
+  <script src="assets/js/api.js?v=5"></script>
+  <script src="assets/js/hardcode.js?v=12"></script>
+  <script src="assets/js/shell.js?v=48"></script>
+  <script src="assets/js/report-export.js?v=3"></script>
   <script>
     // Not gated on DOMContentLoaded - this page's <script> can be injected
     // by the app's SPA navigation (shell.js's navigateTo) into a document
@@ -302,24 +303,15 @@
     window.rerender = rerender;
 
     function exportCSV() {
-      const csv = [];
-      const push = (row) => {
-        const cols = Array.from(row.querySelectorAll("th, td")).map((td) => `"${td.innerText.replace(/"/g, '""')}"`);
-        if (cols.length) csv.push(cols.join(","));
-      };
+      const rows = [];
       if (currentGroupId) {
-        document.querySelectorAll("#bs-drill tr").forEach(push);
+        rows.push(...document.querySelectorAll("#bs-drill tr"));
       } else {
         document.querySelectorAll("#bs-box .bs-col").forEach((col, i) => {
-          csv.push(i === 0 ? "Liabilities" : "Assets");
-          col.querySelectorAll("table tr").forEach(push);
+          rows.push(i === 0 ? "Liabilities" : "Assets", ...col.querySelectorAll("table tr"));
         });
       }
-      const blob = new Blob([csv.join("\n")], { type: "text/csv;charset=utf-8;" });
-      const link = document.createElement("a");
-      link.href = URL.createObjectURL(blob);
-      link.download = currentGroupId ? "balance-sheet-group.csv" : "balance-sheet.csv";
-      link.click();
+      window.VoyagerExport.excel(currentGroupId ? "Balance Sheet - Group" : "Balance Sheet", rows);
     }
     window.exportCSV = exportCSV;
     })();

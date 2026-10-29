@@ -89,7 +89,8 @@
   }
   fillPlain(document.getElementById("invoice_type"), [], "Select...");
   fillPlain(document.getElementById("booking_type"), OPT.bookingTypes, "Select...");
-  fillPlain(document.getElementById("booking_status"), OPT.bookingStatuses, "Select...");
+  // "SSR Updated" (code SSR) is the Auto Push status of the SSR Updation screen - not a ticket status.
+  fillPlain(document.getElementById("booking_status"), OPT.bookingStatuses.filter((s) => s !== "SSR Updated"), "Select...");
   // Booking Status defaults to a fixed value per screen, frozen (never
   // user-editable) everywhere - "Confirmed" here for a plain New Ticket;
   // Reschedule/Cancellation each override both the value and the disabled
@@ -305,7 +306,9 @@
       voyagerAlert("Could not load customers/suppliers from the database. Is the Django backend running?", { icon: "error" });
       allCustomers = []; allSuppliers = [];
     }
-    document.getElementById("customer-options").innerHTML = allCustomers.map((c) => `<option value="${c.name}">`).join("");
+    document.getElementById("customer-options").innerHTML = allCustomers
+      .filter((c) => c.agent_id)
+      .map((c) => `<option value="${c.agent_id}">${c.name}</option>`).join("");
     document.getElementById("modal-office-id-options").innerHTML = allSuppliers
       .filter((s) => s.office_id)
       .map((s) => `<option value="${s.office_id}">`).join("");
@@ -535,6 +538,17 @@
   }
   document.getElementById("invoice_type").addEventListener("change", applyInvoiceNumbering);
 
+  // New Cancellation: select the Credit Note invoice type by itself (the
+  // first active one in the list) instead of leaving "Select...".
+  async function autoSelectCreditNoteType() {
+    const select = document.getElementById("invoice_type");
+    const firstType = () => Array.from(select.options).find((o) => o.value);
+    if (!firstType() && activeCompanyId) await populateVoucherTypeOptions(activeCompanyId);
+    const opt = firstType();
+    select.value = opt ? opt.value : "";
+    if (opt) select.dispatchEvent(new Event("change"));
+  }
+
   // FOP dropdown starts Cash-only; "Own Card"/"Client Card" are only added
   // when FOP Master (fop-master.html) has at least one ACTIVE card of that
   // type - no active cards at all means the dropdown stays just "Cash".
@@ -576,11 +590,23 @@
     if (preselect && matching.some((c) => c.card_number === preselect)) select.value = preselect;
   }
   document.getElementById("modal-fop").addEventListener("change", () => updateCardNumberField());
-  document.getElementById("customer").addEventListener("input", (e) => {
-    const c = allCustomers.find((c) => c.name === e.target.value);
-    document.getElementById("customer_agent_id").textContent = c && c.agent_id ? c.agent_id : "-";
+  // The customer is picked by Agent ID; Customer Name (read-only) and the
+  // address / GST fill from it. Loading a saved document still sets
+  // Customer Name and fires its "input" - that fills the Agent ID back.
+  function showCustomerDetails(c) {
     document.getElementById("customer_address").textContent = c && c.address ? c.address : "-";
     document.getElementById("customer_gst").textContent = c && c.gst_no ? c.gst_no : "-";
+  }
+  document.getElementById("customer_agent_id").addEventListener("input", (e) => {
+    const typed = e.target.value.trim().toLowerCase();
+    const c = typed ? allCustomers.find((c) => (c.agent_id || "").toLowerCase() === typed) : null;
+    document.getElementById("customer").value = c ? c.name : "";
+    showCustomerDetails(c);
+  });
+  document.getElementById("customer").addEventListener("input", (e) => {
+    const c = allCustomers.find((c) => c.name === e.target.value);
+    document.getElementById("customer_agent_id").value = c && c.agent_id ? c.agent_id : "";
+    showCustomerDetails(c);
   });
   document.getElementById("modal-office-id").addEventListener("input", (e) => {
     const s = allSuppliers.find((s) => s.office_id === e.target.value);
@@ -823,6 +849,30 @@
       "Basic + YQ + YR": p.basic_fare + p.yq + p.yr, "Gross": supplierCost };
     return baseMap[p.disc_on] || 0;
   }
+  // GST of one fee. An Auto Push line carries the GST the Agent sent
+  // (p.gst_amounts, from the server) - used as is, never re-worked from
+  // the %; every other fee is fee x its mapped ledger's GST % (Ledger
+  // Mapping, fieldLedgerGstPct). Same rule as models.gst_part on the server.
+  function pushedGst(p, feeField) {
+    const v = p.gst_amounts ? p.gst_amounts[`${feeField}_gst`] : null;
+    return v == null ? null : Number(v);
+  }
+  function gstPart(p, feeField, mappingField) {
+    const pushed = pushedGst(p, feeField);
+    return pushed != null ? pushed : (p[feeField] || 0) * ((fieldLedgerGstPct[mappingField] || 0) / 100);
+  }
+  // The pushed GST amounts a passenger keeps after an edit in the fare
+  // modal: a fee whose amount was changed drops its pushed GST (worked out
+  // from the % from then on); unchanged fees keep theirs.
+  function keptGstAmounts(prev, p) {
+    if (!prev || !prev.gst_amounts) return null;
+    const kept = {};
+    Object.keys(prev.gst_amounts).forEach((key) => {
+      const fee = key.replace(/_gst$/, "");
+      if (Number(prev[fee] || 0) === Number(p[fee] || 0)) kept[key] = prev.gst_amounts[key];
+    });
+    return Object.keys(kept).length ? kept : null;
+  }
   function computeFareLine(p) {
     const supplierCost = p.basic_fare + p.yq + p.yr + p.k3_tax + p.tax_others + p.seat + p.meal + p.baggage + p.other_ssr;
     const discBase = computeDiscBase(p);
@@ -836,17 +886,17 @@
     // mapped ledger's GST% (Master Mapping), not one flat GST% typed on
     // the line - see fieldLedgerGstPct above. Same formula regardless of
     // Payment Mode - PG Charges never contributes to GST Amount.
-    const gst = p.service_fee * ((fieldLedgerGstPct["Service Fee A/c"] || 0) / 100)
-      + p.addl_service_fee * ((fieldLedgerGstPct["Addl Service Fee A/c"] || 0) / 100)
-      + p.ssr_service_fee * ((fieldLedgerGstPct["SSR Service Fee A/c"] || 0) / 100);
+    const gst = gstPart(p, "service_fee", "Service Fee A/c")
+      + gstPart(p, "addl_service_fee", "Addl Service Fee A/c")
+      + gstPart(p, "ssr_service_fee", "SSR Service Fee A/c");
     // Supplier GST Amount - same convention as Customer GST Amount above
     // (2026-10-07): each Supplier fee component times its OWN mapped
     // ledger's GST% (Master Mapping - "Supplier Service Fee A/c"/
     // "Supplier Addl Service Fee A/c"), not one flat rate hand-typed on
     // the line. supp_gst_pct is no longer read here - see computeSuppLine.
-    const suppGst = (p.supp_service_fee || 0) * ((fieldLedgerGstPct["Supplier Service Fee A/c"] || 0) / 100)
-      + (p.supp_addl_service_fee || 0) * ((fieldLedgerGstPct["Supplier Addl Service Fee A/c"] || 0) / 100)
-      + (p.supp_ssr_service_fee || 0) * ((fieldLedgerGstPct["Supplier SSR Service Fee A/c"] || 0) / 100);
+    const suppGst = gstPart(p, "supp_service_fee", "Supplier Service Fee A/c")
+      + gstPart(p, "supp_addl_service_fee", "Supplier Addl Service Fee A/c")
+      + gstPart(p, "supp_ssr_service_fee", "Supplier SSR Service Fee A/c");
     const total = supplierCost - discount + tds + p.markup + p.addl_markup + p.ssr_markup
       + p.service_fee + p.addl_service_fee + p.ssr_service_fee + gst
       + (p.supp_markup || 0) + (p.supp_addl_markup || 0) + (p.supp_ssr_markup || 0)
@@ -863,9 +913,9 @@
       : (p.supp_comm_type === "Flat" ? p.supp_comm_value : 0);
     // Same cumulative-chain override as computeFareLine's own TDS above.
     const tds = p.supp_tds_amount_override != null ? p.supp_tds_amount_override : commission * (p.supp_tds_per / 100);
-    const gst = (p.supp_service_fee || 0) * ((fieldLedgerGstPct["Supplier Service Fee A/c"] || 0) / 100)
-      + (p.supp_addl_service_fee || 0) * ((fieldLedgerGstPct["Supplier Addl Service Fee A/c"] || 0) / 100)
-      + (p.supp_ssr_service_fee || 0) * ((fieldLedgerGstPct["Supplier SSR Service Fee A/c"] || 0) / 100);
+    const gst = gstPart(p, "supp_service_fee", "Supplier Service Fee A/c")
+      + gstPart(p, "supp_addl_service_fee", "Supplier Addl Service Fee A/c")
+      + gstPart(p, "supp_ssr_service_fee", "Supplier SSR Service Fee A/c");
     return { commission, tds, gst };
   }
 
@@ -997,7 +1047,7 @@
     if (v !== e.target.value) e.target.value = v;
   });
   function readModalPassenger() {
-    return {
+    const p = {
       airline_code: joinSectorField("airlineCode"),
       airline_name: joinSectorField("airlineName"),
       airline_category: document.getElementById("modal-airline-category").value,
@@ -1102,6 +1152,10 @@
         chain_other_ssr: passengers[editingIndex].chain_other_ssr,
       } : {}),
     };
+    // Auto Push GST amounts - no modal field holds them; kept for the fees
+    // this edit didn't change (see keptGstAmounts).
+    p.gst_amounts = keptGstAmounts(editingIndex != null ? passengers[editingIndex] : null, p);
+    return p;
   }
   // Cancellation's own Total formula (2026-10-06 explicit spec) - a
   // refund/reversal view, not a billing total, so it's structured very
@@ -1167,23 +1221,25 @@
   function openGstDetailModal(side) {
     const p = readModalPassenger();
     const rows = side === "supplier" ? [
-      { label: "Supplier Service Fee", amount: p.supp_service_fee, field: "Supplier Service Fee A/c" },
-      { label: "Supplier Addl Service Fee", amount: p.supp_addl_service_fee, field: "Supplier Addl Service Fee A/c" },
-      ...(isBookingMode() || rescheduleMode ? [{ label: "Supplier SSR Service Fee", amount: p.supp_ssr_service_fee, field: "Supplier SSR Service Fee A/c" }] : []),
+      { label: "Supplier Service Fee", fee: "supp_service_fee", field: "Supplier Service Fee A/c" },
+      { label: "Supplier Addl Service Fee", fee: "supp_addl_service_fee", field: "Supplier Addl Service Fee A/c" },
+      ...(isBookingMode() || rescheduleMode ? [{ label: "Supplier SSR Service Fee", fee: "supp_ssr_service_fee", field: "Supplier SSR Service Fee A/c" }] : []),
     ] : [
-      { label: "Service Fee", amount: p.service_fee, field: "Service Fee A/c" },
-      { label: "Addl Service Fee", amount: p.addl_service_fee, field: "Addl Service Fee A/c" },
-      { label: "SSR Service Fee", amount: p.ssr_service_fee, field: "SSR Service Fee A/c" },
+      { label: "Service Fee", fee: "service_fee", field: "Service Fee A/c" },
+      { label: "Addl Service Fee", fee: "addl_service_fee", field: "Addl Service Fee A/c" },
+      { label: "SSR Service Fee", fee: "ssr_service_fee", field: "SSR Service Fee A/c" },
     ];
     let total = 0;
     const bodyHtml = rows.map((row) => {
+      // GST sent through Auto Push: shown as received - no % behind it.
+      const pushed = pushedGst(p, row.fee);
       const pct = fieldLedgerGstPct[row.field] || 0;
-      const gstAmt = (row.amount || 0) * pct / 100;
+      const gstAmt = gstPart(p, row.fee, row.field);
       total += gstAmt;
       return `<tr>
         <td>${row.label}</td>
-        <td>${fmtN(row.amount)}</td>
-        <td>${pct.toFixed(2)}%</td>
+        <td>${fmtN(p[row.fee] || 0)}</td>
+        <td>${pushed != null ? "-" : `${pct.toFixed(2)}%`}</td>
         <td>${fmtN(gstAmt)}</td>
       </tr>`;
     }).join("") + `<tr class="dom-gst-detail-total"><td colspan="3">GST Amount</td><td>${fmtN(total)}</td></tr>`;
@@ -1856,6 +1912,11 @@
     document.getElementById("reschedule-tab-bar").style.display = rescheduleMode ? "" : "none";
     if (rescheduleMode) {
       renderAncestorTabs(index);
+      // No Parent PNR Details tab when there's no parent line to show - a
+      // direct Reschedule (Auto Push, booking not entered here) has only
+      // the Parent PNR header field.
+      document.querySelector('#reschedule-tab-bar .reschedule-tab-btn[data-tab="parent"]').style.display =
+        rescheduleParentPassengers[index] ? "" : "none";
       applyRescheduleTab("reschedule");
     } else if (cancellationMode) {
       // No Parent/Reschedule tab bar here (cancellation has just the one
@@ -2220,7 +2281,7 @@
   // (Customer for billing, Payment Mode for the FOP/PG tabs, etc).
   const PROCEED_REQUIRED_FIELDS = [
     ["invoice_number", "Invoice Number"], ["invoice_type", "Invoice Type"], ["booking_type", "Booking Type"],
-    ["customer", "Customer Name"], ["travel_type", "Travel Type"], ["user_name", "User Name"],
+    ["customer", "Agent ID"], ["travel_type", "Travel Type"], ["user_name", "User Name"],
     ["booking_reference", "Booking Reference"], ["payment_mode", "Payment Mode"],
   ];
   function validateHeaderRequiredFields() {
@@ -2234,7 +2295,7 @@
       // every other required field is already filled.
       const firstMissingId = missingEntries.length ? missingEntries[0][0] : null;
       const focusEl = firstMissingId
-        ? document.getElementById(firstMissingId)
+        ? document.getElementById(firstMissingId === "customer" ? "customer_agent_id" : firstMissingId)
         : document.querySelector("#booking_ref_date .dg-native");
       voyagerAlert(`Please fill the following required field(s) before proceeding: ${missing.join(", ")}.`, { focusEl });
       return false;
@@ -2357,9 +2418,10 @@
       // flags the original booking line cancelled). Only a line cancelled
       // directly reads "Cancelled". Neither flag set (including New
       // Ticket's own still-unsaved rows and Reschedule/Cancellation's own
-      // passenger objects, which carry neither at all) reads as "Live".
-      const statusLabel = p.rescheduled ? "Rescheduled" : p.canceled ? "Cancelled" : "Live";
-      const statusColor = p.rescheduled ? "#B45309" : p.canceled ? "#DC2626" : "#16A34A";
+      // passenger objects, which carry neither at all) reads as "Live" -
+      // except on the Cancellation screen, where the passenger is "Closed".
+      const statusLabel = p.rescheduled ? "Rescheduled" : p.canceled ? "Cancelled" : cancellationMode ? "Closed" : "Live";
+      const statusColor = p.rescheduled ? "#B45309" : p.canceled ? "#DC2626" : cancellationMode ? "#64748B" : "#16A34A";
       return `<tr class="pax-row" data-idx="${i}" title="${viewMode ? "Double-click to view" : "Double-click to edit"}">
         <td style="text-align:center;">${i + 1}</td><td>${p.ticket_no}</td><td>${p.airline_name || p.airline_code || "-"}</td>
         <td>${p.card_number || "-"}</td>
@@ -2629,6 +2691,7 @@
     }));
     return {
       company_id: activeCompanyId,
+      attributes: readAttributeRows(),
       ...(rescheduleMode ? { original_ticket_id: Number(rescheduleTicketId) } : {}),
       invoice_number: document.getElementById("invoice_number").value.trim(),
       invoice_date: toISOFromDDMMYYYY(getDateGroupValue(document.getElementById("invoice_date"))),
@@ -2663,10 +2726,8 @@
   // this so the JV stays in sync with whatever was last typed.
   // ============================================================
   async function renderJvPreview(jv) {
-    // Before the ticket is actually posted (draft preview), show the
-    // Invoice Number as the stand-in Voucher No - a real voucher_no only
-    // exists once Save Ticket auto-posts the JV.
-    const displayVno = jv.voucher_no || document.getElementById("invoice_number").value.trim() || "Preview";
+    // Voucher No shows the document's Invoice Number (not the internal AL-n / ALR-n / ALC-n).
+    const displayVno = document.getElementById("invoice_number").value.trim() || jv.voucher_no || "Preview";
     document.getElementById("jv-meta-vno").textContent = displayVno;
     document.getElementById("jv-meta-date").textContent = jv.voucher_date ? isoToDDMMYYYY(jv.voucher_date) : "-";
     document.getElementById("jv-meta-currency").textContent = jv.currency || document.getElementById("currency").textContent;
@@ -2982,7 +3043,8 @@
   // Balanced/Posted badge wording (a Reschedule JV is never "posted" -
   // no JournalVoucher is created for a reschedule ticket yet).
   async function renderRescheduleJvPreview(jv) {
-    const displayVno = jv.voucher_no || document.getElementById("invoice_number").value.trim() || "Preview";
+    // Voucher No shows the document's Invoice Number (not the internal AL-n / ALR-n / ALC-n).
+    const displayVno = document.getElementById("invoice_number").value.trim() || jv.voucher_no || "Preview";
     document.getElementById("jv-meta-vno").textContent = displayVno;
     document.getElementById("jv-meta-date").textContent = jv.voucher_date ? isoToDDMMYYYY(jv.voucher_date) : "-";
     document.getElementById("jv-meta-currency").textContent = jv.currency || document.getElementById("currency").textContent;
@@ -3180,7 +3242,8 @@
   // exists for this cancellation (jv.posted, from cancellation_jv_preview's
   // own JournalVoucher lookup).
   async function renderCancellationJvPreview(jv) {
-    const displayVno = jv.voucher_no || document.getElementById("invoice_number").value.trim() || "Preview";
+    // Voucher No shows the document's Invoice Number (not the internal AL-n / ALR-n / ALC-n).
+    const displayVno = document.getElementById("invoice_number").value.trim() || jv.voucher_no || "Preview";
     document.getElementById("jv-meta-vno").textContent = displayVno;
     document.getElementById("jv-meta-date").textContent = jv.voucher_date ? isoToDDMMYYYY(jv.voucher_date) : "-";
     document.getElementById("jv-meta-currency").textContent = jv.currency || document.getElementById("currency").textContent;
@@ -3210,7 +3273,13 @@
       }
     }
 
-    setJvTabVisible("pg", false); // Cancellation never has a PG Receipts tab - payment_mode is always Top-up here
+    // PG Receipts tab - only when Payment Mode is Payment Gateway.
+    if (document.getElementById("payment_mode").value === "Payment Gateway") {
+      await renderCancellationPgReceiptTab(jv);
+      setJvTabVisible("pg", true);
+    } else {
+      setJvTabVisible("pg", false);
+    }
     const fop = jv.fop || "Cash";
     if (fop === "Own Card" || fop === "Client Card") {
       await renderCancellationFopPaymentTab(jv, fop, passengers[0]);
@@ -3218,6 +3287,27 @@
     } else {
       setJvTabVisible("fop", false);
     }
+  }
+
+  // Cancellation PG Receipt (Payment Mode = Payment Gateway): Customer
+  // Debit, the gateway's PG platform ledger (PG Master, as of the Invoice
+  // Date) Credit - both the Customer amount of the Main JV (its row 1).
+  // Same rows the server posts (views._cancellation_pg_receipt_lines).
+  async function renderCancellationPgReceiptTab(jv) {
+    const customerRow = (jv.accounts || []).find((a) => a.role === "customer");
+    const amount = customerRow ? (customerRow.credit || customerRow.debit || 0) : 0;
+    const gatewayRef = document.getElementById("payment_gateway_ref").value;
+    const gateway = await getPgEffective(gatewayRef);
+    const pgLedgerName = gateway && gateway.payment_master_ledger_name
+      ? gateway.payment_master_ledger_name
+      : `${gatewayRef || "PG Platform"} <span style="color:#DC2626; font-weight:700;" title="No Payment Master ledger for this gateway in PG Master">(unmapped)</span>`;
+    document.getElementById("jv-pg-table-body").innerHTML =
+      jvRowHtml(1, customerRow ? customerRow.ledger_name : "Customer", amount, 0) +
+      jvRowHtml(2, pgLedgerName, 0, amount);
+    document.getElementById("jv-pg-total-debit").textContent = fmtN(amount);
+    document.getElementById("jv-pg-total-credit").textContent = fmtN(amount);
+    document.getElementById("jv-tab-panel-pg").querySelector("table").parentElement.style.display = "";
+    document.getElementById("jv-pg-empty").style.display = "none";
   }
 
   // FOP Payment tab (JV-2 Own Card / JV-3 Client Card) - per spec, the
@@ -3268,6 +3358,66 @@
     else if (rescheduleMode) loadRescheduleJvPreview(false);
     else loadJvPreview(false);
   }
+  // Attributes popup (Booking / Reschedule / Cancellation) - Field / Value
+  // rows, "+" adds one at the bottom, x removes it. UI only for now: the
+  // rows are not saved with the ticket yet.
+  const attributesModal = document.getElementById("attributes-modal");
+  const attributesBody = document.getElementById("attributes-table-body");
+  function renumberAttributeRows() {
+    attributesBody.querySelectorAll("tr").forEach((tr, i) => { tr.firstElementChild.textContent = i + 1; });
+  }
+  function addAttributeRow(field = "", value = "") {
+    const tr = document.createElement("tr");
+    tr.style.borderBottom = "1px solid #E2E8F0";
+    const input = "width:100%; box-sizing:border-box; height:26px; padding:2px 6px; border:1px solid #CBD5E1; border-radius:3px; font-size:11.5px;";
+    tr.innerHTML = `
+      <td style="padding:4px 8px; text-align:center; color:#64748B;"></td>
+      <td style="padding:4px 8px;"><input type="text" class="attr-field" placeholder="Field" style="${input}"></td>
+      <td style="padding:4px 8px;"><input type="text" class="attr-value" placeholder="Value" style="${input}"></td>
+      <td style="padding:4px 8px; text-align:center;">
+        <button type="button" class="attr-remove-btn" title="Remove" style="background:none; border:none; color:#DC2626; font-size:16px; font-weight:700; cursor:pointer;">&times;</button>
+      </td>`;
+    tr.querySelector(".attr-field").value = field;
+    tr.querySelector(".attr-value").value = value;
+    attributesBody.appendChild(tr);
+    renumberAttributeRows();
+    return tr;
+  }
+  // Sent with every Save (Booking / Reschedule / Cancellation) - saved under
+  // the Invoice Number (dbo.Ticket_Document_Attribute). Rows without a Field
+  // are left out.
+  function readAttributeRows() {
+    return [...attributesBody.querySelectorAll("tr")]
+      .map((tr) => ({ field_name: tr.querySelector(".attr-field").value.trim(), field_value: tr.querySelector(".attr-value").value.trim() }))
+      .filter((r) => r.field_name);
+  }
+  // A saved document's rows (ticket / reschedule / cancellation detail's "attributes").
+  function loadAttributeRows(rows) {
+    attributesBody.innerHTML = "";
+    (rows || []).forEach((r) => addAttributeRow(r.field_name || "", r.field_value || ""));
+    if (!attributesBody.children.length) addAttributeRow();
+  }
+  document.getElementById("attributes-btn").addEventListener("click", () => {
+    if (!attributesBody.children.length) addAttributeRow();
+    // Read-only until Edit, like the rest of a saved document.
+    attributesModal.querySelectorAll("input").forEach((el) => { el.disabled = viewMode; });
+    attributesModal.querySelectorAll("#attributes-add-btn, .attr-remove-btn").forEach((el) => { el.style.visibility = viewMode ? "hidden" : ""; });
+    attributesModal.classList.add("open");
+  });
+  document.getElementById("attributes-add-btn").addEventListener("click", () => {
+    const row = addAttributeRow();
+    row.scrollIntoView({ block: "nearest" });  // past 6 rows the table scrolls - show the new one
+    row.querySelector(".attr-field").focus();
+  });
+  attributesBody.addEventListener("click", (e) => {
+    if (!e.target.closest(".attr-remove-btn")) return;
+    e.target.closest("tr").remove();
+    if (!attributesBody.children.length) addAttributeRow();
+    renumberAttributeRows();
+  });
+  document.getElementById("attributes-close-x-btn").addEventListener("click", () => attributesModal.classList.remove("open"));
+  document.getElementById("attributes-ok-btn").addEventListener("click", () => attributesModal.classList.remove("open"));
+
   document.getElementById("jv-close-x-btn").addEventListener("click", () => jvModal.classList.remove("open"));
   document.getElementById("jv-ok-btn").addEventListener("click", () => jvModal.classList.remove("open"));
 
@@ -3518,6 +3668,7 @@
   // View mode - load a saved ticket read-only
   // ============================================================
   async function enterViewMode(t) {
+    loadAttributeRows(t.attributes);
     editLockMessage = t.edit_lock_message || null;
     editLockBypass = !!t.edit_lock_bypass;
     viewMode = true;
@@ -3561,6 +3712,8 @@
       baggage: l.baggage, other_ssr: l.other_ssr, disc_on: l.disc_on, disc_type: l.disc_type, disc_value: l.disc_value,
       tds_per: l.tds_per, pg_charges: l.pg_charges || 0, pg_charges_percentage: l.pg_charges_percentage != null ? l.pg_charges_percentage : 0, markup: l.markup, addl_markup: l.addl_markup, ssr_markup: l.ssr_markup || 0, service_fee: l.service_fee,
       addl_service_fee: l.addl_service_fee, ssr_service_fee: l.ssr_service_fee || 0, gst_pct: l.gst_pct,
+      // GST the Agent sent through Auto Push (shown / used as is) - null for a manual line.
+      gst_amounts: l.gst_amounts || null,
       supplier_name: l.supplier_name, office_id: l.office_id, fop: l.fop, card_number: l.card_number || "",
       supp_comm_on: l.supp_comm_on, supp_comm_type: l.supp_comm_type,
       supp_comm_value: l.supp_comm_value, supp_tds_per: l.supp_tds_per,
@@ -3914,10 +4067,11 @@
       // defaults to today and stays user-editable (see the exclusion list
       // below), same reasoning as Invoice Type/Payment Mode/User Name.
       setDateGroupValue(document.getElementById("invoice_date"), todayDDMMYYYY());
-      // Not copied from the original ticket - that ticket's own Invoice
-      // Type is never a Credit Note, which is all this dropdown now offers
-      // (see populateVoucherTypeOptions) - left blank for a manual pick.
-      document.getElementById("invoice_type").value = "";
+      // Not copied from the original ticket (its type is never a Credit
+      // Note) - the company's Credit Note type is picked automatically (the
+      // first one when there are several, still changeable), and its
+      // "change" runs the normal numbering so the Credit Note No. fills in.
+      await autoSelectCreditNoteType();
       document.getElementById("booking_mode").value = t.booking_mode || "";
       document.getElementById("customer").value = t.customer_name || "";
       // Cancellation Reference/Ref Date are THIS cancellation's own new
@@ -4045,6 +4199,8 @@
         // via the eye icon popup (see openMarkupReversalModal).
         cust_markup_reversal_checked: {}, cust_markup_reversal: 0,
         supp_markup_reversal_checked: {}, supp_markup_reversal: 0,
+        // The booking's Auto Push GST belongs to the booking, not to this new credit note.
+        gst_amounts: null,
       }));
       renderPaxTable();
 
@@ -4093,6 +4249,7 @@
       if (!document.getElementById("user_name").value.trim()) { voyagerAlert("Pick a User Name before saving."); return; }
       const payload = {
         company_id: activeCompanyId,
+        attributes: readAttributeRows(),
         invoice_number: document.getElementById("invoice_number").value,
         invoice_date: toISOFromDDMMYYYY(getDateGroupValue(document.getElementById("invoice_date"))),
         invoice_type: invoiceType,
@@ -4123,6 +4280,7 @@
 
     const payload = {
       company_id: activeCompanyId,
+      attributes: readAttributeRows(),
       original_ticket_id: cxSaveTicketId,
       source_reschedule_ticket_id: cxSaveSourceRescheduleId,
       customer_name: document.getElementById("customer").value,
@@ -4165,6 +4323,7 @@
   // PNR Details to reconstruct).
   function enterSavedCancellationMode(ct) {
     cancellationMode = true;
+    loadAttributeRows(ct.attributes);
     if (activeCompanyId) populateVoucherTypeOptions(activeCompanyId); // Credit Note types only
     viewMode = true;
     cxEditSavedCancellationId = ct.id;
@@ -4177,6 +4336,10 @@
       `View Cancellation - ${ct.lines[0]?.ticket_no || ct.invoice_number} (${ct.lines[0]?.passenger_name || ""})${extraPaxSuffix}`;
     document.getElementById("booking_reference_label").innerHTML = "Cancellation Reference";
     document.getElementById("booking_ref_date_label").innerHTML = "Cancellation Ref Date";
+    // Parent PNR - the one it was pushed with, else its booking's; the only
+    // trace of the booking on a direct Cancellation (Auto Push, not entered here).
+    document.getElementById("parent-pnr-field").style.display = "";
+    document.getElementById("parent_pnr").textContent = ct.parent_pnr || "—";
     document.getElementById("invoice_number").value = ct.invoice_number || "";
     setDateGroupValue(document.getElementById("invoice_date"), ct.invoice_date ? isoToDDMMYYYY(ct.invoice_date) : "");
     setInvoiceTypeValue(ct.invoice_type || "");
@@ -4434,6 +4597,8 @@
       baggage: l.baggage, other_ssr: l.other_ssr, disc_on: l.disc_on, disc_type: l.disc_type, disc_value: l.disc_value,
       tds_per: l.tds_per, pg_charges: l.pg_charges || 0, pg_charges_percentage: l.pg_charges_percentage != null ? l.pg_charges_percentage : 0, markup: l.markup, addl_markup: l.addl_markup, ssr_markup: l.ssr_markup || 0, service_fee: l.service_fee,
       addl_service_fee: l.addl_service_fee, ssr_service_fee: l.ssr_service_fee || 0, gst_pct: l.gst_pct,
+      // GST the Agent sent through Auto Push (shown / used as is) - null for a manual line.
+      gst_amounts: l.gst_amounts || null,
       supplier_name: l.supplier_name, office_id: l.office_id, fop: l.fop, card_number: l.card_number || "",
       supp_comm_on: l.supp_comm_on, supp_comm_type: l.supp_comm_type,
       supp_comm_value: l.supp_comm_value, supp_tds_per: l.supp_tds_per,
@@ -4611,6 +4776,7 @@
   // blank, and Save Ticket goes on to UPDATE this same record (see
   // editingRescheduleId) instead of creating a new one.
   async function enterSavedRescheduleMode(rt, originalTicket) {
+    loadAttributeRows(rt.attributes);
     editLockMessage = rt.edit_lock_message || null;
     editLockBypass = !!rt.edit_lock_bypass;
     rescheduleMode = true;
@@ -4672,8 +4838,9 @@
       // (original_ticket_line_id/reschedule_line_id) instead of fresh
       // lookup-screen params, so re-opening a chained reschedule later
       // still shows the correct running total, not just the single-line
-      // fallback above.
-      try {
+      // fallback above. A direct Reschedule's line has no chain (no
+      // Parent PNR Details tab - see openFareModal).
+      if (savedLine.original_ticket_line_id) try {
         const chainUrl =
           `http://127.0.0.1:8000/api/reschedule-tickets/parent-chain-line/?company_id=${activeCompanyId}&original_ticket_line_id=${savedLine.original_ticket_line_id}` +
           (savedLine.reschedule_line_id ? `&based_on_reschedule_line_id=${savedLine.reschedule_line_id}` : "");
@@ -4795,7 +4962,7 @@
     if (!checkDuplicateHeaderField("invoice_number", "invoice_number_hint", "invoice_number", "Invoice Number")) {
       voyagerAlert("This Invoice Number is already used."); return;
     }
-    if (!document.getElementById("customer").value.trim() || !allCustomers.some((c) => c.name === document.getElementById("customer").value)) { voyagerAlert("Pick a valid Customer from the list."); return; }
+    if (!document.getElementById("customer").value.trim() || !allCustomers.some((c) => c.name === document.getElementById("customer").value)) { voyagerAlert("Pick a valid Agent ID from the list.", { focusEl: document.getElementById("customer_agent_id") }); return; }
     if (!document.getElementById("booking_reference").value.trim()) { voyagerAlert("Booking Reference is required."); return; }
     if (!checkDuplicateHeaderField("booking_reference", "booking_reference_hint", "booking_reference", "Booking Reference")) {
       voyagerAlert("This Booking Reference is already used."); return;
@@ -4997,6 +5164,8 @@
     const sectors = [...new Set(passengers.flatMap((p) => (p.sector || "").split(",").map((s) => s.trim()).filter(Boolean)))];
     return {
       docTitle: cancellationMode ? "CREDIT NOTE" : "TAX INVOICE",
+      // The document's own Invoice Type (Voucher Type name) - Template 3's heading.
+      invoiceType: document.getElementById("invoice_type").value.trim(),
       showTdsColumn: isBookingMode(), // Payment Invoice fare table - Booking only
       userName: (document.getElementById("user_name") || {}).value || "",
       creditNote: !!cancellationMode, // Template 2's Credit Note Total / summary
@@ -5097,9 +5266,14 @@
           const res = await fetch(`http://127.0.0.1:8000/api/reschedule-tickets/${rescheduleSavedId}/?company_id=${activeCompanyId}`);
           const rt = await res.json();
           if (!res.ok) throw new Error(rt.error || "Saved reschedule ticket not found.");
-          const origRes = await fetch(`http://127.0.0.1:8000/api/tickets/${rt.original_ticket_id}/?company_id=${activeCompanyId}`);
-          const originalTicket = await origRes.json();
-          if (!origRes.ok) throw new Error(originalTicket.error || "Original ticket not found.");
+          // A direct Reschedule (Auto Push - its booking was never entered
+          // here) has no original ticket to load; only its Parent PNR.
+          let originalTicket = { lines: [], booking_reference: "" };
+          if (rt.original_ticket_id) {
+            const origRes = await fetch(`http://127.0.0.1:8000/api/tickets/${rt.original_ticket_id}/?company_id=${activeCompanyId}`);
+            originalTicket = await origRes.json();
+            if (!origRes.ok) throw new Error(originalTicket.error || "Original ticket not found.");
+          }
           await enterSavedRescheduleMode(rt, originalTicket);
         } catch (err) {
           voyagerAlert(err.message || "Could not load this saved reschedule ticket. Is the Django backend running?", { icon: "error" });

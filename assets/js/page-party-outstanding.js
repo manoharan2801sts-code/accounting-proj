@@ -206,12 +206,7 @@
   }
 
   function exportCSV() {
-    const csv = Array.from(document.querySelectorAll("#po-table tr")).map((tr) =>
-      Array.from(tr.querySelectorAll("th, td")).map((td) => `"${td.innerText.replace(/"/g, '""')}"`).join(","));
-    const link = document.createElement("a");
-    link.href = URL.createObjectURL(new Blob([csv.join("\n")], { type: "text/csv;charset=utf-8;" }));
-    link.download = `${SIDE}.csv`;
-    link.click();
+    window.VoyagerExport.excel(RECEIVABLE ? "Receivables" : "Payables", document.querySelectorAll("#po-table tr"));
   }
 
   // ---------- Customer / Supplier filter ----------

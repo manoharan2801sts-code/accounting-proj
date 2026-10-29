@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <title>Access Control — TRAVEL AGENCY</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
+  <link href="assets/css/design-system.css" rel="stylesheet" />
+  <link href="assets/css/app.css?v=8" rel="stylesheet" />
+  <link rel="icon" type="image/png" href="assets/img/favicon.png" />
+  <style>
+    /* Locked to the viewport - the user list and the access grid scroll on
+       their own (same pattern as user-management.html). */
+    html, body { height: 100%; overflow: hidden; margin: 0; }
+    .ac-main {
+      display: flex; flex-direction: column;
+      height: calc(100vh - var(--topnav-height) - var(--menubar-height, 0px));
+      box-sizing: border-box;
+    }
+    .page-header-row { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 1rem; flex-wrap: wrap; flex-shrink: 0; }
+    .page-title-group h1 { font-size: 1.25rem; font-weight: 700; margin: 0; display: flex; align-items: center; gap: 0.5rem; }
+    .page-title-group .breadcrumb { font-size: 0.8rem; color: var(--color-text-muted); margin-bottom: 0.25rem; display: flex; gap: 0.4rem; align-items: center; }
+
+    .ac-layout { flex: 1; min-height: 0; display: grid; grid-template-columns: 300px 1fr; gap: 1rem; }
+    .ac-panel {
+      background: var(--color-white); border: 1px solid var(--color-border);
+      border-radius: var(--radius-md); overflow: hidden; display: flex; flex-direction: column; min-height: 0;
+    }
+    .ac-panel-head {
+      padding: 0.75rem 1rem; border-bottom: 1px solid var(--color-border); background: #FAFBFD;
+      display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap; flex-shrink: 0;
+    }
+    .ac-panel-title { font-weight: 700; font-size: 0.92rem; color: var(--color-text-dark); }
+    .ac-count { font-size: 11.5px; color: var(--color-text-muted); font-weight: 600; }
+    .ac-search { padding: 0.6rem 0.75rem; border-bottom: 1px solid var(--color-border-subtle); flex-shrink: 0; }
+    .ac-search input { width: 100%; box-sizing: border-box; }
+
+    /* Left: users */
+    .ac-user-list { flex: 1; min-height: 0; overflow: auto; }
+    .ac-user {
+      display: flex; align-items: center; gap: 10px; width: 100%; padding: 0.65rem 0.9rem;
+      border: none; border-bottom: 1px solid var(--color-border-subtle); border-left: 3px solid transparent;
+      background: none; text-align: left; cursor: pointer; font: inherit;
+    }
+    .ac-user:hover { background: #F8FAFC; }
+    .ac-user.active { background: var(--color-primary-tint); border-left-color: var(--color-primary); }
+    .ac-avatar {
+      width: 34px; height: 34px; border-radius: 50%; flex-shrink: 0; display: flex; align-items: center; justify-content: center;
+      background: #E0E7FF; color: #3730A3; font-weight: 700; font-size: 12.5px;
+    }
+    .ac-user.inactive .ac-avatar { background: #F1F5F9; color: var(--color-text-faint); }
+    .ac-user-text { flex: 1; min-width: 0; }
+    .ac-user-name { font-weight: 600; font-size: 13px; color: var(--color-text-dark); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .ac-user-sub { font-size: 11.5px; color: var(--color-text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .ac-empty { padding: 2rem 1rem; text-align: center; color: var(--color-text-muted); font-size: 13px; }
+
+    .status-badge { display: inline-flex; align-items: center; padding: 0.15rem 0.45rem;
+      border-radius: 4px; font-size: 10.5px; font-weight: 700; white-space: nowrap; flex-shrink: 0; }
+    .badge-success { background: #DCFCE7; color: #166534; }
+    .badge-danger { background: #FEE2E2; color: #991B1B; }
+    .badge-info { background: #E0E7FF; color: #3730A3; }
+    .badge-muted { background: #F1F5F9; color: var(--color-text-muted); }
+
+    /* Right: access grid */
+    .ac-head-name { font-weight: 700; font-size: 1rem; color: var(--color-text-dark); }
+    .ac-head-sub { font-size: 12px; color: var(--color-text-muted); }
+    .ac-head-actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+    .ac-head-actions input { width: 200px; }
+    .ac-super-note { display: none; margin: 0.75rem 1rem 0; padding: 8px 10px; border-radius: var(--radius-sm);
+      background: #E0E7FF; color: #3730A3; font-size: 12px; font-weight: 600; flex-shrink: 0; }
+    .ac-grid-scroll { flex: 1; min-height: 0; overflow: auto; }
+    .ua-table { width: 100%; min-width: 720px; border-collapse: collapse; }
+    .ua-table th { position: sticky; top: 0; z-index: 1; background: #F8FAFC; padding: 0.6rem 0.75rem;
+      font-size: 11px; font-weight: 700; color: var(--color-text-muted); letter-spacing: 0.03em;
+      border-bottom: 1px solid var(--color-border); text-align: center; width: 96px; }
+    .ua-table th:first-child { text-align: left; width: auto; }
+    .ua-table td { padding: 0 0.75rem; border-bottom: 1px solid var(--color-border-subtle); font-size: 13px; text-align: center; }
+    .ua-table td:first-child { text-align: left; padding: 0.35rem 0.75rem 0.35rem 1.9rem; }
+    .ua-table tbody tr:hover td { background: #F8FAFC; }
+    .ua-table tr.ua-module-row td { background: var(--color-primary-tint); font-weight: 700; color: var(--color-text-dark); }
+    .ua-table tr.ua-module-row td:first-child { padding-left: 0.85rem; }
+    .ua-module-count { font-weight: 600; font-size: 11px; color: var(--color-text-muted); margin-left: 6px; }
+    .ua-menu-key { display: block; font-size: 10.5px; color: var(--color-text-faint); font-family: var(--font-mono); }
+    /* 44px touch target around each checkbox */
+    .ua-cell { display: inline-flex; align-items: center; justify-content: center; min-width: 44px; min-height: 40px; cursor: pointer; }
+    .ua-cell input { accent-color: var(--color-primary); width: 16px; height: 16px; cursor: pointer; }
+    .ua-cell input:disabled { cursor: not-allowed; }
+
+    .ac-foot {
+      padding: 0.65rem 1rem; border-top: 1px solid var(--color-border); background: #FAFBFD; flex-shrink: 0;
+      display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap;
+    }
+    .ac-foot-note { font-size: 11.5px; color: var(--color-text-muted); }
+    .ac-dirty { color: #B45309; font-weight: 700; }
+    .ac-placeholder { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--color-text-muted); font-size: 13px; padding: 2rem; text-align: center; }
+
+    @media (max-width: 800px) {
+      html, body { overflow: auto; }
+      .ac-main { height: auto; }
+      .ac-layout { grid-template-columns: 1fr; }
+      .ac-user-list { max-height: 260px; }
+      .ac-grid-scroll { max-height: 70vh; }
+    }
+  </style>
+</head>
+<body>
+  <header class="app-topnav" id="shell-topnav"></header>
+  <div class="app-body">
+    <main class="app-main ac-main" style="max-width: 1440px; margin: 0 auto; padding: 1.5rem 2rem; width: 100%;">
+      <div class="page-header-row">
+        <div class="page-title-group">
+          <div class="breadcrumb">Control Panel &rsaquo; Access Control</div>
+          <h1><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--color-primary)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/></svg> Access Control</h1>
+        </div>
+      </div>
+
+      <div class="ac-layout">
+        <!-- Left: users -->
+        <section class="ac-panel">
+          <div class="ac-panel-head">
+            <div class="ac-panel-title">Users</div>
+            <div class="ac-count" id="ac-user-count"></div>
+          </div>
+          <div class="ac-search">
+            <input type="text" class="form-control-custom" id="ac-user-search" placeholder="Search users..." />
+          </div>
+          <div class="ac-user-list" id="ac-user-list">
+            <div class="ac-empty">Loading...</div>
+          </div>
+        </section>
+
+        <!-- Right: menu access -->
+        <section class="ac-panel" id="ac-access-panel">
+          <div class="ac-placeholder" id="ac-placeholder">Select a user on the left to set their menu access.</div>
+          <div class="ac-panel-head" id="ac-access-head" style="display:none;">
+            <div>
+              <div class="ac-head-name" id="ac-user-name"></div>
+              <div class="ac-head-sub" id="ac-user-sub"></div>
+            </div>
+            <div class="ac-head-actions">
+              <input type="text" class="form-control-custom" id="ac-menu-search" placeholder="Search menus..." />
+              <button type="button" class="dom-nav-btn" id="ac-select-all-btn">Select all</button>
+              <button type="button" class="dom-nav-btn" id="ac-clear-all-btn">Clear all</button>
+            </div>
+          </div>
+          <div class="ac-super-note" id="ac-super-note">Super Admin always has full access to every menu - no individual flags needed.</div>
+          <div class="ac-grid-scroll" id="ac-grid-scroll" style="display:none;">
+            <table class="ua-table">
+              <thead>
+                <tr><th>MODULE / MENU</th><th>VIEW</th><th>ADD</th><th>EDIT</th><th>DELETE</th><th>PRINT</th><th>EXPORT EXCEL</th></tr>
+              </thead>
+              <tbody id="ac-tbody"></tbody>
+            </table>
+          </div>
+          <div class="ac-foot" id="ac-foot" style="display:none;">
+            <div class="ac-foot-note">Ticking Add, Edit, Delete, Print or Export Excel also ticks View. <span class="ac-dirty" id="ac-dirty" hidden>&bull; Unsaved changes</span></div>
+            <div style="display:flex; gap:6px;">
+              <button type="button" class="dom-nav-btn" id="ac-reset-btn">Reset</button>
+              <button type="button" class="dom-nav-btn btn-primary" id="ac-save-btn" style="font-weight:700;">Save changes</button>
+            </div>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <script src="assets/js/api.js?v=5"></script>
+  <script src="assets/js/hardcode.js?v=12"></script>
+  <script src="assets/js/shell.js?v=48"></script>
+  <script src="assets/js/page-access-control.js?v=2"></script>
+</body>
+</html>

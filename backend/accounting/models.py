@@ -22,7 +22,10 @@ run migrations with --fake after creating the table by hand, so
 Django's migration history matches without re-running the DDL:
     python manage.py migrate accounting --fake
 """
+import contextlib
+import contextvars
 from decimal import Decimal
+from django.core.signals import request_started
 from django.db import models
 
 # Process-level cache for TicketLine.computed_gst's per-field GST% lookup
@@ -82,12 +85,77 @@ def _mapping_history(company_id, product_type="Airline"):
     return _mapping_history_cache[key]
 
 
-def resolve_mapping(company_id, field_name, as_of=None, product_type="Airline"):
+# ---------------------------------------------------------------------------
+# Ledger Mapping pins (MasterMappingPin): a back-dated mapping saved with
+# "Retain old ledgers" keeps every document already saved on the ledger it
+# posted to - resolve_mapping returns a document's pin before the history.
+# A document is identified as (doc_type, id) - document_ref(); SSR /
+# Miscellaneous computations name theirs with `with mapping_document(...)`.
+# An edited document resolves without its pins (ignore_mapping_pins) and
+# drops them once saved.
+# ---------------------------------------------------------------------------
+_mapping_pins_cache = {}
+_current_document = contextvars.ContextVar("mapping_document", default=None)
+_pins_ignored_for = contextvars.ContextVar("mapping_pins_ignored", default=frozenset())
+
+DOCUMENT_TYPES = {"Ticket": "ticket", "RescheduleAirlineTicket": "reschedule",
+                  "CancellationAirlineTicket": "cancellation", "SSRAirlineTicket": "ssr", "MiscTransaction": "misc"}
+
+
+def document_ref(header):
+    """(doc_type, id) of a saved document header, or None (unsaved / not a document)."""
+    doc_type = DOCUMENT_TYPES.get(type(header).__name__)
+    doc_id = getattr(header, "id", None)
+    return (doc_type, int(doc_id)) if doc_type and doc_id else None
+
+
+@contextlib.contextmanager
+def mapping_document(doc_type, doc_id):
+    """Every resolve_mapping inside resolves for this saved document (its pins apply)."""
+    token = _current_document.set((doc_type, int(doc_id)) if doc_type and doc_id else None)
+    try:
+        yield
+    finally:
+        _current_document.reset(token)
+
+
+@contextlib.contextmanager
+def ignore_mapping_pins(doc_type, doc_id):
+    """While a document is being edited it takes today's mapping, not its pins."""
+    token = _pins_ignored_for.set(_pins_ignored_for.get() | {(doc_type, int(doc_id))})
+    try:
+        yield
+    finally:
+        _pins_ignored_for.reset(token)
+
+
+def _mapping_pins(company_id):
+    key = int(company_id)
+    if key not in _mapping_pins_cache:
+        from . import sp_client
+        _mapping_pins_cache[key] = {
+            (r["doc_type"], r["doc_id"], r["product_type"], r["field_name"]): {
+                "effective_from": _as_date(r["effective_from"]), "ledger_id": r["ledger_id"],
+                "ledger_name": r["ledger_name"], "gst_pct": float(r["ledger_gst_percentage"] or 0),
+                "masters_category": r["masters_category"], "pinned": True,
+            }
+            for r in sp_client.master_mapping_pins(company_id)
+        }
+    return _mapping_pins_cache[key]
+
+
+def resolve_mapping(company_id, field_name, as_of=None, product_type="Airline", doc=None):
     """The Ledger Mapping in force for field_name on as_of (a document's own
     date) - {ledger_id, ledger_name, gst_pct, effective_from, masters_category},
-    or None when the field was never mapped or is not mapped yet on as_of."""
+    or None when the field was never mapped or is not mapped yet on as_of.
+    doc (doc_type, id): a saved document - its pin (if any) wins."""
     if company_id is None:
         return None
+    doc = doc or _current_document.get()
+    if doc and doc not in _pins_ignored_for.get():
+        pin = _mapping_pins(company_id).get((doc[0], doc[1], product_type, field_name))
+        if pin:
+            return pin
     rows = _mapping_history(company_id, product_type).get(field_name)
     if not rows:
         return None
@@ -98,9 +166,9 @@ def resolve_mapping(company_id, field_name, as_of=None, product_type="Airline"):
     return in_force[-1] if in_force else None
 
 
-def mapped_gst_pct(company_id, field_name, as_of=None, product_type="Airline"):
+def mapped_gst_pct(company_id, field_name, as_of=None, product_type="Airline", doc=None):
     """GST % of the ledger mapped to field_name on as_of (0 when unmapped)."""
-    r = resolve_mapping(company_id, field_name, as_of, product_type)
+    r = resolve_mapping(company_id, field_name, as_of, product_type, doc)
     return r["gst_pct"] if r else 0.0
 
 
@@ -114,8 +182,78 @@ def document_date(header):
     return None
 
 
+# ---------------------------------------------------------------------------
+# Auto Push GST amounts (Ticket_Line_Gst_Amount): the GST the Agent worked
+# out itself, per line - used as sent instead of fee x mapped GST % (that %
+# calculation is for manual entry). Keyed (line_type, document id, Ticket
+# No.); while an import is saving (no id yet) the amounts come from
+# pushed_line_gst(). Read fresh for every request (request_started below),
+# since the scheduler process writes them too. An edited document resolves
+# without them (ignore_mapping_pins) and drops them once saved.
+# ---------------------------------------------------------------------------
+_line_gst_cache = {}
+_pending_line_gst = contextvars.ContextVar("pending_line_gst", default=None)
+LINE_TYPES = {"TicketLine": "ticket", "RescheduleAirlineTicketLine": "reschedule",
+              "CancellationAirlineTicketLine": "cancellation"}
+GST_AMOUNT_FIELDS = {
+    "service_fee": "service_fee_gst", "addl_service_fee": "addl_service_fee_gst", "ssr_service_fee": "ssr_service_fee_gst",
+    "supp_service_fee": "supp_service_fee_gst", "supp_addl_service_fee": "supp_addl_service_fee_gst",
+    "supp_ssr_service_fee": "supp_ssr_service_fee_gst",
+}
+
+
+@contextlib.contextmanager
+def pushed_line_gst(amounts):
+    """amounts {(line_type, ticket_no): {service_fee_gst: ..., ...}} for a document being saved."""
+    token = _pending_line_gst.set(amounts or None)
+    try:
+        yield
+    finally:
+        _pending_line_gst.reset(token)
+
+
+def _line_gst_rows():
+    if "rows" not in _line_gst_cache:
+        from . import sp_client
+        _line_gst_cache["rows"] = {(r["line_type"], r["doc_id"], r["ticket_no"]): r for r in sp_client.ticket_line_gst_amounts()}
+    return _line_gst_cache["rows"]
+
+
+def line_gst_amounts(line, header):
+    """The GST amounts the Agent sent for this line, or None (worked out from the mapping)."""
+    line_type = LINE_TYPES.get(type(line).__name__)
+    if not line_type:
+        return None
+    ref = document_ref(header)
+    if ref:
+        if ref in _pins_ignored_for.get():
+            return None
+        saved = _line_gst_rows().get((line_type, ref[1], line.ticket_no))
+        if saved:
+            return saved
+    pending = _pending_line_gst.get()
+    return pending.get((line_type, line.ticket_no)) if pending else None
+
+
+def gst_part(line, header, fee_field, field_name, pct_of):
+    """GST of one fee: the amount the Agent sent, else fee x GST % of the ledger mapped to field_name."""
+    pushed = line_gst_amounts(line, header)
+    if pushed and pushed.get(GST_AMOUNT_FIELDS[fee_field]) is not None:
+        return float(pushed[GST_AMOUNT_FIELDS[fee_field]])
+    return float(getattr(line, fee_field) or 0) * pct_of(field_name) / 100
+
+
+def _clear_line_gst_cache(**_kwargs):
+    _line_gst_cache.clear()
+
+
+request_started.connect(_clear_line_gst_cache, dispatch_uid="accounting_line_gst_cache")
+
+
 def clear_mapping_caches():
     _mapping_history_cache.clear()
+    _mapping_pins_cache.clear()
+    _line_gst_cache.clear()
     _field_gst_pct_cache.clear()
 
 
@@ -322,7 +460,7 @@ class Ticket(models.Model):
     # from whatever voucher types the company has defined there.
     invoice_type = models.CharField(max_length=100, null=True, blank=True)
     booking_mode = models.CharField(max_length=20, choices=BOOKING_MODE_CHOICES, default="Manual")
-    booking_type = models.CharField(max_length=30, null=True, blank=True)
+    booking_type = models.CharField(max_length=50, null=True, blank=True)
     booking_status = models.CharField(max_length=20, choices=BOOKING_STATUS_CHOICES, null=True, blank=True)
 
     customer = models.ForeignKey(
@@ -602,12 +740,12 @@ class TicketLine(models.Model):
         def field_ledger_gst_pct(field_name):
             # GST % of the ledger mapped to this field ON THIS DOCUMENT'S OWN
             # DATE (Ledger Mapping effective dates - see resolve_mapping).
-            return mapped_gst_pct(company_id, field_name, doc_date)
+            return mapped_gst_pct(company_id, field_name, doc_date, doc=document_ref(self.ticket))
 
         return (
-            float(self.service_fee) * field_ledger_gst_pct("Service Fee A/c") / 100
-            + float(self.addl_service_fee) * field_ledger_gst_pct("Addl Service Fee A/c") / 100
-            + float(self.ssr_service_fee) * field_ledger_gst_pct("SSR Service Fee A/c") / 100
+            gst_part(self, self.ticket, "service_fee", "Service Fee A/c", field_ledger_gst_pct)
+            + gst_part(self, self.ticket, "addl_service_fee", "Addl Service Fee A/c", field_ledger_gst_pct)
+            + gst_part(self, self.ticket, "ssr_service_fee", "SSR Service Fee A/c", field_ledger_gst_pct)
         )
 
     @property
@@ -645,12 +783,12 @@ class TicketLine(models.Model):
         def field_ledger_gst_pct(field_name):
             # GST % of the ledger mapped to this field ON THIS DOCUMENT'S OWN
             # DATE (Ledger Mapping effective dates - see resolve_mapping).
-            return mapped_gst_pct(company_id, field_name, doc_date)
+            return mapped_gst_pct(company_id, field_name, doc_date, doc=document_ref(self.ticket))
 
         return (
-            float(self.supp_service_fee) * field_ledger_gst_pct("Supplier Service Fee A/c") / 100
-            + float(self.supp_addl_service_fee) * field_ledger_gst_pct("Supplier Addl Service Fee A/c") / 100
-            + float(self.supp_ssr_service_fee) * field_ledger_gst_pct("Supplier SSR Service Fee A/c") / 100
+            gst_part(self, self.ticket, "supp_service_fee", "Supplier Service Fee A/c", field_ledger_gst_pct)
+            + gst_part(self, self.ticket, "supp_addl_service_fee", "Supplier Addl Service Fee A/c", field_ledger_gst_pct)
+            + gst_part(self, self.ticket, "supp_ssr_service_fee", "Supplier SSR Service Fee A/c", field_ledger_gst_pct)
         )
 
 
@@ -673,15 +811,17 @@ class RescheduleAirlineTicket(models.Model):
     # is reconstructed entirely from here (original_ticket.booking_reference
     # is what the Reschedule screen calls "Parent PNR", etc.) rather than
     # duplicating any of Ticket's own columns on this table.
+    # NULL = a direct Reschedule (Auto Push): its booking was never entered
+    # in this software - the lines' parent_pnr is all there is of it.
     original_ticket = models.ForeignKey(
-        Ticket, on_delete=models.PROTECT, related_name="reschedules", db_column="original_ticket_id"
+        Ticket, on_delete=models.PROTECT, related_name="reschedules", db_column="original_ticket_id", null=True, blank=True
     )
 
     invoice_number = models.CharField(max_length=20)
     invoice_date = models.DateField()
     invoice_type = models.CharField(max_length=100, null=True, blank=True)
     booking_mode = models.CharField(max_length=20, choices=Ticket.BOOKING_MODE_CHOICES, default="Manual")
-    booking_type = models.CharField(max_length=30, null=True, blank=True)
+    booking_type = models.CharField(max_length=50, null=True, blank=True)
     # Always "Re-Scheduled" in practice (see enterRescheduleMode() in
     # page-ticket-entry.js, which freezes this field) - kept as a real,
     # editable column rather than hardcoded, same choices as Ticket's own.
@@ -749,8 +889,10 @@ class RescheduleAirlineTicketLine(models.Model):
     # itself chained off a PREVIOUS reschedule (based_on_reschedule_line
     # below) - FKs never point reschedule-to-reschedule, so this is the
     # one stable anchor back to the real booking regardless of chain depth.
+    # NULL on a direct Reschedule (see RescheduleAirlineTicket.original_ticket).
     original_ticket_line = models.ForeignKey(
-        TicketLine, on_delete=models.PROTECT, related_name="reschedule_lines", db_column="original_ticket_line_id"
+        TicketLine, on_delete=models.PROTECT, related_name="reschedule_lines", db_column="original_ticket_line_id",
+        null=True, blank=True
     )
     # Set only when this reschedule was created by rescheduling an
     # ALREADY-RESCHEDULED ticket again (chaining) - e.g. original ticket ->
@@ -930,12 +1072,12 @@ class RescheduleAirlineTicketLine(models.Model):
         def field_ledger_gst_pct(field_name):
             # GST % of the ledger mapped to this field ON THIS DOCUMENT'S OWN
             # DATE (Ledger Mapping effective dates - see resolve_mapping).
-            return mapped_gst_pct(company_id, field_name, doc_date)
+            return mapped_gst_pct(company_id, field_name, doc_date, doc=document_ref(self.reschedule_ticket))
 
         return (
-            float(self.service_fee) * field_ledger_gst_pct("Service Fee A/c") / 100
-            + float(self.addl_service_fee) * field_ledger_gst_pct("Addl Service Fee A/c") / 100
-            + float(self.ssr_service_fee) * field_ledger_gst_pct("SSR Service Fee A/c") / 100
+            gst_part(self, self.reschedule_ticket, "service_fee", "Service Fee A/c", field_ledger_gst_pct)
+            + gst_part(self, self.reschedule_ticket, "addl_service_fee", "Addl Service Fee A/c", field_ledger_gst_pct)
+            + gst_part(self, self.reschedule_ticket, "ssr_service_fee", "SSR Service Fee A/c", field_ledger_gst_pct)
         )
 
     @property
@@ -967,12 +1109,12 @@ class RescheduleAirlineTicketLine(models.Model):
         def field_ledger_gst_pct(field_name):
             # GST % of the ledger mapped to this field ON THIS DOCUMENT'S OWN
             # DATE (Ledger Mapping effective dates - see resolve_mapping).
-            return mapped_gst_pct(company_id, field_name, doc_date)
+            return mapped_gst_pct(company_id, field_name, doc_date, doc=document_ref(self.reschedule_ticket))
 
         return (
-            float(self.supp_service_fee) * field_ledger_gst_pct("Supplier Service Fee A/c") / 100
-            + float(self.supp_addl_service_fee) * field_ledger_gst_pct("Supplier Addl Service Fee A/c") / 100
-            + float(self.supp_ssr_service_fee or 0) * field_ledger_gst_pct("Supplier SSR Service Fee A/c") / 100
+            gst_part(self, self.reschedule_ticket, "supp_service_fee", "Supplier Service Fee A/c", field_ledger_gst_pct)
+            + gst_part(self, self.reschedule_ticket, "supp_addl_service_fee", "Supplier Addl Service Fee A/c", field_ledger_gst_pct)
+            + gst_part(self, self.reschedule_ticket, "supp_ssr_service_fee", "Supplier SSR Service Fee A/c", field_ledger_gst_pct)
         )
 
 
@@ -996,15 +1138,18 @@ class CancellationAirlineTicket(models.Model):
 
     # The ticket this cancellation was raised against - same convention as
     # RescheduleAirlineTicket.original_ticket.
+    # NULL = a direct Cancellation (Auto Push): its booking was never
+    # entered in this software - parent_pnr keeps the Parent PNR it was sent with.
     original_ticket = models.ForeignKey(
-        Ticket, on_delete=models.PROTECT, related_name="cancellations", db_column="original_ticket_id"
+        Ticket, on_delete=models.PROTECT, related_name="cancellations", db_column="original_ticket_id", null=True, blank=True
     )
+    parent_pnr = models.CharField(max_length=30, null=True, blank=True)
 
     invoice_number = models.CharField(max_length=20)
     invoice_date = models.DateField()
     invoice_type = models.CharField(max_length=100, null=True, blank=True)
     booking_mode = models.CharField(max_length=20, choices=Ticket.BOOKING_MODE_CHOICES, default="Manual")
-    booking_type = models.CharField(max_length=30, null=True, blank=True)
+    booking_type = models.CharField(max_length=50, null=True, blank=True)
     # Frozen to "Normal Cancelled" by the frontend (enterBlankCancellationShell/
     # enterCancellationMode in page-ticket-entry.js) - kept as a real,
     # editable column rather than hardcoded, same choices as Ticket's own.
@@ -1074,8 +1219,17 @@ class CancellationAirlineTicketLine(models.Model):
         CancellationAirlineTicket, on_delete=models.CASCADE, related_name="lines", db_column="cancellation_ticket_id"
     )
     # The exact original passenger line this cancellation was raised for.
+    # NULL on a direct Cancellation (filtered unique index - one
+    # cancellation per booking line).
     original_ticket_line = models.OneToOneField(
-        TicketLine, on_delete=models.PROTECT, related_name="cancellation_line", db_column="original_ticket_line_id"
+        TicketLine, on_delete=models.PROTECT, related_name="cancellation_line", db_column="original_ticket_line_id",
+        null=True, blank=True
+    )
+    # The reschedule line this cancelled, when the passenger's live data was
+    # on a reschedule (no DB constraint - set by sp_CancellationTicket).
+    reschedule_line = models.ForeignKey(
+        "RescheduleAirlineTicketLine", on_delete=models.DO_NOTHING, db_constraint=False, null=True, blank=True,
+        related_name="cancellation_lines", db_column="reschedule_line_id"
     )
 
     airline_code = models.CharField(max_length=200, null=True, blank=True)
@@ -1236,12 +1390,12 @@ class CancellationAirlineTicketLine(models.Model):
         def field_ledger_gst_pct(field_name):
             # GST % of the ledger mapped to this field ON THIS DOCUMENT'S OWN
             # DATE (Ledger Mapping effective dates - see resolve_mapping).
-            return mapped_gst_pct(company_id, field_name, doc_date)
+            return mapped_gst_pct(company_id, field_name, doc_date, doc=document_ref(self.cancellation_ticket))
 
         return (
-            float(self.service_fee) * field_ledger_gst_pct("Service Fee A/c") / 100
-            + float(self.addl_service_fee) * field_ledger_gst_pct("Addl Service Fee A/c") / 100
-            + float(self.ssr_service_fee) * field_ledger_gst_pct("SSR Service Fee A/c") / 100
+            gst_part(self, self.cancellation_ticket, "service_fee", "Service Fee A/c", field_ledger_gst_pct)
+            + gst_part(self, self.cancellation_ticket, "addl_service_fee", "Addl Service Fee A/c", field_ledger_gst_pct)
+            + gst_part(self, self.cancellation_ticket, "ssr_service_fee", "SSR Service Fee A/c", field_ledger_gst_pct)
         )
 
     @property
@@ -1276,11 +1430,11 @@ class CancellationAirlineTicketLine(models.Model):
         def field_ledger_gst_pct(field_name):
             # GST % of the ledger mapped to this field ON THIS DOCUMENT'S OWN
             # DATE (Ledger Mapping effective dates - see resolve_mapping).
-            return mapped_gst_pct(company_id, field_name, doc_date)
+            return mapped_gst_pct(company_id, field_name, doc_date, doc=document_ref(self.cancellation_ticket))
 
         return (
-            float(self.supp_service_fee) * field_ledger_gst_pct("Supplier Service Fee A/c") / 100
-            + float(self.supp_addl_service_fee) * field_ledger_gst_pct("Supplier Addl Service Fee A/c") / 100
+            gst_part(self, self.cancellation_ticket, "supp_service_fee", "Supplier Service Fee A/c", field_ledger_gst_pct)
+            + gst_part(self, self.cancellation_ticket, "supp_addl_service_fee", "Supplier Addl Service Fee A/c", field_ledger_gst_pct)
         )
 
 
@@ -1298,9 +1452,13 @@ class SSRAirlineTicket(models.Model):
     company_id = models.IntegerField()
     branch_name = models.CharField(max_length=100, null=True, blank=True)
 
+    # NULL = a direct SSR Updation (Auto Push): the ticket's booking was never
+    # entered in this software - parent_pnr keeps the Parent PNR it was sent
+    # with (and source_reschedule_ticket the direct Reschedule it sits on, if any).
     original_ticket = models.ForeignKey(
-        Ticket, on_delete=models.PROTECT, related_name="ssr_updations", db_column="original_ticket_id"
+        Ticket, on_delete=models.PROTECT, related_name="ssr_updations", db_column="original_ticket_id", null=True, blank=True
     )
+    parent_pnr = models.CharField(max_length=30, null=True, blank=True)
     source_reschedule_ticket = models.ForeignKey(
         RescheduleAirlineTicket, on_delete=models.PROTECT, null=True, blank=True,
         related_name="ssr_updations", db_column="source_reschedule_ticket_id"
@@ -1336,10 +1494,11 @@ class SSRAirlineTicket(models.Model):
         db_table = "SSR_AL_Tickets"
         constraints = [
             models.UniqueConstraint(fields=["company_id", "invoice_number"], name="uq_ssr_ticket_company_invoice_no"),
-            models.UniqueConstraint(fields=["company_id", "ssr_reference"], name="uq_ssr_ticket_company_ssr_ref"),
         ]
+        # SSR Reference repeats: one booking can have several SSR Updations (migration 0088).
         indexes = [models.Index(fields=["company_id"], name="ssr_ticket_company_idx"),
-                   models.Index(fields=["original_ticket"], name="ssr_ticket_original_idx")]
+                   models.Index(fields=["original_ticket"], name="ssr_ticket_original_idx"),
+                   models.Index(fields=["company_id", "ssr_reference"], name="ssr_ticket_ssr_ref_idx")]
 
     def __str__(self):
         return self.invoice_number
@@ -1357,8 +1516,8 @@ class SSRAirlineTicketLine(models.Model):
     """
     id = models.AutoField(primary_key=True)
     ssr_ticket = models.ForeignKey(SSRAirlineTicket, on_delete=models.CASCADE, related_name="lines", db_column="ssr_ticket_id")
-    original_ticket_line = models.ForeignKey(
-        TicketLine, on_delete=models.PROTECT, related_name="ssr_lines", db_column="original_ticket_line_id"
+    original_ticket_line = models.ForeignKey(   # NULL on a direct SSR Updation
+        TicketLine, on_delete=models.PROTECT, related_name="ssr_lines", db_column="original_ticket_line_id", null=True, blank=True
     )
     reschedule_line = models.ForeignKey(
         RescheduleAirlineTicketLine, on_delete=models.PROTECT, null=True, blank=True,
@@ -1375,6 +1534,7 @@ class SSRAirlineTicketLine(models.Model):
         Ledger, on_delete=models.PROTECT, null=True, blank=True, related_name="ssr_lines_as_supplier", db_column="supplier_ledger_id"
     )
     fop = models.CharField(max_length=20, null=True, blank=True)
+    card_number = models.CharField(max_length=40, null=True, blank=True)   # FOP Own Card / Client Card (FOP Master)
     ssr_items = models.TextField(null=True, blank=True)
     # SSR Ticket Number per SSR type, same JSON-text shape as ssr_items,
     # e.g. {"Baggage": "0981234567890"} - optional per type.
@@ -2106,6 +2266,8 @@ class UserMenuAccess(models.Model):
     can_add = models.BooleanField(default=False)
     can_edit = models.BooleanField(default=False)
     can_delete = models.BooleanField(default=False)
+    can_print = models.BooleanField(default=False)    # Print button
+    can_export = models.BooleanField(default=False)   # Export Excel button
     created_by = models.ForeignKey(
         AppUser, on_delete=models.SET_NULL, null=True, blank=True,
         related_name="granted_accesses", db_column="created_by_id",

@@ -132,6 +132,7 @@
     ]},
     { label: "Control Panel", forceDropdown: true, items: [
       { key: "user-management", label: "User Management", href: "user-management.html", icon: "M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2M9 11a4 4 0 100-8 4 4 0 000 8zM23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75" },
+      { key: "access-control", label: "Access Control", href: "access-control.html", icon: "M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10zM9 12l2 2 4-4" },
     ]},
   ];
 
@@ -169,21 +170,23 @@
   ];
 
   // Revenue-by-product-line tiles. Moved out of dashboard.js.
+  // href = the real report a tile opens (none = not clickable). Only the
+  // Airline module is live - Hotel / Visa / Insurance are 0 for now.
   const DASHBOARD_REVENUE_TILES = [
-    { label: "Ticket Revenue",     dataPath: "revenue.ticket_revenue",     ledger: "Ticket Sales Revenue" },
-    { label: "Hotel Revenue",      dataPath: "revenue.hotel_revenue",      ledger: "Hotel Sales Revenue" },
-    { label: "Visa Revenue",       dataPath: "revenue.visa_revenue",       ledger: "Visa Service Revenue" },
-    { label: "Insurance Revenue",  dataPath: "revenue.insurance_revenue",  ledger: "Insurance Revenue" },
-    { label: "Service Charges",    dataPath: "revenue.service_charges",    ledger: null },
-    { label: "Markup Revenue",     dataPath: "revenue.markup_revenue",     ledger: null },
+    { label: "Ticket Revenue",     dataPath: "revenue.ticket_revenue",     href: "report-dsr.html" },
+    { label: "Hotel Revenue",      dataPath: "revenue.hotel_revenue",      href: null },
+    { label: "Visa Revenue",       dataPath: "revenue.visa_revenue",       href: null },
+    { label: "Insurance Revenue",  dataPath: "revenue.insurance_revenue",  href: null },
+    { label: "Service Charges",    dataPath: "revenue.service_charges",    href: "report-dsr.html" },
+    { label: "Markup Revenue",     dataPath: "revenue.markup_revenue",     href: "report-dsr.html" },
   ];
 
   // Finance position tiles. Moved out of dashboard.js.
   const DASHBOARD_FINANCE_TILES = [
-    { label: "Cash Position",              dataPath: "finance.cash_position",              ledger: "Cash in Hand" },
-    { label: "Bank Position",              dataPath: "finance.bank_position",              ledger: "Bank Account - Main" },
-    { label: "Outstanding Receivables",    dataPath: "finance.outstanding_receivables",    ledger: "Trade Receivable" },
-    { label: "Outstanding Payables",       dataPath: "finance.outstanding_payables",       ledger: "Trade Payable - Suppliers" },
+    { label: "Cash Position",              dataPath: "finance.cash_position",              href: "report-cash-bank-book.html" },
+    { label: "Bank Position",              dataPath: "finance.bank_position",              href: "report-cash-bank-book.html" },
+    { label: "Outstanding Receivables",    dataPath: "finance.outstanding_receivables",    href: "customers.html" },
+    { label: "Outstanding Payables",       dataPath: "finance.outstanding_payables",       href: "suppliers.html" },
   ];
 
   // Shared icon paths (24x24 stroke icons), keyed for reuse across dashboard cards.

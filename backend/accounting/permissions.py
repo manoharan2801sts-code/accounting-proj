@@ -12,9 +12,11 @@ Rules:
   endpoint is listed in RULES with the menu(s) and flag it needs. Writes
   NOT listed in RULES are Super-Admin-only (fail closed).
 """
+import hmac
 import time
 import json
 
+from django.conf import settings
 from django.core import signing
 from django.http import JsonResponse
 from django.urls import Resolver404, resolve
@@ -24,7 +26,17 @@ from . import sp_client
 AUTH_TOKEN_SALT = "voyager-auth"
 AUTH_TOKEN_MAX_AGE = 12 * 60 * 60
 
-PUBLIC_URL_NAMES = {"auth-login", "seed-database"}
+PUBLIC_URL_NAMES = {"auth-login"}
+
+# Airline ticket Auto Push import (ticket_import.py): an external booking
+# system calls these with the X-Api-Key header (TICKET_IMPORT_API_KEY in
+# .env) instead of a signed-in user's token. Saves made that way are logged
+# (audit log) under API_KEY_USER.
+API_KEY_URL_NAMES = {
+    "ticket-import-push", "ticket-import-process", "ticket-import-retry", "ticket-import-status",
+    "ticket-import-error-log", "agent-db-scheduler-log",
+}
+API_KEY_USER = {"id": None, "full_name": "Auto Push API", "email": None, "is_super_admin": True, "is_active": True}
 SUPER_ADMIN_ONLY_PREFIX = "user-management/"
 
 # "upsert" = one save endpoint for both: "edit" when the JSON body carries
@@ -69,6 +81,13 @@ RULES = {
     "misc-create": ("add", ["trans-misc"]),
     "misc-update": ("edit", ["trans-misc"]),
     "misc-jv-preview-draft": ("view", ["trans-misc"]),
+    # Auto Push ticket import, when called with a user's token instead of the API key
+    "ticket-import-push": ("add", ["tickets"]),
+    "ticket-import-process": ("add", ["tickets"]),
+    "ticket-import-retry": ("add", ["tickets"]),
+    "ticket-import-error-log": ("view", ["tickets"]),
+    "agent-db-scheduler-log": ("view", ["tickets"]),
+    "ticket-import-invoice-types": ("add|edit", ["voucher-type"]),
     # Reports (their own data endpoints)
     "day-book-report": ("view", ["rep-day-book"]),
     "cash-bank-book-report": ("view", ["rep-cash-bank-book"]),
@@ -142,16 +161,23 @@ def user_from_request(request):
 
 
 def permissions_for(u):
-    """{menu_key: {view, add, edit, delete}} for menus with View ticked; {} for a Super Admin (bypasses checks)."""
+    """{menu_key: {view, add, edit, delete, print, export}} for menus with View ticked; {} for a Super Admin (bypasses checks)."""
     if u["is_super_admin"]:
         return {}
     return _cached(_perm_cache, int(u["id"]), lambda: {
         r["menu_key"]: {
             "view": bool(r["can_view"]), "add": bool(r["can_add"]),
             "edit": bool(r["can_edit"]), "delete": bool(r["can_delete"]),
+            "print": bool(r.get("can_print")), "export": bool(r.get("can_export")),
         }
         for r in sp_client.user_menu_access_get(u["id"]) if r["can_view"]
     })
+
+
+def _valid_api_key(request):
+    key = settings.TICKET_IMPORT_API_KEY
+    given = request.headers.get("X-Api-Key", "")
+    return bool(key) and hmac.compare_digest(given.encode(), key.encode())
 
 
 def _body_has_id(request):
@@ -184,8 +210,13 @@ class MenuPermissionMiddleware:
             return None
         if match.url_name in PUBLIC_URL_NAMES:
             return None
+        if match.url_name in API_KEY_URL_NAMES and _valid_api_key(request):
+            request.app_user = API_KEY_USER
+            return None
 
         u = user_from_request(request)
+        if not u and match.url_name in API_KEY_URL_NAMES:
+            return JsonResponse({"error": "Missing or invalid X-Api-Key header."}, status=401)
         if not u:
             return JsonResponse({"error": "Your session has ended. Please sign in again."}, status=401)
         request.app_user = u

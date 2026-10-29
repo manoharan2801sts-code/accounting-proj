@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="en-GB"><head>
+<meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+<title>Auto Push Error Log — TRAVEL AGENCY</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
+<link rel="icon" type="image/png" href="../assets/img/favicon.png" />
+<style>
+  /* Auto Push Error Log - standalone page (no SPA shell), same palette as
+     the app's masters (voucher-type.html). Data: GET /api/import/tickets/error-log/
+     with the signed-in user's token (same browser storage as the app). */
+  :root {
+    --el-blue: #3F6FB5;
+    --el-blue-dark: #2F5994;
+    --el-text: #183B70;
+    --el-body: #334155;
+    --el-muted: #64748B;
+    --el-border: #D8E1EC;
+    --el-bg: #F5F7FA;
+    --el-white: #FFFFFF;
+    --el-head: #EEF3FA;
+    --el-red: #C53030;   --el-red-bg: #FDECEC;
+    --el-amber: #B7791F; --el-amber-bg: #FEF6E4;
+    --el-green: #1B8A5A; --el-green-bg: #E6F6EE;
+    --el-violet: #6B46C1; --el-violet-bg: #F1EBFC;
+    --el-slate-bg: #EDF2F7;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--el-bg); color: var(--el-body);
+    font-family: Inter, system-ui, -apple-system, "Segoe UI", sans-serif; font-size: 13px; }
+  body { display: flex; flex-direction: column; }
+
+  .el-top { background: linear-gradient(90deg, var(--el-blue-dark), var(--el-blue)); color: #fff;
+    padding: 10px 20px; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  .el-top h1 { margin: 0; font: 700 17px "Plus Jakarta Sans", Inter, sans-serif; letter-spacing: .2px; }
+  .el-top .el-sub { opacity: .85; font-size: 12px; }
+  .el-top .el-spacer { flex: 1; }
+  .el-top a { color: #fff; text-decoration: none; font-weight: 600; font-size: 12px;
+    border: 1px solid rgba(255,255,255,.45); border-radius: 6px; padding: 5px 10px; }
+  .el-top a:hover { background: rgba(255,255,255,.12); }
+
+  /* API Push / Automated Database Scheduler */
+  .el-tabs { background: var(--el-white); border-bottom: 1px solid var(--el-border); padding: 0 20px; display: flex; gap: 4px; }
+  .el-tab { border: 0; background: none; padding: 10px 16px 9px; font: 600 13px Inter, sans-serif; color: var(--el-muted);
+    cursor: pointer; border-bottom: 3px solid transparent; margin-bottom: -1px; }
+  .el-tab:hover { color: var(--el-text); }
+  .el-tab.active { color: var(--el-blue); border-bottom-color: var(--el-blue); }
+
+  .el-runs { margin: 10px 20px 0; background: var(--el-white); border: 1px solid var(--el-border); border-radius: 8px; }
+  .el-runs-head { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: baseline; padding: 8px 12px;
+    border-bottom: 1px solid var(--el-border); }
+  .el-runs-head h2 { margin: 0; font: 700 13px "Plus Jakarta Sans", Inter, sans-serif; color: var(--el-text); }
+  .el-runs-head span { color: var(--el-muted); font-size: 12px; }
+  .el-runs-wrap { max-height: 190px; overflow: auto; }
+  .el-runs table { min-width: 900px; }
+  .el-runs thead th { cursor: default; }
+  .el-num { text-align: right; font-family: "IBM Plex Mono", monospace; font-size: 12px; }
+  .el-num.el-bad { color: var(--el-red); font-weight: 700; }
+
+  .el-filters { background: var(--el-white); border-bottom: 1px solid var(--el-border);
+    padding: 10px 20px; display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; }
+  .el-f { display: flex; flex-direction: column; gap: 3px; }
+  .el-f label { font-size: 11px; font-weight: 600; color: var(--el-muted); text-transform: uppercase; letter-spacing: .3px; }
+  .el-f input, .el-f select { height: 30px; border: 1px solid var(--el-border); border-radius: 6px; padding: 0 8px;
+    font: inherit; color: var(--el-text); background: #fff; min-width: 120px; }
+  .el-f input[type="search"] { min-width: 220px; }
+  .el-f input:focus, .el-f select:focus { outline: 2px solid rgba(63,111,181,.25); border-color: var(--el-blue); }
+  .el-btn { height: 30px; border-radius: 6px; border: 1px solid var(--el-border); background: #fff; color: var(--el-text);
+    font: 600 12px Inter, sans-serif; padding: 0 14px; cursor: pointer; }
+  .el-btn:hover { background: var(--el-head); }
+  .el-btn.el-primary { background: var(--el-blue); border-color: var(--el-blue); color: #fff; }
+  .el-btn.el-primary:hover { background: var(--el-blue-dark); }
+
+  .el-summary { padding: 10px 20px 0; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .el-chip { border-radius: 999px; padding: 4px 10px; font-size: 12px; font-weight: 600; border: 1px solid transparent;
+    cursor: pointer; user-select: none; background: var(--el-white); border-color: var(--el-border); color: var(--el-text); }
+  .el-chip b { font-family: "IBM Plex Mono", monospace; margin-left: 4px; }
+  .el-chip.active { outline: 2px solid var(--el-blue); }
+  .el-count { color: var(--el-muted); font-size: 12px; margin-left: auto; }
+
+  .el-grid-wrap { flex: 1; margin: 10px 20px 16px; background: var(--el-white); border: 1px solid var(--el-border);
+    border-radius: 8px; overflow: auto; min-height: 0; }
+  table { border-collapse: separate; border-spacing: 0; width: 100%; min-width: 1500px; }
+  thead th { position: sticky; top: 0; z-index: 1; background: var(--el-head); color: var(--el-text); text-align: left;
+    font-weight: 700; font-size: 11.5px; padding: 8px 10px; border-bottom: 1px solid var(--el-border); white-space: nowrap;
+    cursor: pointer; }
+  thead th:hover { background: #E3EBF6; }
+  thead th .el-sort { opacity: .6; font-size: 10px; margin-left: 3px; }
+  tbody td { padding: 7px 10px; border-bottom: 1px solid #EDF2F7; vertical-align: top; }
+  tbody tr:hover td { background: #F8FAFD; }
+  tbody tr.el-resolved td { color: #94A3B8; }
+  tbody tr.el-resolved td .el-badge { opacity: .65; }
+  .el-mono { font-family: "IBM Plex Mono", monospace; font-size: 12px; }
+  .el-nowrap { white-space: nowrap; }
+  .el-msg { min-width: 340px; max-width: 520px; line-height: 1.35; }
+  .el-val { max-width: 220px; word-break: break-word; }
+  .el-field small { display: block; color: var(--el-muted); font-family: "IBM Plex Mono", monospace; font-size: 11px; }
+  .el-badge { display: inline-block; border-radius: 4px; padding: 2px 7px; font-size: 11px; font-weight: 700; white-space: nowrap; }
+  .b-missing { background: var(--el-red-bg); color: var(--el-red); }
+  .b-invalid { background: #FFF0E6; color: #C05621; }
+  .b-notmapped { background: var(--el-violet-bg); color: var(--el-violet); }
+  .b-mismatch { background: #E6F0FB; color: #2B6CB0; }
+  .b-notallowed { background: var(--el-amber-bg); color: var(--el-amber); }
+  .b-duplicate { background: var(--el-slate-bg); color: #4A5568; }
+  .b-unknown { background: #FFFBEA; color: #975A16; }
+  .b-savefailed { background: var(--el-red); color: #fff; }
+  .b-open { background: var(--el-red-bg); color: var(--el-red); }
+  .b-resolved { background: var(--el-green-bg); color: var(--el-green); }
+  .b-warning { background: var(--el-amber-bg); color: var(--el-amber); }
+  .el-empty { padding: 40px; text-align: center; color: var(--el-muted); }
+  .el-empty a { color: var(--el-blue); font-weight: 600; }
+
+  @media (max-width: 700px) {
+    .el-top, .el-filters, .el-summary { padding-left: 16px; padding-right: 16px; }
+    .el-grid-wrap { margin-left: 16px; margin-right: 16px; }
+    .el-f, .el-f input, .el-f select, .el-f input[type="search"] { width: 100%; min-width: 0; }
+  }
+</style>
+</head>
+<body>
+  <header class="el-top">
+    <div>
+      <h1>Auto Push Error Log</h1>
+      <div class="el-sub"><span id="el-sub-text"></span><span id="el-company-no"></span></div>
+    </div>
+    <div class="el-spacer"></div>
+    <a href="../index.html">Back to the app</a>
+  </header>
+
+  <nav class="el-tabs" role="tablist">
+    <button type="button" class="el-tab" role="tab" data-source="API">API Push</button>
+    <button type="button" class="el-tab" role="tab" data-source="AGENT_DB">Automated Database Scheduler</button>
+  </nav>
+
+  <!-- Automated Database Scheduler tab only: one row per run that fetched rows. -->
+  <section class="el-runs" id="el-runs" hidden>
+    <div class="el-runs-head"><h2>Scheduler Runs</h2><span id="el-runs-info"></span></div>
+    <div class="el-runs-wrap">
+      <table>
+        <thead><tr><th>#</th><th>Run Started (IST)</th><th>Records Fetched</th><th>Invoices</th><th>Imported</th>
+          <th>Pending</th><th>Error Records</th><th>Run Finished (IST)</th><th>Message</th></tr></thead>
+        <tbody id="el-runs-body"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <div class="el-filters">
+    <div class="el-f"><label for="f-from">From</label><input type="date" id="f-from" /></div>
+    <div class="el-f"><label for="f-to">To</label><input type="date" id="f-to" /></div>
+    <div class="el-f"><label for="f-status">Booking Status</label>
+      <select id="f-status"><option value="">All</option><option value="C">C - Confirmed</option>
+        <option value="R">R - Rescheduled</option><option value="X">X - Cancelled</option>
+        <option value="SSR">SSR - SSR Updation</option></select></div>
+    <div class="el-f"><label for="f-type">Error Type</label>
+      <select id="f-type"><option value="">All</option></select></div>
+    <div class="el-f"><label for="f-stage">Stage</label>
+      <select id="f-stage"><option value="">All</option><option value="Validation">Validation (push rejected)</option>
+        <option value="Import">Import (save refused)</option></select></div>
+    <div class="el-f"><label for="f-resolved">Status</label>
+      <select id="f-resolved"><option value="0">Open</option><option value="1">Resolved</option><option value="" selected>All</option></select></div>
+    <div class="el-f"><label for="f-search">Search</label>
+      <input type="search" id="f-search" placeholder="Booking Ref / PNR / Ticket No / field / message" /></div>
+    <button type="button" class="el-btn el-primary" id="btn-load">Show</button>
+    <button type="button" class="el-btn" id="btn-csv">Export CSV</button>
+  </div>
+
+  <div class="el-summary" id="el-summary"></div>
+
+  <div class="el-grid-wrap">
+    <table>
+      <thead><tr id="el-head"></tr></thead>
+      <tbody id="el-body"><tr><td class="el-empty" colspan="16">Loading...</td></tr></tbody>
+    </table>
+  </div>
+
+<script>
+(function () {
+  const API = (location.protocol === "file:" ||
+    ((location.hostname === "localhost" || location.hostname === "127.0.0.1") && location.port !== "8000"))
+    ? "http://127.0.0.1:8000/api" : "/api";
+  const token = localStorage.getItem("voyager_access_token");
+  const companyId = localStorage.getItem("voyager_active_company_id") || "";
+
+  const ERROR_TYPES = ["Missing", "Invalid Format", "Not Mapped", "Mismatch", "Not Allowed", "Duplicate", "Unknown Field", "Save Failed"];
+  const BADGE = {
+    "Missing": "b-missing", "Invalid Format": "b-invalid", "Not Mapped": "b-notmapped", "Mismatch": "b-mismatch",
+    "Not Allowed": "b-notallowed", "Duplicate": "b-duplicate", "Unknown Field": "b-unknown", "Save Failed": "b-savefailed",
+  };
+  const STATUS_NAME = { C: "Confirmed", R: "Rescheduled", X: "Cancelled", SSR: "SSR Updation" };
+  const COLUMNS = [
+    { key: "error_log_id", label: "#", cls: "el-mono el-nowrap" },
+    { key: "logged_at", label: "Logged At (IST)", cls: "el-nowrap", fmt: (r) => fmtDate(r.logged_at) },
+    { key: "is_resolved", label: "Status", fmt: (r) => r.is_resolved
+        ? `<span class="el-badge b-resolved" title="${esc(r.resolved_note || "")}">Resolved</span>`
+        : (r.severity === "Warning" ? `<span class="el-badge b-warning">Warning</span>` : `<span class="el-badge b-open">Open</span>`) },
+    { key: "stage", label: "Stage" },
+    { key: "booking_status", label: "Booking Status", cls: "el-nowrap",
+      fmt: (r) => r.booking_status ? `${esc(r.booking_status)}${STATUS_NAME[r.booking_status] ? " - " + STATUS_NAME[r.booking_status] : ""}` : "" },
+    { key: "booking_reference", label: "Booking Reference", cls: "el-mono el-nowrap" },
+    { key: "parent_pnr", label: "Parent PNR", cls: "el-mono el-nowrap" },
+    { key: "passenger_no", label: "Pax #", cls: "el-mono" },
+    { key: "ticket_no", label: "Ticket No", cls: "el-mono el-nowrap" },
+    { key: "passenger_name", label: "Pax Name", cls: "el-nowrap" },
+    { key: "field_label", label: "Field", cls: "el-field el-nowrap",
+      fmt: (r) => r.field_name ? `${esc(r.field_label || r.field_name)}<small>${esc(r.field_name)}</small>` : "-" },
+    { key: "error_type", label: "Error Type", fmt: (r) => `<span class="el-badge ${BADGE[r.error_type] || "b-duplicate"}">${esc(r.error_type)}</span>` },
+    { key: "received_value", label: "Received Value", cls: "el-mono el-val" },
+    { key: "expected_value", label: "Expected Value", cls: "el-val" },
+    { key: "error_message", label: "Message", cls: "el-msg" },
+    { key: "resolved_note", label: "Resolution", cls: "el-nowrap",
+      fmt: (r) => r.is_resolved ? `${esc(r.resolved_note || "")}<br><small>${fmtDate(r.resolved_at)}</small>` : "" },
+  ];
+
+  let rows = [];
+  let typeFilter = "";
+  let sort = { key: "error_log_id", dir: -1 };
+  // Tab: API = pushes to /api/import/tickets/push/, AGENT_DB = the Automated
+  // Database Scheduler (Airline_Agent database). #scheduler opens the second.
+  const SUBTITLE = {
+    API: "Airline ticket Auto Push API - every value that was missing, wrong, not mapped or refused",
+    AGENT_DB: "Automated Database Scheduler - tickets the Agent put in the Agent database",
+  };
+  let source = location.hash === "#scheduler" ? "AGENT_DB" : "API";
+
+  const $ = (id) => document.getElementById(id);
+  function esc(v) {
+    return String(v == null ? "" : v).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  }
+  function fmtDate(v) {
+    if (!v) return "";
+    const d = new Date(String(v).replace(" ", "T"));
+    if (isNaN(d)) return esc(v);
+    const p = (n) => String(n).padStart(2, "0");
+    return `${p(d.getDate())}/${p(d.getMonth() + 1)}/${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+  }
+  function isoDay(d) {
+    const p = (n) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+  }
+  function message(html) {
+    $("el-body").innerHTML = `<tr><td class="el-empty" colspan="${COLUMNS.length}">${html}</td></tr>`;
+  }
+
+  ERROR_TYPES.forEach((t) => $("f-type").insertAdjacentHTML("beforeend", `<option value="${t}">${t}</option>`));
+  const today = new Date();
+  const weekAgo = new Date(today.getTime() - 6 * 86400000);
+  $("f-from").value = isoDay(weekAgo);
+  $("f-to").value = isoDay(today);
+
+  $("el-head").innerHTML = COLUMNS.map((c) => `<th data-key="${c.key}">${esc(c.label)}<span class="el-sort"></span></th>`).join("");
+  $("el-head").addEventListener("click", (e) => {
+    const th = e.target.closest("th");
+    if (!th) return;
+    sort = { key: th.dataset.key, dir: sort.key === th.dataset.key ? -sort.dir : 1 };
+    render();
+  });
+
+  function visibleRows() {
+    const out = typeFilter ? rows.filter((r) => r.error_type === typeFilter) : rows.slice();
+    const k = sort.key;
+    out.sort((a, b) => {
+      const x = a[k], y = b[k];
+      if (x == null && y == null) return 0;
+      if (x == null) return 1;
+      if (y == null) return -1;
+      return (typeof x === "number" && typeof y === "number" ? x - y : String(x).localeCompare(String(y), undefined, { numeric: true })) * sort.dir;
+    });
+    return out;
+  }
+
+  function renderSummary() {
+    const counts = {};
+    rows.forEach((r) => { counts[r.error_type] = (counts[r.error_type] || 0) + 1; });
+    const open = rows.filter((r) => !r.is_resolved && r.severity !== "Warning").length;
+    const chips = [`<span class="el-chip ${typeFilter ? "" : "active"}" data-type="">All<b>${rows.length}</b></span>`]
+      .concat(ERROR_TYPES.filter((t) => counts[t]).map((t) =>
+        `<span class="el-chip ${typeFilter === t ? "active" : ""}" data-type="${t}"><span class="el-badge ${BADGE[t]}">${t}</span><b>${counts[t]}</b></span>`));
+    $("el-summary").innerHTML = chips.join("") + `<span class="el-count">${open} open error${open === 1 ? "" : "s"}</span>`;
+  }
+  $("el-summary").addEventListener("click", (e) => {
+    const chip = e.target.closest(".el-chip");
+    if (!chip) return;
+    typeFilter = chip.dataset.type;
+    render();
+  });
+
+  function render() {
+    renderSummary();
+    document.querySelectorAll("#el-head th").forEach((th) => {
+      th.querySelector(".el-sort").textContent = th.dataset.key === sort.key ? (sort.dir > 0 ? "▲" : "▼") : "";
+    });
+    const list = visibleRows();
+    if (!list.length) return message("No errors for these filters.");
+    $("el-body").innerHTML = list.map((r) =>
+      `<tr class="${r.is_resolved ? "el-resolved" : ""}">` +
+      COLUMNS.map((c) => `<td class="${c.cls || ""}">${c.fmt ? c.fmt(r) : esc(r[c.key])}</td>`).join("") +
+      "</tr>").join("");
+  }
+
+  async function load() {
+    if (!token || token === "demo-token") {
+      $("el-summary").innerHTML = "";
+      return message('Sign in to the app first, then open this page again. <a href="../index.html">Go to sign in</a>');
+    }
+    if (source === "AGENT_DB") loadRuns();
+    const q = new URLSearchParams({ company_id: companyId, source, from_date: $("f-from").value, to_date: $("f-to").value,
+      booking_status: $("f-status").value, error_type: $("f-type").value, stage: $("f-stage").value,
+      resolved: $("f-resolved").value, search: $("f-search").value.trim(), top: "2000" });
+    message("Loading...");
+    try {
+      const res = await fetch(`${API}/import/tickets/error-log/?${q}`, { headers: { Authorization: `Bearer ${token}` } });
+      const data = await res.json().catch(() => ({}));
+      if (res.status === 401) return message('Your session has ended. <a href="../index.html">Sign in again</a>');
+      if (!res.ok) return message(esc(data.error || `Could not load the error log (HTTP ${res.status}).`));
+      rows = data.rows || [];
+      typeFilter = $("f-type").value;
+      render();
+    } catch (err) {
+      message("Could not reach the server - is the backend running on port 8000?");
+    }
+  }
+
+  async function loadRuns() {
+    const body = $("el-runs-body");
+    const note = (text) => { body.innerHTML = `<tr><td class="el-empty" colspan="9">${text}</td></tr>`; };
+    note("Loading...");
+    try {
+      const q = new URLSearchParams({ from_date: $("f-from").value, to_date: $("f-to").value, top: "500" });
+      const res = await fetch(`${API}/import/agent-db/scheduler-log/?${q}`, { headers: { Authorization: `Bearer ${token}` } });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) return note(esc(data.error || `Could not load the scheduler runs (HTTP ${res.status}).`));
+      const s = data.settings || {};
+      $("el-runs-info").textContent = `${s.database}.dbo.${s.table} - every ${s.minutes} minute${s.minutes === 1 ? "" : "s"}`
+        + (s.enabled ? "" : " - OFF (AGENT_DB_SCHEDULER_ENABLED)") + " - only runs that fetched records are listed";
+      const runs = data.rows || [];
+      if (!runs.length) return note("No records were fetched in these dates.");
+      body.innerHTML = runs.map((r) => `<tr>
+        <td class="el-mono">${esc(r.log_id)}</td>
+        <td class="el-nowrap">${fmtDate(r.run_started_at)}</td>
+        <td class="el-num">${esc(r.records_fetched)}</td>
+        <td class="el-num">${esc(r.invoices_fetched)}</td>
+        <td class="el-num">${esc(r.imported_count)}</td>
+        <td class="el-num">${esc(r.pending_count)}</td>
+        <td class="el-num ${r.error_count ? "el-bad" : ""}">${esc(r.error_count)}</td>
+        <td class="el-nowrap">${fmtDate(r.run_finished_at)}</td>
+        <td>${esc(r.message)}</td></tr>`).join("");
+    } catch (err) {
+      note("Could not reach the server - is the backend running on port 8000?");
+    }
+  }
+
+  function setSource(next) {
+    source = next;
+    document.querySelectorAll(".el-tab").forEach((t) => {
+      const on = t.dataset.source === source;
+      t.classList.toggle("active", on);
+      t.setAttribute("aria-selected", on ? "true" : "false");
+    });
+    $("el-runs").hidden = source !== "AGENT_DB";
+    $("el-sub-text").textContent = SUBTITLE[source];
+    history.replaceState(null, "", source === "AGENT_DB" ? "#scheduler" : location.pathname + location.search);
+  }
+  document.querySelectorAll(".el-tab").forEach((t) => t.addEventListener("click", () => {
+    if (t.dataset.source === source) return;
+    setSource(t.dataset.source);
+    load();
+  }));
+
+  function exportCsv() {
+    const list = visibleRows();
+    const cols = ["error_log_id", "logged_at", "is_resolved", "severity", "stage", "booking_status", "booking_reference",
+      "parent_pnr", "passenger_no", "ticket_no", "passenger_name", "field_label", "field_name", "error_type",
+      "received_value", "expected_value", "error_message", "resolved_note", "resolved_at", "doc_key"];
+    const cell = (v) => `"${String(v == null ? "" : v).replace(/"/g, '""')}"`;
+    const csv = [cols.join(",")].concat(list.map((r) => cols.map((c) => cell(c === "is_resolved" ? (r[c] ? "Resolved" : "Open") : r[c])).join(",")));
+    const blob = new Blob(["﻿" + csv.join("\r\n")], { type: "text/csv;charset=utf-8" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `${source === "AGENT_DB" ? "db-scheduler" : "api-push"}-error-log-${$("f-from").value}-to-${$("f-to").value}.csv`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
+  $("btn-load").addEventListener("click", load);
+  $("btn-csv").addEventListener("click", exportCsv);
+  $("f-search").addEventListener("keydown", (e) => { if (e.key === "Enter") load(); });
+  ["f-from", "f-to", "f-status", "f-type", "f-stage", "f-resolved"].forEach((id) => $(id).addEventListener("change", load));
+  if (companyId) $("el-company-no").textContent = ` - company ${companyId}`;
+  setSource(source);
+  load();
+})();
+</script>
+</body>
+</html>

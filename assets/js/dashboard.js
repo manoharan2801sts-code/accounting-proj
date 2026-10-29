@@ -57,21 +57,32 @@
     return path.split(".").reduce((o, k) => (o ? o[k] : undefined), obj);
   }
 
-  function metricTile(label, value, ccy, ledgerName) {
-    const cls = ledgerName ? "drillable" : "";
-    const attr = ledgerName ? `data-ledger="${ledgerName}" title="Click to view the vouchers behind this figure"` : "";
-    return `<div class="metric-tile ${cls}" ${attr}><div class="m-label">${label}</div><div class="m-value">${fmtMoney(value, ccy)}</div></div>`;
+  // href = the real report behind the figure (opened on click); none = plain tile.
+  function metricTile(label, value, ccy, href) {
+    const cls = href ? "drillable" : "";
+    const attr = href ? `data-href="${href}" title="Click to open the report behind this figure"` : "";
+    return `<div class="metric-tile ${cls}" ${attr}><div class="m-label">${label}</div><div class="m-value">${fmtMoney(Number(value) || 0, ccy)}</div></div>`;
   }
 
-  function wireDrillableTiles(containerId, companyId, ccy) {
+  function wireDrillableTiles(containerId) {
     document.querySelectorAll(`#${containerId} .drillable`).forEach((el) => {
-      el.addEventListener("click", () => VoyagerDrilldown.byLedger(el.dataset.ledger, companyId, ccy));
+      el.addEventListener("click", () => window.VoyagerShell.navigateTo(el.dataset.href));
     });
   }
 
   async function loadDashboard(companyId, country) {
     document.getElementById("scope-label").textContent = "Loading dashboard for the selected entity…";
-    const data = await get(`/dashboard?company_id=${companyId}`);
+    // Straight from the server (/api/dashboard - real posted airline
+    // documents and ledger balances), never the demo data api.js falls back to.
+    let data;
+    try {
+      const res = await fetch(`${window.VoyagerAPI.API_BASE}/dashboard?company_id=${companyId}`);
+      data = await res.json();
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    } catch (err) {
+      document.getElementById("scope-label").textContent = `Could not load the dashboard (${err.message}). Is the Django backend running?`;
+      return;
+    }
     const ccy = currency(country);
     document.getElementById("scope-label").textContent =
       `Real-time CFO dashboard — ${country === "AE" ? "UAE entity, AED" : "India entity, INR"}`;
@@ -83,27 +94,26 @@
 
     // Revenue grid — config comes from window.VoyagerHardcode.DASHBOARD_REVENUE_TILES
     document.getElementById("revenue-grid").innerHTML = window.VoyagerHardcode.DASHBOARD_REVENUE_TILES
-      .map((t) => metricTile(t.label, getPath(data, t.dataPath), ccy, t.ledger))
+      .map((t) => metricTile(t.label, getPath(data, t.dataPath), ccy, t.href))
       .join("");
-    wireDrillableTiles("revenue-grid", companyId, ccy);
+    wireDrillableTiles("revenue-grid");
 
     // Finance grid — config comes from window.VoyagerHardcode.DASHBOARD_FINANCE_TILES,
     // plus BSP/Supplier liability which stay inline (used again in the compliance
     // grid logic just below and not worth a second layer of indirection).
     document.getElementById("finance-grid").innerHTML =
-      window.VoyagerHardcode.DASHBOARD_FINANCE_TILES.map((t) => metricTile(t.label, getPath(data, t.dataPath), ccy, t.ledger)).join("") +
-      metricTile("BSP Liability", data.finance.bsp_liability, ccy, "BSP Payable") +
-      metricTile("Supplier Liability", data.finance.supplier_liability, ccy, "Trade Payable - Suppliers");
-    wireDrillableTiles("finance-grid", companyId, ccy);
+      window.VoyagerHardcode.DASHBOARD_FINANCE_TILES.map((t) => metricTile(t.label, getPath(data, t.dataPath), ccy, t.href)).join("") +
+      metricTile("BSP Liability", data.finance.bsp_liability, ccy, null) +
+      metricTile("Supplier Liability", data.finance.supplier_liability, ccy, "suppliers.html");
+    wireDrillableTiles("finance-grid");
 
     // Compliance grid — show the relevant tax type for the entity's country
     const complianceHtml =
       country === "AE"
-        ? metricTile("VAT Payable", data.compliance.vat_payable, ccy, "VAT Payable")
-        : metricTile("GST Payable", data.compliance.gst_payable, ccy, "GST Payable") +
-          metricTile("TDS Payable", data.compliance.tds_payable, ccy, "TDS Payable");
+        ? metricTile("VAT Payable", data.compliance.vat_payable, ccy, null)
+        : metricTile("GST Payable", data.compliance.gst_payable, ccy, null) +
+          metricTile("TDS Payable", data.compliance.tds_payable, ccy, null);
     document.getElementById("compliance-grid").innerHTML = complianceHtml;
-    wireDrillableTiles("compliance-grid", companyId, ccy);
 
     // Trend chart
     const trendCtx = document.getElementById("trendChart").getContext("2d");
@@ -162,7 +172,7 @@
     document.getElementById("branch-table-body").innerHTML = data.branch_performance
       .map((b) => {
         const margin = b.sales > 0 ? ((b.profit / b.sales) * 100).toFixed(1) : "0.0";
-        return `<tr class="drillable" data-branch="${b.branch_name}" title="Click to view this branch's vouchers">
+        return `<tr>
           <td style="font-weight:600;">${b.branch_name}</td>
           <td class="tabular-nums">${fmtMoney(b.sales, ccy)}</td>
           <td class="tabular-nums">${fmtMoney(b.profit, ccy)}</td>
@@ -170,9 +180,6 @@
         </tr>`;
       })
       .join("");
-    document.querySelectorAll("#branch-table-body tr.drillable").forEach((tr) => {
-      tr.addEventListener("click", () => VoyagerDrilldown.byBranch(tr.dataset.branch, companyId, ccy));
-    });
   }
 
   (async function init() {
