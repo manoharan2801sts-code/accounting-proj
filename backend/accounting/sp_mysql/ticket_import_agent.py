@@ -142,7 +142,9 @@ def master_mapping_pin_list(p):
     company_id = _p_int(p.get("CompanyId"))
     sql = """
         SELECT p.product_type, p.field_name, p.doc_type, p.doc_id, p.doc_date, p.ledger_id,
-               p.ledger_name, p.masters_category, l.gst_rate_percentage
+               COALESCE(NULLIF(l.alias_name, ''), l.name, p.ledger_name) AS ledger_name,
+               COALESCE(l.gst_percentage, 0) AS ledger_gst_percentage,
+               p.masters_category, p.effective_from
         FROM MasterMappingPin p
         LEFT JOIN Ledgers l ON l.id = p.ledger_id
         WHERE p.company_id = %s
