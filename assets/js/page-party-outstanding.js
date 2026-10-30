@@ -287,7 +287,7 @@
   $("po-only-settled").addEventListener("change", render);
   $("po-search").addEventListener("input", render);
   $("po-export").addEventListener("click", exportCSV);
-  $("po-print").addEventListener("click", () => window.print());
+  $("po-print").addEventListener("click", () => window.VoyagerExport.printReport(exportCSV));
   $("po-tbody").addEventListener("dblclick", (e) => {
     const row = e.target.closest("tr[data-url]");
     if (row) window.location.href = row.dataset.url;

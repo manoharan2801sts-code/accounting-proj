@@ -1836,7 +1836,7 @@ TICKET_HEADER_FIELDS = [
     "invoice_number", "invoice_date", "invoice_type", "booking_mode", "booking_type", "booking_status",
     "travel_type", "user_name", "currency", "roe", "booking_given_by",
     "booking_reference", "booking_ref_date", "airline_pnr", "gds_pnr", "office_id",
-    "payment_mode", "payment_gateway_ref", "airline_category", "branch_name",
+    "payment_mode", "payment_gateway_ref", "airline_category",
 ]
 TICKET_LINE_FIELDS = [
     "airline_code", "airline_name", "airline_category", "flight_no", "ticket_no", "passenger_name", "pax_type",
@@ -3367,7 +3367,7 @@ def reschedule_ticket_detail(request, reschedule_ticket_id):
         "booking_reference": rt.booking_reference, "booking_ref_date": rt.booking_ref_date.isoformat() if rt.booking_ref_date else None,
         "airline_pnr": rt.airline_pnr, "gds_pnr": rt.gds_pnr, "supplier_name": rt.supplier.name if rt.supplier else None,
         "office_id": rt.office_id, "payment_mode": rt.payment_mode, "payment_gateway_ref": rt.payment_gateway_ref,
-        "airline_category": rt.airline_category, "branch_name": rt.branch_name, "lines": lines,
+        "airline_category": rt.airline_category, "lines": lines,
     })
 
 
@@ -3667,7 +3667,6 @@ def reschedule_jv_preview(request, reschedule_ticket_id):
         "posted": voucher is not None,
         "voucher_id": voucher.id if voucher else None,
         "voucher_no": voucher.voucher_no if voucher else None,
-        "branch_name": rt.branch_name or "Chennai Branch",
         "voucher_type": "Tax Invoice",
         "voucher_date": rt.invoice_date.isoformat() if rt.invoice_date else None,
         "narration": narration,
@@ -3741,7 +3740,6 @@ def reschedule_jv_preview_draft(request):
 
     return JsonResponse({
         "posted": False, "voucher_id": None, "voucher_no": None,
-        "branch_name": resched_ticket.branch_name or "Chennai Branch",
         "voucher_type": "Tax Invoice",
         "voucher_date": resched_ticket.invoice_date.isoformat() if resched_ticket.invoice_date else None,
         "narration": narration,
@@ -3821,7 +3819,7 @@ def ticket_detail(request, ticket_id):
         "airline_pnr": header["airline_pnr"], "gds_pnr": header["gds_pnr"], "supplier_name": header["supplier_name"],
         "office_id": header["office_id"], "payment_mode": header["payment_mode"], "payment_gateway_ref": header["payment_gateway_ref"],
         "airline_category": header["airline_category"],
-        "branch_name": header["branch_name"], "lines": lines,
+        "lines": lines,
     })
 
 
@@ -4708,7 +4706,6 @@ def cancellation_jv_preview(request, cancellation_id):
         "posted": voucher is not None,
         "voucher_id": voucher.id if voucher else None,
         "voucher_no": voucher.voucher_no if voucher else None,
-        "branch_name": header.get("branch_name") or "Chennai Branch",
         "voucher_type": "Tax Invoice",
         "voucher_date": header["invoice_date"].isoformat() if header.get("invoice_date") else None,
         "narration": narration,
@@ -4786,7 +4783,6 @@ def cancellation_jv_preview_draft(request):
     voucher_date = _parse_date(body.get("cancellation_ref_date")) or _parse_date(body.get("invoice_date"))
     return JsonResponse({
         "posted": False, "voucher_id": None, "voucher_no": None,
-        "branch_name": "Chennai Branch",
         "voucher_type": "Tax Invoice",
         "voucher_date": voucher_date.isoformat() if voucher_date else None,
         "narration": narration,
@@ -5364,7 +5360,7 @@ def cancellation_ticket_detail(request, cancellation_id):
         "cancellation_ref_date": header["cancellation_ref_date"].isoformat() if header["cancellation_ref_date"] else None,
         "airline_pnr": header["airline_pnr"], "gds_pnr": header["gds_pnr"], "supplier_name": header["supplier_name"],
         "office_id": header["office_id"], "payment_mode": header["payment_mode"], "payment_gateway_ref": header["payment_gateway_ref"],
-        "airline_category": header["airline_category"], "branch_name": header["branch_name"],
+        "airline_category": header["airline_category"],
         "lines": [{
             "id": l["id"], "original_ticket_line_id": l["original_ticket_line_id"],
             "gst_amounts": _saved_line_gst("cancellation", cancellation_id, l["ticket_no"]),
@@ -5424,7 +5420,6 @@ def ticket_jv_preview(request, ticket_id):
         "posted": voucher is not None,
         "voucher_id": voucher.id if voucher else None,
         "voucher_no": voucher.voucher_no if voucher else None,
-        "branch_name": ticket.branch_name or "Chennai Branch",
         "voucher_type": "Tax Invoice",
         "voucher_date": ticket.invoice_date.isoformat() if ticket.invoice_date else None,
         "narration": narration,
@@ -5508,7 +5503,6 @@ def ticket_jv_preview_draft(request):
 
     return JsonResponse({
         "posted": False, "voucher_id": None, "voucher_no": None,
-        "branch_name": ticket.branch_name or "Chennai Branch",
         "voucher_type": "Tax Invoice",
         "voucher_date": ticket.invoice_date.isoformat() if ticket.invoice_date else None,
         "narration": narration,
@@ -5523,7 +5517,7 @@ def _voucher_dict(v):
     """v: the row dict sp_client.vouchers_list/voucher_get/voucher_save returns (dbo.sp_Voucher)."""
     lines_json = v["lines_json"]
     return {
-        "id": v["id"], "voucher_no": v["voucher_no"], "branch_name": v["branch_name"], "voucher_type": v["voucher_type"],
+        "id": v["id"], "voucher_no": v["voucher_no"], "voucher_type": v["voucher_type"],
         "voucher_type_name": v.get("voucher_type_name"),
         "voucher_date": v["voucher_date"].isoformat() if v["voucher_date"] else None,
         "narration": v["narration"],
@@ -5581,7 +5575,7 @@ def _cash_bank_voucher_error(body):
 def voucher_create(request):
     """
     POST /api/vouchers/create/
-    Body: { company_id, branch_name, voucher_type, voucher_date, narration,
+    Body: { company_id, voucher_type, voucher_date, narration,
             lines: [{ledger_id, debit, credit}, ...] }
     Saves into the Voucher table (manual double-entry postings only,
     voucher-entry.html) — never JournalVoucher, which only ticket_create/
@@ -5609,7 +5603,7 @@ def voucher_create(request):
 
     try:
         voucher = sp_client.voucher_save(
-            body.get("company_id"), body.get("branch_name"), body.get("voucher_type", "Journal"),
+            body.get("company_id"), body.get("voucher_type", "Journal"),
             _parse_date(body.get("voucher_date")), body.get("narration"), body.get("lines") or [],
             voucher_type_name=body.get("voucher_type_name"), manual_no=body.get("voucher_no_manual"),
         )
@@ -5657,7 +5651,7 @@ def voucher_update(request, voucher_id):
 
     try:
         voucher = sp_client.voucher_save(
-            body.get("company_id"), body.get("branch_name"), body.get("voucher_type", "Journal"),
+            body.get("company_id"), body.get("voucher_type", "Journal"),
             _parse_date(body.get("voucher_date")), body.get("narration"), body.get("lines") or [],
             voucher_id=voucher_id, voucher_type_name=body.get("voucher_type_name"), manual_no=body.get("voucher_no_manual"),
         )
@@ -6677,7 +6671,7 @@ def company_master_delete(request, company_id):
 def _app_user_dict(u):
     return {
         "id": u["id"], "full_name": u["full_name"], "email": u["email"], "role": u["role"],
-        "branch_name": u["branch_name"], "is_super_admin": bool(u["is_super_admin"]),
+        "is_super_admin": bool(u["is_super_admin"]),
         "is_active": bool(u["is_active"]),
         "menu_count": u.get("menu_count") or 0,
         "created_at": u["created_at"].isoformat() if u.get("created_at") else None,
@@ -6706,7 +6700,7 @@ def app_user_save(request):
     """
     POST /api/user-management/users/save/
     Body: { "id": 1 (optional - update if present), "full_name": "...",
-            "email": "...", "role": "Accountant", "branch_name": "...",
+            "email": "...", "role": "Accountant",
             "is_super_admin": false, "is_active": true }
     """
     if request.method != "POST":
@@ -6735,7 +6729,6 @@ def app_user_save(request):
         "full_name": full_name,
         "email": email,
         "role": (body.get("role") or "User").strip() or "User",
-        "branch_name": (body.get("branch_name") or "").strip() or None,
         "is_super_admin": bool(body.get("is_super_admin")),
         "is_active": bool(body.get("is_active", True)),
         "password_hash": make_password(password) if password else None,
@@ -6838,7 +6831,7 @@ def user_menu_access_save(request, user_id):
 def _auth_user_payload(u):
     return {
         "id": u["id"], "full_name": u["full_name"], "email": u["email"], "role": u["role"],
-        "branch_name": u["branch_name"], "is_super_admin": bool(u["is_super_admin"]),
+        "is_super_admin": bool(u["is_super_admin"]),
     }
 
 
@@ -7139,7 +7132,7 @@ def _ssr_build(company_id, body):
     header = {
         "original_ticket_id": body.get("original_ticket_id"),
         "source_reschedule_ticket_id": body.get("source_reschedule_ticket_id") or None,
-        "customer_name": customer["name"], "branch_name": body.get("branch_name"),
+        "customer_name": customer["name"],
         "invoice_number": (body.get("invoice_number") or "").strip(), "invoice_date": _parse_date(body.get("invoice_date")),
         "invoice_type": body.get("invoice_type"), "travel_type": body.get("travel_type"),
         "user_name": body.get("user_name"), "currency": body.get("currency") or "INR",
@@ -7436,10 +7429,6 @@ def _dsr_row(header, l, kind, amounts, doc_ids, **extra):
         "travel_type": g(header, "travel_type"), "payment_mode": g(header, "payment_mode"),
         "travel_class": g(l, "travel_class"), "supplier_name": supplier.name if supplier else None,
         "office_id": g(l, "office_id") or g(header, "office_id"), "document": kind,
-        # Cancellation / SSR are saved without a branch - they belong to their
-        # original booking's branch.
-        "branch_name": g(header, "branch_name") or (header.original_ticket.branch_name
-                                                    if getattr(header, "original_ticket_id", None) else None),
         **doc_ids, **extra,
     }
     # (+ 0.0 turns a negated zero, -0.0, into 0.0 - never shown as "-0.00".)
@@ -7584,12 +7573,6 @@ def dashboard_summary(request):
         trend.append({"label": label, "value": r2(sum(sales(r) for r in in_month))})
         profit_trend.append({"label": label, "value": r2(sum(profit(r) for r in in_month))})
 
-    branches = {}
-    for r in ytd_rows:
-        b = branches.setdefault(r.get("branch_name") or "Head Office", {"sales": 0.0, "profit": 0.0})
-        b["sales"] += sales(r)
-        b["profit"] += profit(r)
-
     # Live ledger balances (Debit positive) - opening balance + every posting.
     deltas = _ledger_balance_deltas(company_id, as_of_date=today.isoformat())
     groups = sp_client.ledger_group_list(company_id)
@@ -7641,10 +7624,6 @@ def dashboard_summary(request):
         "compliance": {"gst_payable": r2(gst_payable), "tds_payable": r2(tds_payable), "vat_payable": 0},
         "monthly_revenue_trend": trend,
         "profitability_trend": profit_trend,
-        "branch_performance": [
-            {"branch_name": k, "sales": r2(v["sales"]), "profit": r2(v["profit"])}
-            for k, v in sorted(branches.items(), key=lambda kv: -kv[1]["sales"])
-        ],
         "product_mix": [
             {"product": "Airline Tickets", "value": airline}, {"product": "Hotels", "value": 0},
             {"product": "Visa", "value": 0}, {"product": "Insurance", "value": 0},
@@ -7790,7 +7769,6 @@ def _misc_build(company_id, body):
     if status not in ("Confirmed", "Cancelled"):
         return None, None, None, "Status must be Confirmed or Cancelled."
     fields = {
-        "branch_name": body.get("branch_name"),
         "invoice_number": (body.get("invoice_number") or "").strip(), "invoice_date": _parse_date(body.get("invoice_date")),
         "invoice_type": body.get("invoice_type"), "status": status, "user_name": body.get("user_name"),
         "reference": (body.get("reference") or "").strip(), "ref_date": _parse_date(body.get("ref_date")),

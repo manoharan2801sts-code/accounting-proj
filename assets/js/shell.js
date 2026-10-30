@@ -374,7 +374,7 @@
   let pagePerm = { view: true, add: true, edit: true, delete: true, print: true, export: true };
   let pageRule = null;
   // Print / Export Excel buttons hidden when the menu's flag is off.
-  const PRINT_BUTTONS = ['[onclick="window.print()"]', "#po-print", "#print-btn", "#ssr-print-btn"];
+  const PRINT_BUTTONS = ['[onclick="VoyagerExport.printReport()"]', "#po-print", "#print-btn", "#ssr-print-btn"];
   const EXPORT_BUTTONS = ['[onclick="exportCSV()"]', "#po-export"];
   let lockedSelectors = [];
   let blockedTriggers = [];

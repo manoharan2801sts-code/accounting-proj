@@ -167,19 +167,6 @@
       },
       options: { plugins: { legend: { position: "bottom", labels: { usePointStyle: true, boxWidth: 8 } } }, cutout: "62%" },
     });
-
-    // Branch performance table
-    document.getElementById("branch-table-body").innerHTML = data.branch_performance
-      .map((b) => {
-        const margin = b.sales > 0 ? ((b.profit / b.sales) * 100).toFixed(1) : "0.0";
-        return `<tr>
-          <td style="font-weight:600;">${b.branch_name}</td>
-          <td class="tabular-nums">${fmtMoney(b.sales, ccy)}</td>
-          <td class="tabular-nums">${fmtMoney(b.profit, ccy)}</td>
-          <td><span class="pill pill-success">${margin}%</span></td>
-        </tr>`;
-      })
-      .join("");
   }
 
   (async function init() {

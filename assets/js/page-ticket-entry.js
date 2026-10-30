@@ -2307,6 +2307,7 @@
     openFareModal(null);
   });
   const MAX_PASSENGERS = 9;
+  const TICKET_NO_MAX = 14;   // same limit as Auto Push (ticket_import.TICKET_NO_MAX)
   document.getElementById("add-line-btn").addEventListener("click", () => {
     if (passengers.length >= MAX_PASSENGERS) { voyagerAlert(`Maximum ${MAX_PASSENGERS} passengers allowed per ticket.`); return; }
     openFareModal(null);
@@ -2319,12 +2320,10 @@
   document.getElementById("modal-save-btn").addEventListener("click", () => {
     const p = readModalPassenger();
     if (!p.ticket_no) { voyagerAlert("Ticket No. is required."); return; }
-    // A real airline ticket number is exactly 10 digits - the BASE
-    // number only, before any "-1"/"-2" passenger suffix this app
-    // appends (e.g. "2204849820-1" is valid: base "2204849820" is 10,
-    // the "-1" isn't counted against that limit).
-    const ticketNoBase = p.ticket_no.includes("-") ? p.ticket_no.slice(0, p.ticket_no.lastIndexOf("-")) : p.ticket_no;
-    if (ticketNoBase.length !== 10) { voyagerAlert("Ticket No. must be exactly 10 characters (not counting any -1/-2 passenger suffix)."); return; }
+    // Letters, numbers and special characters are all allowed - at most
+    // 14 characters in total, any "-1"/"-2" passenger suffix included
+    // (e.g. "NW20HJ00011-1").
+    if (p.ticket_no.length > TICKET_NO_MAX) { voyagerAlert(`Ticket No. can be at most ${TICKET_NO_MAX} characters (including any -1/-2 passenger suffix).`); return; }
     if (!p.passenger_name) { voyagerAlert("Pax Name is required."); return; }
     // Sector is mandatory in Booking and Reschedule (Cancellation's sectors
     // come from the picked ticket and are locked).
@@ -2711,7 +2710,6 @@
       gds_pnr: document.getElementById("gds_pnr_header").value,
       payment_mode: document.getElementById("payment_mode").value,
       payment_gateway_ref: document.getElementById("payment_gateway_ref").value.trim(),
-      branch_name: (window.VoyagerMock.getReferenceData(activeCompanyId).branches[0] || {}).name,
       lines,
     };
   }

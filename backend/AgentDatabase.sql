@@ -38,7 +38,6 @@ CREATE TABLE dbo.[Agent_ticket_data] (
     [parent_pnr]         NVARCHAR(100)  NULL,
     -- API parameters - passenger
     [ticket_no]          NVARCHAR(100)  NULL,
-    [original_ticket_no] NVARCHAR(100)  NULL,
     [pax_name]           NVARCHAR(100)  NULL,
     [pax_type]           NVARCHAR(100)  NULL,
     [airline_category]   NVARCHAR(100)  NULL,
@@ -101,7 +100,7 @@ CREATE TABLE dbo.[Agent_ticket_data] (
     [supp_ssr_markup_reversal]   DECIMAL(18,2)  NULL
 );
 GO
--- Columns added to the API after the table was created (safe to run again)
+-- Columns added to / removed from the API after the table was created (safe to run again)
 IF COL_LENGTH('dbo.[Agent_ticket_data]', 'booking_status') IS NULL ALTER TABLE dbo.[Agent_ticket_data] ADD [booking_status] NVARCHAR(100) NULL;
 IF COL_LENGTH('dbo.[Agent_ticket_data]', 'booking_type') IS NULL ALTER TABLE dbo.[Agent_ticket_data] ADD [booking_type] NVARCHAR(100) NULL;
 IF COL_LENGTH('dbo.[Agent_ticket_data]', 'customer_id') IS NULL ALTER TABLE dbo.[Agent_ticket_data] ADD [customer_id] NVARCHAR(100) NULL;
@@ -118,7 +117,6 @@ IF COL_LENGTH('dbo.[Agent_ticket_data]', 'fop') IS NULL ALTER TABLE dbo.[Agent_t
 IF COL_LENGTH('dbo.[Agent_ticket_data]', 'card_number') IS NULL ALTER TABLE dbo.[Agent_ticket_data] ADD [card_number] NVARCHAR(100) NULL;
 IF COL_LENGTH('dbo.[Agent_ticket_data]', 'parent_pnr') IS NULL ALTER TABLE dbo.[Agent_ticket_data] ADD [parent_pnr] NVARCHAR(100) NULL;
 IF COL_LENGTH('dbo.[Agent_ticket_data]', 'ticket_no') IS NULL ALTER TABLE dbo.[Agent_ticket_data] ADD [ticket_no] NVARCHAR(100) NULL;
-IF COL_LENGTH('dbo.[Agent_ticket_data]', 'original_ticket_no') IS NULL ALTER TABLE dbo.[Agent_ticket_data] ADD [original_ticket_no] NVARCHAR(100) NULL;
 IF COL_LENGTH('dbo.[Agent_ticket_data]', 'pax_name') IS NULL ALTER TABLE dbo.[Agent_ticket_data] ADD [pax_name] NVARCHAR(100) NULL;
 IF COL_LENGTH('dbo.[Agent_ticket_data]', 'pax_type') IS NULL ALTER TABLE dbo.[Agent_ticket_data] ADD [pax_type] NVARCHAR(100) NULL;
 IF COL_LENGTH('dbo.[Agent_ticket_data]', 'airline_category') IS NULL ALTER TABLE dbo.[Agent_ticket_data] ADD [airline_category] NVARCHAR(100) NULL;
@@ -178,6 +176,7 @@ IF COL_LENGTH('dbo.[Agent_ticket_data]', 'cust_ssr_markup_reversal') IS NULL ALT
 IF COL_LENGTH('dbo.[Agent_ticket_data]', 'supp_markup_reversal') IS NULL ALTER TABLE dbo.[Agent_ticket_data] ADD [supp_markup_reversal] DECIMAL(18,2) NULL;
 IF COL_LENGTH('dbo.[Agent_ticket_data]', 'supp_addl_markup_reversal') IS NULL ALTER TABLE dbo.[Agent_ticket_data] ADD [supp_addl_markup_reversal] DECIMAL(18,2) NULL;
 IF COL_LENGTH('dbo.[Agent_ticket_data]', 'supp_ssr_markup_reversal') IS NULL ALTER TABLE dbo.[Agent_ticket_data] ADD [supp_ssr_markup_reversal] DECIMAL(18,2) NULL;
+IF COL_LENGTH('dbo.[Agent_ticket_data]', 'original_ticket_no') IS NOT NULL ALTER TABLE dbo.[Agent_ticket_data] DROP COLUMN [original_ticket_no];
 GO
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'ix_Agent_ticket_data_invoice')
     CREATE INDEX ix_Agent_ticket_data_invoice ON dbo.[Agent_ticket_data] (company_id, booking_status, booking_reference);

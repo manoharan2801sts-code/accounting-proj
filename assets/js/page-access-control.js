@@ -63,7 +63,7 @@
   function renderUsers() {
     const q = userSearch.value.trim().toLowerCase();
     const rows = users.filter((u) =>
-      !q || [u.full_name, u.email, u.role, u.branch_name].some((v) => (v || "").toLowerCase().includes(q))
+      !q || [u.full_name, u.email, u.role].some((v) => (v || "").toLowerCase().includes(q))
     );
     document.getElementById("ac-user-count").textContent = `${users.length} user${users.length === 1 ? "" : "s"}`;
     if (!rows.length) {
@@ -117,7 +117,7 @@
     ["ac-access-head", "ac-grid-scroll", "ac-foot"].forEach((id) => { document.getElementById(id).style.display = ""; });
     document.getElementById("ac-user-name").textContent = user.full_name;
     document.getElementById("ac-user-sub").textContent =
-      [user.is_super_admin ? "Super Admin" : user.role, user.email, user.branch_name, user.is_active ? "" : "Inactive"].filter(Boolean).join(" · ");
+      [user.is_super_admin ? "Super Admin" : user.role, user.email, user.is_active ? "" : "Inactive"].filter(Boolean).join(" · ");
     document.getElementById("ac-super-note").style.display = user.is_super_admin ? "block" : "none";
     ["ac-select-all-btn", "ac-clear-all-btn", "ac-reset-btn", "ac-save-btn"].forEach((id) => {
       document.getElementById(id).disabled = !!user.is_super_admin;

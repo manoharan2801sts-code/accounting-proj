@@ -451,7 +451,6 @@ class Ticket(models.Model):
 
     id = models.AutoField(primary_key=True)
     company_id = models.IntegerField()
-    branch_name = models.CharField(max_length=100, null=True, blank=True)
 
     invoice_number = models.CharField(max_length=20)
     invoice_date = models.DateField()
@@ -805,7 +804,6 @@ class RescheduleAirlineTicket(models.Model):
     """
     id = models.AutoField(primary_key=True)
     company_id = models.IntegerField()
-    branch_name = models.CharField(max_length=100, null=True, blank=True)
 
     # The ticket this reschedule was raised against - "Parent PNR Details"
     # is reconstructed entirely from here (original_ticket.booking_reference
@@ -1134,7 +1132,6 @@ class CancellationAirlineTicket(models.Model):
     """
     id = models.AutoField(primary_key=True)
     company_id = models.IntegerField()
-    branch_name = models.CharField(max_length=100, null=True, blank=True)
 
     # The ticket this cancellation was raised against - same convention as
     # RescheduleAirlineTicket.original_ticket.
@@ -1450,7 +1447,6 @@ class SSRAirlineTicket(models.Model):
     """
     id = models.AutoField(primary_key=True)
     company_id = models.IntegerField()
-    branch_name = models.CharField(max_length=100, null=True, blank=True)
 
     # NULL = a direct SSR Updation (Auto Push): the ticket's booking was never
     # entered in this software - parent_pnr keeps the Parent PNR it was sent
@@ -1578,7 +1574,6 @@ class MiscTransaction(models.Model):
 
     id = models.AutoField(primary_key=True)
     company_id = models.IntegerField()
-    branch_name = models.CharField(max_length=100, null=True, blank=True)
 
     invoice_number = models.CharField(max_length=20)
     invoice_date = models.DateField()
@@ -1656,7 +1651,6 @@ class JournalVoucher(models.Model):
 
     id = models.AutoField(primary_key=True)
     company_id = models.IntegerField()
-    branch_name = models.CharField(max_length=100, null=True, blank=True)
     voucher_type = models.CharField(max_length=20, default="Tax Invoice")
     voucher_date = models.DateField()
     narration = models.CharField(max_length=250, null=True, blank=True)
@@ -1731,7 +1725,6 @@ class Voucher(models.Model):
 
     id = models.AutoField(primary_key=True)
     company_id = models.IntegerField()
-    branch_name = models.CharField(max_length=100, null=True, blank=True)
     voucher_type = models.CharField(max_length=20, choices=VOUCHER_TYPE_CHOICES, default="Journal")
     # The Voucher Type master entry picked on the Voucher screen (e.g. "Petty
     # Cash Payment"), when one was - voucher_type above stays its category
@@ -2203,7 +2196,6 @@ class AppUser(models.Model):
     full_name = models.CharField(max_length=150)
     email = models.EmailField(max_length=200)
     role = models.CharField(max_length=50, default="User")
-    branch_name = models.CharField(max_length=100, null=True, blank=True)
     # Django's own PBKDF2 hash (django.contrib.auth.hashers), never plain text.
     password_hash = models.CharField(max_length=256, null=True, blank=True)
     # Bypasses every menu access check and always sees every menu, including

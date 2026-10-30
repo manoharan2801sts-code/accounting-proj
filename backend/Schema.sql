@@ -209,7 +209,6 @@ CREATE TABLE AL_Tickets (
     id                    INT IDENTITY(1,1) PRIMARY KEY,
 
     company_id            INT NOT NULL,
-    branch_name           NVARCHAR(100) NULL,
 
     invoice_number        NVARCHAR(20) NOT NULL,
     invoice_date          DATE NOT NULL,
@@ -433,7 +432,6 @@ CREATE TABLE Rescheduled_Al_Ticket (
     id                    INT IDENTITY(1,1) PRIMARY KEY,
 
     company_id            INT NOT NULL,
-    branch_name           NVARCHAR(100) NULL,
 
     -- The ticket this reschedule was raised against - "Parent PNR" and
     -- every other Parent-tab field comes from here, not a stored copy.
@@ -683,7 +681,6 @@ CREATE TABLE JournalVoucher (
     id                INT IDENTITY(1,1) PRIMARY KEY,
 
     company_id        INT NOT NULL,
-    branch_name       NVARCHAR(100) NULL,
 
     voucher_type      NVARCHAR(20) NOT NULL DEFAULT 'Tax Invoice',
     voucher_date      DATE NOT NULL,
@@ -763,7 +760,6 @@ CREATE TABLE Vouchers (
     id                INT IDENTITY(1,1) PRIMARY KEY,
 
     company_id        INT NOT NULL,
-    branch_name       NVARCHAR(100) NULL,
 
     voucher_type      NVARCHAR(20) NOT NULL DEFAULT 'Journal'
         CONSTRAINT ck_vouchers_voucher_type
@@ -1354,7 +1350,6 @@ BEGIN
         full_name       NVARCHAR(150) NOT NULL,
         email           NVARCHAR(200) NOT NULL,
         role            NVARCHAR(50)  NOT NULL DEFAULT 'User',
-        branch_name     NVARCHAR(100) NULL,
         is_super_admin  BIT NOT NULL DEFAULT 0,
         is_active       BIT NOT NULL DEFAULT 1,
         created_at      DATETIMEOFFSET NOT NULL DEFAULT SYSUTCDATETIME(),
@@ -1453,8 +1448,8 @@ GO
 
 -- One initial Super Admin, only if none exists yet.
 IF NOT EXISTS (SELECT 1 FROM dbo.AppUsers WHERE is_super_admin = 1)
-    INSERT INTO dbo.AppUsers (full_name, email, role, branch_name, is_super_admin, is_active)
-    VALUES ('Ananya Krishnan', 'ananya.krishnan@travelagency.com', 'Administrator', 'Delhi HQ', 1, 1);
+    INSERT INTO dbo.AppUsers (full_name, email, role, is_super_admin, is_active)
+    VALUES ('Ananya Krishnan', 'ananya.krishnan@travelagency.com', 'Administrator', 1, 1);
 GO
 
 -- --------------------------------------------------------------------------
@@ -1556,7 +1551,6 @@ IF OBJECT_ID('dbo.SSR_AL_Tickets', 'U') IS NULL
 CREATE TABLE dbo.SSR_AL_Tickets (
     id                          INT IDENTITY(1,1) PRIMARY KEY,
     company_id                  INT NOT NULL,
-    branch_name                 NVARCHAR(100) NULL,
     original_ticket_id          INT NULL REFERENCES dbo.AL_Tickets(id),   -- NULL = direct SSR (migration 0090)
     source_reschedule_ticket_id INT NULL REFERENCES dbo.Rescheduled_Al_Ticket(id),
     invoice_number              NVARCHAR(20) NOT NULL,
@@ -1647,7 +1641,6 @@ IF OBJECT_ID('dbo.Misc_Transactions', 'U') IS NULL
 CREATE TABLE dbo.Misc_Transactions (
     id                  INT IDENTITY(1,1) PRIMARY KEY,
     company_id          INT NOT NULL,
-    branch_name         NVARCHAR(100) NULL,
     invoice_number      NVARCHAR(20) NOT NULL,
     invoice_date        DATE NOT NULL,
     invoice_type        NVARCHAR(100) NULL,
@@ -2000,7 +1993,6 @@ CREATE TABLE dbo.Ticket_Import_Staging (
     doc_key AS (ticket_status + N'|' + CAST(company_id AS NVARCHAR(10)) + N'|' + source_system + N'|' + doc_ref) PERSISTED,
 
     /* ---- Header ---- */
-    branch_name                 NVARCHAR(100)  NULL,
     invoice_number              NVARCHAR(20)   NULL,      -- blank = generated from the Invoice Type's numbering
     invoice_date                DATE           NULL,
     invoice_type                NVARCHAR(100)  NULL,
@@ -2387,4 +2379,16 @@ IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'ix_adtl_status')
     CREATE INDEX ix_adtl_status ON dbo.Agent_DB_Ticket_Log (process_status, import_doc_key);
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'ix_adtl_run')
     CREATE INDEX ix_adtl_run ON dbo.Agent_DB_Ticket_Log (scheduler_log_id);
+GO
+
+-- Branch removed from the application (migration 0093).
+IF COL_LENGTH('dbo.AL_Tickets', 'branch_name') IS NOT NULL ALTER TABLE dbo.AL_Tickets DROP COLUMN branch_name;
+IF COL_LENGTH('dbo.Rescheduled_Al_Ticket', 'branch_name') IS NOT NULL ALTER TABLE dbo.Rescheduled_Al_Ticket DROP COLUMN branch_name;
+IF COL_LENGTH('dbo.Cancellation_AL_Tickets', 'branch_name') IS NOT NULL ALTER TABLE dbo.Cancellation_AL_Tickets DROP COLUMN branch_name;
+IF COL_LENGTH('dbo.SSR_AL_Tickets', 'branch_name') IS NOT NULL ALTER TABLE dbo.SSR_AL_Tickets DROP COLUMN branch_name;
+IF COL_LENGTH('dbo.Misc_Transactions', 'branch_name') IS NOT NULL ALTER TABLE dbo.Misc_Transactions DROP COLUMN branch_name;
+IF COL_LENGTH('dbo.JournalVoucher', 'branch_name') IS NOT NULL ALTER TABLE dbo.JournalVoucher DROP COLUMN branch_name;
+IF COL_LENGTH('dbo.Vouchers', 'branch_name') IS NOT NULL ALTER TABLE dbo.Vouchers DROP COLUMN branch_name;
+IF COL_LENGTH('dbo.AppUsers', 'branch_name') IS NOT NULL ALTER TABLE dbo.AppUsers DROP COLUMN branch_name;
+IF COL_LENGTH('dbo.Ticket_Import_Staging', 'branch_name') IS NOT NULL ALTER TABLE dbo.Ticket_Import_Staging DROP COLUMN branch_name;
 GO

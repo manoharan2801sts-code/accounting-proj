@@ -45,11 +45,6 @@
         { label: "Feb", value: 918000 }, { label: "Mar", value: 1033500 }, { label: "Apr", value: 1086000 },
         { label: "May", value: 1186500 }, { label: "Jun", value: 1248000 }, { label: "Jul", value: 1326750 },
       ],
-      branch_performance: [
-        { branch_name: "Chennai Branch", sales: 34200000, profit: 5130000 },
-        { branch_name: "Mumbai Branch", sales: 31500000, profit: 4725000 },
-        { branch_name: "Delhi Branch", sales: 23220000, profit: 3483000 },
-      ],
       product_mix: [
         { product: "Airline Tickets", value: 62400000 }, { product: "Hotels", value: 14200000 },
         { product: "Visa", value: 3100000 }, { product: "Insurance", value: 980000 },
@@ -67,11 +62,6 @@
       profitability_trend: [
         { label: "Feb", value: 78000 }, { label: "Mar", value: 86700 }, { label: "Apr", value: 91800 },
         { label: "May", value: 99750 }, { label: "Jun", value: 105450 }, { label: "Jul", value: 111300 },
-      ],
-      branch_performance: [
-        { branch_name: "Dubai Branch", sales: 3740000, profit: 561000 },
-        { branch_name: "Abu Dhabi Branch", sales: 2244000, profit: 336600 },
-        { branch_name: "Sharjah Branch", sales: 1496000, profit: 224400 },
       ],
       product_mix: [
         { product: "Airline Tickets", value: 5120000 }, { product: "Hotels", value: 1640000 },
@@ -640,12 +630,6 @@
       .sort((a, b) => (a.voucher_date < b.voucher_date ? 1 : -1));
   }
 
-  function getVouchersForBranch(cid, branchName) {
-    return (VOUCHERS[cid] || [])
-      .filter((v) => v.branch_name === branchName)
-      .sort((a, b) => (a.voucher_date < b.voucher_date ? 1 : -1));
-  }
-
   function qp(path, key) {
     const m = path.match(new RegExp(`[?&]${key}=([^&]+)`));
     return m ? decodeURIComponent(m[1]) : null;
@@ -741,7 +725,7 @@
     handle, USER, COMPANIES, getReferenceData, GROUP_BEHAVIOR,
     addTicket, addHotel, addVisa, addInsurance, addTour, addVoucher, addAccount, getAccountGroups,
     addGroup, updateGroup, deleteGroup, updateLedger, deleteLedger, computeLedgerBalance,
-    getVouchersForAccount, getVouchersForBranch,
+    getVouchersForAccount,
     getTicket, updateTicket, getHotel, updateHotel, getVisaRecord, updateVisa,
     getInsuranceRecord, updateInsurance, getTour, updateTour, getVoucher, updateVoucher2,
     getTicketsForCustomer, getHotelsForCustomer, getHotelsForSupplier,

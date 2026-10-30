@@ -169,20 +169,22 @@ _REQUIRED_HEADER_ALL = ("booking_type", "customer_id", "travel_type", "booking_r
 REQUIRED_HEADER = {
     "Confirmed": _REQUIRED_HEADER_ALL,
     "Rescheduled": _REQUIRED_HEADER_ALL + ("parent_pnr",),
-    "Cancelled": _REQUIRED_HEADER_ALL + ("parent_pnr",),
+    # Cancellation: Parent PNR optional - the ticket being cancelled is found by its
+    # Ticket No; only a direct Cancellation (ticket not in the software) needs it.
+    "Cancelled": _REQUIRED_HEADER_ALL,
 }
 _REQUIRED_PAX_ALL = ("ticket_no", "pax_name", "pax_type", "airline_category", "sector", "airline_code", "travel_date",
                      "flight_no", "cabin", "fare_type", "office_id", "basic_fare")
 REQUIRED_PAX = {status: _REQUIRED_PAX_ALL for status in ("Confirmed", "Rescheduled", "Cancelled")}
-# SSR Updation: extra SSR sold on a ticket. parent_pnr = the Booking Reference
-# of that ticket's live booking / reschedule (a ticket not in this software
-# = a direct SSR, saved with that Parent PNR, like a direct Reschedule);
+# SSR Updation: extra SSR sold on a ticket. parent_pnr (optional) = the Booking
+# Reference of that ticket's live booking / reschedule, checked if sent (a ticket
+# not in this software = a direct SSR, saved with that Parent PNR - required then);
 # booking_reference = the SSR's own reference (SSR Reference on the screen -
 # may repeat); ticket_no = the ticket the SSR is for, one row per passenger +
 # sector. Flight details (airline_code, travel_date, ...) are optional - the
 # SSR line keeps only the sector. At least one SSR Details is required.
 REQUIRED_HEADER["SSR"] = ("customer_id", "travel_type", "booking_reference", "booking_ref_date", "airline_pnr",
-                          "payment_mode", "fop", "parent_pnr")
+                          "payment_mode", "fop")
 REQUIRED_PAX["SSR"] = ("ticket_no", "pax_name", "pax_type", "airline_category", "sector", "office_id")
 # Parameters that belong to another Booking Status - a value (other than
 # blank / 0) is refused, so it is never silently dropped.
@@ -210,7 +212,7 @@ SSR_GST = (("ssr_service_fee", "ssr_service_fee_gst", "cust_ssr_service_fee_gst"
 # What the screens save (internal field names - Ticket Entry / staging).
 # ---------------------------------------------------------------------------
 HEADER_TEXT = {
-    "branch_name": 100, "invoice_number": 20, "invoice_type": 100, "booking_type": 50,
+    "invoice_number": 20, "invoice_type": 100, "booking_type": 50,
     "customer_name": 150, "supplier_name": 150, "travel_type": 20, "user_name": 100, "currency": 5,
     "booking_given_by": 25, "booking_reference": 30, "airline_pnr": 13, "gds_pnr": 13, "office_id": 30,
     "payment_mode": 20, "payment_gateway_ref": 60, "airline_category": 5,
@@ -254,6 +256,9 @@ REVERSAL_LIMITS = {
 DATA_DIR = Path(settings.BASE_DIR).parent / "assets" / "data"
 ALNUM = re.compile(r"^[A-Za-z0-9]+$")
 SECTOR_PAIR = re.compile(r"^([A-Z]{3})-([A-Z]{3})$")
+# Ticket No: letters, numbers and special characters, at most 14 in all (any -1/-2
+# suffix included) - the same limit as the Ticket Entry screen (TICKET_NO_MAX).
+TICKET_NO_MAX = 14
 FLIGHT_NO = re.compile(r"^[A-Za-z0-9]{2,3}[ -]?[0-9]{1,5}[A-Za-z]?$")
 CLASS_TEXT = re.compile(r"^[A-Za-z][A-Za-z ]{0,19}$")
 DATE_DMY = re.compile(r"^\d{2}/\d{2}/\d{4}$")
@@ -321,8 +326,9 @@ def _ssr_doc_ref(reference, doc):
     return f"{reference}-{digest}"
 
 
-def _norm_card(value):
-    return re.sub(r"[\s-]", "", str(value or "")).upper()
+def _card_last4(value):
+    """Last 4 digits of a card number as saved in FOP Master (e.g. XXXXXXXXXXXX8344 -> 8344)."""
+    return re.sub(r"\D", "", str(value or ""))[-4:]
 
 
 class _Masters:
@@ -358,9 +364,10 @@ class _Masters:
 
     @cached_property
     def cards(self):
+        """FOP Master cards by their last 4 digits - the API sends only those."""
         out = {}
         for r in sp_client.fop_master_list(self.company_id):
-            out.setdefault(_norm_card(r["card_number"]), []).append(r)
+            out.setdefault(_card_last4(r["card_number"]), []).append(r)
         return out
 
     @cached_property
@@ -750,13 +757,14 @@ class _DocumentCheck:
         self._not_allowed(pax, [k for k in NOT_ALLOWED[status] if k in labels], labels, f"for a {status} ticket", n)
 
         line = {}
-        ticket_no = self._text(pax, "ticket_no", "Ticket No", 30, n)
-        original = self._text(pax, "original_ticket_no", "Original Ticket No", 30, n)
+        ticket_no = self._text(pax, "ticket_no", "Ticket No", TICKET_NO_MAX, n)
+        original = self._text(pax, "original_ticket_no", "Original Ticket No", TICKET_NO_MAX, n)
         if status == "Confirmed":
             line["ticket_no"] = ticket_no
         elif status == "Rescheduled":
             # ticket_no = the new ticket; original_ticket_no = the ticket being
-            # rescheduled (left out = the same number).
+            # rescheduled (left out = the same number, or found from the Parent
+            # PNR + passenger name - _link_by_parent_pnr).
             line["ticket_no"] = ticket_no
             line["original_ticket_no"] = original or ticket_no
         else:
@@ -953,10 +961,22 @@ class _DocumentCheck:
         text = self._text(pax, "card_number", "Card Number", 40, n)
         if not text:
             return
-        rows = self.masters.cards.get(_norm_card(text), [])
+        if not re.fullmatch(r"\d{4}", text):
+            self.problems.add("Invalid Format", "card_number", "Card Number",
+                              f"Card Number \"{text}\" is not valid - send only the last 4 digits of the card (e.g. 8344).",
+                              text, "4 digits", n)
+            return
+        rows = self.masters.cards.get(text, [])
         same_type = [r for r in rows if r["card_type"] == fop]
-        on_file = ", ".join(r["card_number"] for r in sum(self.masters.cards.values(), []) if r["card_type"] == fop and r["is_active"])
-        if not rows:
+        on_file = ", ".join(_card_last4(r["card_number"]) for r in sum(self.masters.cards.values(), [])
+                            if r["card_type"] == fop and r["is_active"])
+        active = [r for r in same_type if r["is_active"]]
+        if len(active) > 1:
+            self.problems.add("Mismatch", "card_number", "Card Number",
+                              f"More than one active {fop} in FOP Master ends with {text} ("
+                              f"{', '.join(r['card_number'] for r in active)}) - keep only one active.", text,
+                              "one card ending with these digits", n)
+        elif not rows:
             self.problems.add("Not Mapped", "card_number", "Card Number",
                               f"Card Number \"{text}\" is not mapped in FOP Master - add it under {fop} first (FOP Master "
                               f"{fop}s: {on_file or 'none'}).", text, on_file, n)
@@ -964,11 +984,11 @@ class _DocumentCheck:
             self.problems.add("Mismatch", "card_number", "Card Number",
                               f"Card Number \"{text}\" is saved as {rows[0]['card_type']} in FOP Master, but FOP is {fop} - "
                               f"the card type must match.", text, f"a card saved as {fop} in FOP Master", n)
-        elif not same_type[0]["is_active"]:
+        elif not active:
             self.problems.add("Not Mapped", "card_number", "Card Number",
                               f"Card Number \"{text}\" ({fop}) is inactive in FOP Master.", text, "an active card", n)
         else:
-            line["card_number"] = same_type[0]["card_number"]
+            line["card_number"] = active[0]["card_number"]   # saved as FOP Master has it
 
     def _amounts(self, pax, n, line):
         status = self.status
@@ -1202,6 +1222,16 @@ def _parent_pnr(rows):
     return (_payload(rows[0]).get("context") or {}).get("parent_pnr_clean")
 
 
+def _direct_needs_parent(rows, kind):
+    """Parent PNR is optional on a Cancellation / SSR - except a direct one (ticket not in the software)."""
+    tickets = ", ".join(dict.fromkeys(r["original_ticket_no"] for r in rows))
+    problems = _Problems()
+    problems.add("Missing", "parent_pnr", "Parent PNR",
+                 f"Ticket No {tickets} is not in the software, so this is saved as a direct {kind} - send the Parent PNR "
+                 f"(the Booking Reference the ticket was booked / rescheduled on).", None, "the ticket's Booking Reference")
+    raise ImportRejected(" ".join(p["error_message"] for p in problems.items), problems.items, "Missing")
+
+
 def _check_against_parent(rows, parents, verb):
     """Parent PNR and Customer ID sent with a Reschedule / Cancellation must be the ticket's own."""
     problems = _Problems()
@@ -1282,11 +1312,41 @@ def _booking_payload(company_id, rows):
     return views.ticket_create, {"company_id": company_id, **header, "lines": lines}
 
 
+def _name_key(name):
+    return " ".join(str(name or "").split()).casefold()
+
+
+def _link_by_parent_pnr(company_id, rows):
+    """
+    Reschedule sent without Original Ticket No (the Agent table has none): a passenger
+    whose Ticket No is not a live ticket here gets the live ticket of the same passenger
+    name on the Parent PNR's booking / reschedule (the only one, for a one-passenger
+    booking). Not found = left as sent (a direct Reschedule when nothing is in the software).
+    """
+    pnr = _parent_pnr(rows)
+    if not pnr:
+        return
+    live = sp_client.ticket_import_resolve_parents(company_id, [r["original_ticket_no"] for r in rows])
+    waiting = [r for r in rows if r["original_ticket_no"] not in live]
+    if not waiting:
+        return
+    on_pnr = sp_client.ticket_import_pnr_tickets(company_id, pnr)
+    taken = {r["original_ticket_no"] for r in rows if r["original_ticket_no"] in live}
+    for r in waiting:
+        free = [p for p in on_pnr if p["ticket_no"] not in taken]
+        named = [p for p in free if _name_key(p["passenger_name"]) == _name_key(r.get("passenger_name"))]
+        match = named if len(named) == 1 else (free if len(free) == 1 and len(waiting) == 1 else [])
+        if len(match) == 1:
+            r["original_ticket_no"] = match[0]["ticket_no"]
+            taken.add(match[0]["ticket_no"])
+
+
 def _reschedule_payload(company_id, rows):
     """
     Every value from the push itself; the live ticket only links each passenger (and is checked against).
     No booking in the software = a direct Reschedule: nothing to link, the Parent PNR sent is kept.
     """
+    _link_by_parent_pnr(company_id, rows)
     parents, original_ticket_id = _parents(company_id, rows, "reschedule")
     if parents:
         _check_against_parent(rows, parents, "reschedule")
@@ -1320,6 +1380,8 @@ def _cancellation_payload(company_id, rows):
     reschedule line is marked cancelled).
     """
     parents, original_ticket_id = _parents(company_id, rows, "cancel")
+    if not parents and not _parent_pnr(rows):
+        _direct_needs_parent(rows, "Cancellation")
     first = None
     if parents:
         _check_against_parent(rows, parents, "cancel")
@@ -1366,7 +1428,9 @@ def _cancellation_payload(company_id, rows):
     if problems.items:
         raise ImportRejected(" ".join(p["error_message"] for p in problems.items), problems.items, "Mismatch")
     return views.cancellation_ticket_create, {
-        "company_id": company_id, "original_ticket_id": original_ticket_id, "parent_pnr": _parent_pnr(rows),
+        # Ticket on a direct Reschedule and no Parent PNR sent: it is that reschedule's Booking Reference.
+        "company_id": company_id, "original_ticket_id": original_ticket_id,
+        "parent_pnr": _parent_pnr(rows) or (None if original_ticket_id else (first or {}).get("h_booking_reference")),
         "source_reschedule_ticket_id": first["reschedule_ticket_id"] if first else None, **header,
         "cancellation_reference": cancellation_reference, "cancellation_ref_date": cancellation_ref_date,
         "lines": lines,
@@ -1422,6 +1486,8 @@ def _ssr_payload(company_id, rows):
     (ticket not in this software): nothing to link, the Parent PNR sent is kept.
     """
     parents = _ssr_parents(company_id, rows)
+    if not parents and not _parent_pnr(rows):
+        _direct_needs_parent(rows, "SSR")
     if parents:
         _check_against_parent(rows, parents, "update")
     header = _header(rows[0])
@@ -1468,7 +1534,7 @@ def _ssr_payload(company_id, rows):
         "source_reschedule_ticket_id": first.get("reschedule_ticket_id"),
         # No booking in this software (direct SSR, or one on a direct Reschedule): keep the Parent PNR sent.
         "parent_pnr": _parent_pnr(rows) if not first.get("original_ticket_id") else None,
-        **{k: header.get(k) for k in ("customer_name", "branch_name", "invoice_number", "invoice_date", "invoice_type",
+        **{k: header.get(k) for k in ("customer_name", "invoice_number", "invoice_date", "invoice_type",
                                       "travel_type", "user_name", "currency", "roe", "airline_pnr", "gds_pnr",
                                       "payment_mode", "payment_gateway_ref", "booking_mode")},
         "ssr_reference": header.get("booking_reference"), "ssr_ref_date": header.get("booking_ref_date"),
@@ -1543,7 +1609,33 @@ def _save(view, payload, rows, acting_user):
     for line, r in zip(payload["lines"], rows):
         if _pushed_gst(r) and view is not views.ssr_ticket_create:
             line["gst_amounts"] = _pushed_gst(r)
-    return _call_view(view, payload, acting_user)
+    status_code, data = _call_view(view, payload, acting_user)
+    if status_code in (200, 201) and view in PG_CHARGE_LINES:
+        _set_pg_charges(PG_CHARGE_LINES[view], payload, data.get("id"))
+    return status_code, data
+
+
+def _set_pg_charges(lines_of, payload, header_id):
+    """
+    Payment Gateway: each saved passenger's PG Charges = its Total Billed x the gateway's PG
+    Master PG Charges % in force on the Invoice Date - the Ticket Entry screen's
+    updatePgCharges(). Set after the save, from the Total Billed the view worked out.
+    (SSR / Cancellation lines carry no PG Charges, same as their screens.)
+    """
+    if payload.get("payment_mode") != "Payment Gateway" or not header_id:
+        return
+    snapshot = views._pg_master_effective_snapshot(payload["company_id"], payload.get("payment_gateway_ref") or "",
+                                                   payload.get("invoice_date"))
+    pct = snapshot["pg_charges_percentage"] if snapshot else 0
+    for line_id, total in lines_of(header_id).values_list("id", "total_billed"):
+        lines_of(header_id).filter(id=line_id).update(
+            pg_charges_percentage=pct, pg_charges=_round2(float(total or 0) * pct / 100))
+
+
+PG_CHARGE_LINES = {   # view -> its saved lines, by header id
+    views.ticket_create: lambda header_id: models.TicketLine.objects.filter(ticket_id=header_id),
+    views.reschedule_ticket_create: lambda header_id: models.RescheduleAirlineTicketLine.objects.filter(reschedule_ticket_id=header_id),
+}
 
 
 def _import_document(doc_key, rows, acting_user):

@@ -52,7 +52,9 @@ NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,127}$")
 # The Agent table: the API parameters, in the API's order.
 # ---------------------------------------------------------------------------
 HEADER_COLUMNS = [k for k in ticket_import.HEADER_PARAMS if k != "passengers"]
-PAX_COLUMNS = list(ticket_import.PAX_TEXT_PARAMS)
+# No original_ticket_no: a Reschedule's old ticket is found from its Parent PNR + passenger name.
+PAX_COLUMNS = [k for k in ticket_import.PAX_TEXT_PARAMS if k != "original_ticket_no"]
+DROPPED_COLUMNS = ["original_ticket_no"]
 AMOUNT_COLUMNS = list(ticket_import.AMOUNT_PARAMS)
 TEXT_SIZES = {   # NVARCHAR sizes - roomy on purpose: a value too long is reported by the checks, not refused by SQL
     "user_name": 200, "sector": 400, "airline_code": 400, "travel_date": 400, "flight_no": 400,

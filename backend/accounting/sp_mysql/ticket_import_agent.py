@@ -633,6 +633,26 @@ def ticket_import_scheduler_mark_error(p):
     return [{"rows_marked": cnt, "process_status": (row or {}).get("process_status") or "Error"}]
 
 
+@sp("dbo.sp_TicketImport_Scheduler", "PNR_TICKETS")
+def ticket_import_scheduler_pnr_tickets(p):
+    company_id = _p_int(p.get("CompanyId"))
+    booking_ref = _p_str(p.get("BookingReference"), 30)
+    sql = """
+        SELECT tl.ticket_no, tl.passenger_name, tl.pax_type
+        FROM AL_TicketLines tl
+        INNER JOIN AL_Tickets t ON t.id = tl.ticket_id
+        WHERE t.company_id = %s AND t.booking_reference = %s
+          AND tl.rescheduled = 0 AND tl.canceled = 0
+        UNION ALL
+        SELECT rl.ticket_no, rl.passenger_name, rl.pax_type
+        FROM Rescheduled_Al_TicketLines rl
+        INNER JOIN Rescheduled_Al_Ticket rt ON rt.id = rl.reschedule_ticket_id
+        WHERE rt.company_id = %s AND rt.booking_reference = %s
+          AND rl.rescheduled = 0 AND rl.canceled = 0
+    """
+    return query(sql, [company_id, booking_ref, company_id, booking_ref])
+
+
 @sp("dbo.sp_TicketImport_Scheduler", "FINISH_RUN")
 def ticket_import_scheduler_finish_run(p):
     run_id = _p_int(p.get("RunId"))

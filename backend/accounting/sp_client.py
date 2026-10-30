@@ -30,9 +30,6 @@ from django.db import connection
 
 
 def exec_sp(proc_name, params=None):
-    # Live (MySQL/TiDB) has no stored procedures: each procedure's logic is
-    # reproduced in Python in accounting/sp_mysql/ (StoredProcedures.sql is
-    # kept only as a reference in backend/sp_reference/).
     if connection.vendor != "microsoft":
         from .sp_mysql import exec_sp as exec_sp_mysql
         return exec_sp_mysql(proc_name, params)
@@ -548,7 +545,7 @@ def ticket_save(company_id, customer_name, header_fields, lines, jv_narration, j
     Creates or updates (when ticket_id is given) a Ticket + its TicketLines
     + its auto-posted JournalVoucher, all in ONE atomic dbo.sp_Ticket SAVE
     call - views.ticket_create/ticket_update. `header_fields` is a dict
-    keyed by TICKET_HEADER_FIELDS (plus branch_name/supplier_name); `lines`
+    keyed by TICKET_HEADER_FIELDS (plus supplier_name); `lines`
     is a list of dicts keyed by TICKET_LINE_FIELDS plus total_billed
     (pre-computed by the caller) and supplier_name. The JV's own line-by-
     line amounts/narration are computed in Python (views._compute_jv_lines)
@@ -561,7 +558,7 @@ def ticket_save(company_id, customer_name, header_fields, lines, jv_narration, j
     import json as _json
     params = {
         "Action": "SAVE", "Id": ticket_id, "CompanyId": company_id, "CustomerName": customer_name,
-        "SupplierName": header_fields.get("supplier_name"), "BranchName": header_fields.get("branch_name"),
+        "SupplierName": header_fields.get("supplier_name"),
         "InvoiceNumber": header_fields.get("invoice_number"), "InvoiceDate": header_fields.get("invoice_date"),
         "InvoiceType": header_fields.get("invoice_type"), "BookingMode": header_fields.get("booking_mode"),
         "BookingType": header_fields.get("booking_type"), "BookingStatus": header_fields.get("booking_status"),
@@ -624,7 +621,7 @@ def voucher_next_number(company_id, voucher_type, voucher_type_name=None):
     return (row or {}).get("next_number")
 
 
-def voucher_save(company_id, branch_name, voucher_type, voucher_date, narration, lines, voucher_id=None, voucher_type_name=None, manual_no=None):
+def voucher_save(company_id, voucher_type, voucher_date, narration, lines, voucher_id=None, voucher_type_name=None, manual_no=None):
     """
     Creates or updates (when voucher_id is given) a manual Voucher -
     views.voucher_create/voucher_update. `lines` is the raw submitted
@@ -634,7 +631,7 @@ def voucher_save(company_id, branch_name, voucher_type, voucher_date, narration,
     """
     import json as _json
     row = exec_sp_one("dbo.sp_Voucher", {
-        "Action": "SAVE", "Id": voucher_id, "CompanyId": company_id, "BranchName": branch_name,
+        "Action": "SAVE", "Id": voucher_id, "CompanyId": company_id,
         "VoucherType": voucher_type, "VoucherTypeName": voucher_type_name or None,
         "ManualNo": manual_no or None,  # used only for Manual / Override master types
         "VoucherDate": voucher_date, "Narration": narration,
@@ -698,7 +695,6 @@ def reschedule_ticket_save(company_id, customer_name, header_fields, lines, jv_n
     params = {
         "Action": "SAVE", "Id": reschedule_ticket_id, "CompanyId": company_id, "OriginalTicketId": original_ticket_id,
         "CustomerName": customer_name, "SupplierName": header_fields.get("supplier_name"),
-        "BranchName": header_fields.get("branch_name"),
         "InvoiceNumber": header_fields.get("invoice_number"), "InvoiceDate": header_fields.get("invoice_date"),
         "InvoiceType": header_fields.get("invoice_type"), "BookingMode": header_fields.get("booking_mode"),
         "BookingType": header_fields.get("booking_type"), "BookingStatus": header_fields.get("booking_status"),
@@ -798,7 +794,7 @@ def cancellation_ticket_save(company_id, original_ticket_id, customer_name, head
     params = {
         "Action": "SAVE", "CompanyId": company_id, "OriginalTicketId": original_ticket_id, "ParentPnr": parent_pnr,
         "CustomerName": customer_name,
-        "SupplierName": header_fields.get("supplier_name"), "BranchName": header_fields.get("branch_name"),
+        "SupplierName": header_fields.get("supplier_name"),
         "InvoiceNumber": header_fields.get("invoice_number"), "InvoiceDate": header_fields.get("invoice_date"),
         "InvoiceType": header_fields.get("invoice_type"), "BookingMode": header_fields.get("booking_mode"),
         "BookingType": header_fields.get("booking_type"), "BookingStatus": header_fields.get("booking_status"),
@@ -882,7 +878,7 @@ def app_user_save(fields, user_id=None):
     params = {
         "Action": "SAVE", "Id": user_id,
         "FullName": fields.get("full_name"), "Email": fields.get("email"),
-        "Role": fields.get("role"), "BranchName": fields.get("branch_name"),
+        "Role": fields.get("role"),
         "IsSuperAdmin": fields.get("is_super_admin"), "IsActive": fields.get("is_active"),
         "PasswordHash": fields.get("password_hash"),
     }
@@ -976,7 +972,7 @@ def ssr_ticket_save(company_id, header_fields, lines, jv_narration, jv_total_deb
         "Action": "SAVE", "Id": ssr_id, "CompanyId": company_id,
         "OriginalTicketId": header_fields.get("original_ticket_id"),
         "SourceRescheduleTicketId": header_fields.get("source_reschedule_ticket_id"),
-        "CustomerName": header_fields.get("customer_name"), "BranchName": header_fields.get("branch_name"),
+        "CustomerName": header_fields.get("customer_name"),
         "InvoiceNumber": header_fields.get("invoice_number"), "InvoiceDate": header_fields.get("invoice_date"),
         "InvoiceType": header_fields.get("invoice_type"), "TravelType": header_fields.get("travel_type"),
         "UserName": header_fields.get("user_name"), "Currency": header_fields.get("currency"),
@@ -1002,9 +998,6 @@ def ticket_chain_lock_message(company_id, ticket_id=None, reschedule_id=None):
     """Why a Booking (ticket_id) / Reschedule (reschedule_id) can't be edited -
     the later processes built on it (dbo.fn_TicketChainLock) - or None when free."""
     from django.db import connection
-    if connection.vendor != "microsoft":
-        from .sp_mysql import ticket_chain_lock_message as chain_lock_mysql
-        return chain_lock_mysql(company_id, ticket_id, reschedule_id)
     with connection.cursor() as cur:
         cur.execute("SELECT message FROM dbo.fn_TicketChainLock(%s, %s, %s)", [company_id, ticket_id, reschedule_id])
         row = cur.fetchone()
@@ -1031,7 +1024,7 @@ def misc_save(company_id, fields, jv_narration, jv_total_debit, jv_total_credit,
     """
     params = {
         "Action": "SAVE", "Id": misc_id, "CompanyId": company_id,
-        "BranchName": fields.get("branch_name"), "InvoiceNumber": fields.get("invoice_number"),
+        "InvoiceNumber": fields.get("invoice_number"),
         "InvoiceDate": fields.get("invoice_date"), "InvoiceType": fields.get("invoice_type"),
         "Status": fields.get("status"), "UserName": fields.get("user_name"),
         "Reference": fields.get("reference"), "RefDate": fields.get("ref_date"),
@@ -1152,6 +1145,13 @@ def ticket_import_resolve_parents(company_id, ticket_nos):
         "Action": "RESOLVE_PARENTS", "CompanyId": company_id, "TicketNosJson": _ticket_import_json(list(ticket_nos)),
     })
     return {r["lookup_ticket_no"]: r for r in rows}
+
+
+def ticket_import_pnr_tickets(company_id, booking_reference):
+    """[{ticket_no, passenger_name, pax_type}] - the live passenger lines of the booking / reschedule with that Booking Reference."""
+    return exec_sp("dbo.sp_TicketImport_Scheduler", {
+        "Action": "PNR_TICKETS", "CompanyId": company_id, "BookingReference": booking_reference,
+    })
 
 
 def ticket_import_known_tickets(company_id, ticket_nos):

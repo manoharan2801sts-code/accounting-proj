@@ -26,7 +26,6 @@
     email: document.getElementById("um-email"),
     password: document.getElementById("um-password"),
     role: document.getElementById("um-role"),
-    branch: document.getElementById("um-branch"),
     isSuperAdmin: document.getElementById("um-is-super-admin"),
     isActive: document.getElementById("um-is-active"),
   };
@@ -67,7 +66,7 @@
   function renderUsers() {
     const q = searchInput.value.trim().toLowerCase();
     const rows = users.filter((u) =>
-      !q || [u.full_name, u.email, u.role, u.branch_name].some((v) => (v || "").toLowerCase().includes(q))
+      !q || [u.full_name, u.email, u.role].some((v) => (v || "").toLowerCase().includes(q))
     );
     if (!rows.length) {
       tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:2rem; color:var(--color-text-muted);">${users.length ? "No users match your search." : "No users yet - use Add User to create one."}</td></tr>`;
@@ -78,7 +77,6 @@
         <td style="font-weight:600; color:var(--color-text-dark);">${esc(u.full_name)}</td>
         <td>${esc(u.email)}</td>
         <td>${esc(u.role)}</td>
-        <td>${esc(u.branch_name || "-")}</td>
         <td>${accessBadge(u)}</td>
         <td><span class="status-badge ${u.is_active ? "badge-active" : "badge-inactive"}">${u.is_active ? "Active" : "Inactive"}</span></td>
         <td class="row-actions">
@@ -114,7 +112,6 @@
     f.password.placeholder = user ? "Leave blank to keep current password" : "At least 6 characters";
     document.getElementById("um-password-req").style.display = user ? "none" : "";
     f.role.value = user ? user.role : "";
-    f.branch.value = user ? (user.branch_name || "") : "";
     f.isSuperAdmin.checked = user ? user.is_super_admin : false;
     f.isActive.checked = user ? user.is_active : true;
     userModal.classList.add("open");
@@ -140,7 +137,7 @@
   function userPayload(user, overrides) {
     return {
       id: user.id, full_name: user.full_name, email: user.email, role: user.role,
-      branch_name: user.branch_name, is_super_admin: user.is_super_admin, is_active: user.is_active,
+      is_super_admin: user.is_super_admin, is_active: user.is_active,
       ...overrides,
     };
   }
@@ -171,7 +168,7 @@
     try {
       await saveUser({
         id: editingUserId, full_name: fullName, email, password,
-        role: f.role.value.trim() || "User", branch_name: f.branch.value.trim(),
+        role: f.role.value.trim() || "User",
         is_super_admin: f.isSuperAdmin.checked, is_active: f.isActive.checked,
       });
       closeUserModal();
@@ -229,7 +226,7 @@
     accessUser = user;
     document.getElementById("ua-user-name").textContent = user.full_name;
     document.getElementById("ua-user-sub").textContent =
-      [user.is_super_admin ? "Super Admin" : user.role, user.branch_name].filter(Boolean).join(" · ");
+      [user.is_super_admin ? "Super Admin" : user.role].filter(Boolean).join(" · ");
     document.getElementById("ua-super-note").style.display = user.is_super_admin ? "block" : "none";
     renderAccess();
     accessModal.classList.add("open");

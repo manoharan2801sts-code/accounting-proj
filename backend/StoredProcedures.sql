@@ -1694,7 +1694,6 @@ CREATE OR ALTER PROCEDURE dbo.sp_Ticket
     @FromDate              DATE            = NULL,
     @CustomerName          NVARCHAR(150)   = NULL,
     @SupplierName          NVARCHAR(150)   = NULL,
-    @BranchName            NVARCHAR(100)   = NULL,
     @InvoiceNumber         NVARCHAR(20)    = NULL,
     @InvoiceDate           DATE            = NULL,
     @InvoiceType           NVARCHAR(100)   = NULL,
@@ -1856,7 +1855,7 @@ BEGIN
         -- replaces the ORM's .filter().prefetch_related() bulk read).
         SELECT
             t.id AS ticket_id, t.company_id, cust.id AS customer_id, cust.name AS customer_name, cust.state_name AS customer_state_name,
-            t.booking_reference, t.airline_pnr, t.payment_mode, t.payment_gateway_ref, t.invoice_date, t.booking_ref_date, t.branch_name,
+            t.booking_reference, t.airline_pnr, t.payment_mode, t.payment_gateway_ref, t.invoice_date, t.booking_ref_date,
             t.office_id AS ticket_office_id, t.invoice_number, v.voucher_no,
             tl.id AS line_id, tl.airline_code, tl.airline_name, tl.airline_category, tl.flight_no, tl.ticket_no, tl.passenger_name, tl.pax_type,
             tl.sector, tl.travel_date, tl.cabin, tl.travel_class, tl.fare_type,
@@ -1891,7 +1890,7 @@ BEGIN
                t.booking_status, cust.name AS customer_name, t.travel_type, t.user_name, t.currency, t.roe,
                t.booking_given_by, t.booking_reference, t.booking_ref_date, t.airline_pnr, t.gds_pnr,
                supp.name AS supplier_name, t.office_id, t.payment_mode, t.payment_gateway_ref,
-               t.airline_category, t.branch_name, 'Success' AS status
+               t.airline_category, 'Success' AS status
         FROM dbo.AL_Tickets t
         INNER JOIN dbo.Ledgers cust ON cust.id = t.customer_ledger_id
         LEFT JOIN dbo.Ledgers supp ON supp.id = t.supplier_ledger_id
@@ -2092,8 +2091,7 @@ BEGIN
                     travel_type = @TravelType, user_name = @UserName, currency = ISNULL(@Currency, currency), roe = ISNULL(@Roe, roe),
                     booking_given_by = @BookingGivenBy, booking_reference = @BookingReference, booking_ref_date = @BookingRefDate,
                     airline_pnr = @AirlinePnr, gds_pnr = @GdsPnr, office_id = @OfficeId,
-                    payment_mode = @PaymentMode, payment_gateway_ref = @PaymentGatewayRef, airline_category = @AirlineCategory,
-                    branch_name = @BranchName
+                    payment_mode = @PaymentMode, payment_gateway_ref = @PaymentGatewayRef, airline_category = @AirlineCategory
                 WHERE id = @Id;
 
                 -- Lines no longer present in this submission are dropped -
@@ -2249,7 +2247,7 @@ BEGIN
                 -- Upsert this ticket's JournalVoucher in place (never a 2nd row for the same ticket).
                 IF EXISTS (SELECT 1 FROM dbo.JournalVoucher WHERE source_ticket_id = @Id)
                     UPDATE dbo.JournalVoucher
-                    SET branch_name = ISNULL(@BranchName, 'Chennai Branch'), voucher_date = @InvoiceDate,
+                    SET voucher_date = @InvoiceDate,
                         narration = @JvNarration, total_debit = @JvTotalDebit, total_credit = @JvTotalCredit,
                         updated_at = SYSUTCDATETIME()
                     WHERE source_ticket_id = @Id;
@@ -2257,22 +2255,22 @@ BEGIN
                 BEGIN
                     DECLARE @NextNumU INT = (SELECT ISNULL(MAX(TRY_CAST(SUBSTRING(voucher_no, 4, 20) AS INT)), 0) + 1 FROM dbo.JournalVoucher WHERE company_id = @CompanyId AND category = 'AIRLINE' AND voucher_no LIKE 'AL-%');
                     INSERT INTO dbo.JournalVoucher
-                        (company_id, branch_name, voucher_type, voucher_date, narration, category, voucher_no,
+                        (company_id, voucher_type, voucher_date, narration, category, voucher_no,
                          source_ticket_id, total_debit, total_credit, lines_json, created_at, updated_at)
                     VALUES
-                        (@CompanyId, ISNULL(@BranchName, 'Chennai Branch'), 'Tax Invoice', @InvoiceDate, @JvNarration, 'AIRLINE',
+                        (@CompanyId, 'Tax Invoice', @InvoiceDate, @JvNarration, 'AIRLINE',
                          'AL-' + CAST(@NextNumU AS NVARCHAR(10)), @Id, @JvTotalDebit, @JvTotalCredit, '[]', SYSUTCDATETIME(), SYSUTCDATETIME());
                 END
             END
             ELSE
             BEGIN
                 INSERT INTO dbo.AL_Tickets
-                    (company_id, branch_name, invoice_number, invoice_date, invoice_type, booking_mode, booking_type, booking_status,
+                    (company_id, invoice_number, invoice_date, invoice_type, booking_mode, booking_type, booking_status,
                      customer_ledger_id, supplier_ledger_id, travel_type, user_name, currency, roe, booking_given_by,
                      booking_reference, booking_ref_date, airline_pnr, gds_pnr, office_id, payment_mode, payment_gateway_ref,
                      airline_category, created_at, updated_at)
                 VALUES
-                    (@CompanyId, @BranchName, @InvoiceNumber, @InvoiceDate, @InvoiceType, ISNULL(@BookingMode, 'Manual'), @BookingType, @BookingStatus,
+                    (@CompanyId, @InvoiceNumber, @InvoiceDate, @InvoiceType, ISNULL(@BookingMode, 'Manual'), @BookingType, @BookingStatus,
                      @CustLedgerId, @SuppLedgerId, @TravelType, @UserName, ISNULL(@Currency, 'INR'), ISNULL(@Roe, 1), @BookingGivenBy,
                      @BookingReference, @BookingRefDate, @AirlinePnr, @GdsPnr, @OfficeId, @PaymentMode, @PaymentGatewayRef,
                      @AirlineCategory, SYSUTCDATETIME(), SYSUTCDATETIME());
@@ -2322,10 +2320,10 @@ BEGIN
 
                 DECLARE @NextNumC INT = (SELECT ISNULL(MAX(TRY_CAST(SUBSTRING(voucher_no, 4, 20) AS INT)), 0) + 1 FROM dbo.JournalVoucher WHERE company_id = @CompanyId AND category = 'AIRLINE' AND voucher_no LIKE 'AL-%');
                 INSERT INTO dbo.JournalVoucher
-                    (company_id, branch_name, voucher_type, voucher_date, narration, category, voucher_no,
+                    (company_id, voucher_type, voucher_date, narration, category, voucher_no,
                      source_ticket_id, total_debit, total_credit, lines_json, created_at, updated_at)
                 VALUES
-                    (@CompanyId, ISNULL(@BranchName, 'Chennai Branch'), 'Tax Invoice', @InvoiceDate, @JvNarration, 'AIRLINE',
+                    (@CompanyId, 'Tax Invoice', @InvoiceDate, @JvNarration, 'AIRLINE',
                      'AL-' + CAST(@NextNumC AS NVARCHAR(10)), @ResultId, @JvTotalDebit, @JvTotalCredit, '[]', SYSUTCDATETIME(), SYSUTCDATETIME());
             END
 
@@ -2373,7 +2371,6 @@ CREATE OR ALTER PROCEDURE dbo.sp_RescheduleTicket
     @PairsJson             NVARCHAR(MAX)   = NULL,
     @CustomerName          NVARCHAR(150)   = NULL,
     @SupplierName          NVARCHAR(150)   = NULL,
-    @BranchName            NVARCHAR(100)   = NULL,
     @InvoiceNumber         NVARCHAR(20)    = NULL,
     @InvoiceDate           DATE            = NULL,
     @InvoiceType           NVARCHAR(100)   = NULL,
@@ -2410,7 +2407,7 @@ BEGIN
         -- RescheduleAirlineTicket/RescheduleAirlineTicketLine instances.
         SELECT
             rt.id AS reschedule_ticket_id, rt.company_id, cust.id AS customer_id, cust.name AS customer_name, cust.state_name AS customer_state_name,
-            rt.booking_reference, rt.airline_pnr, rt.payment_mode, rt.payment_gateway_ref, rt.invoice_date, rt.booking_ref_date, rt.branch_name,
+            rt.booking_reference, rt.airline_pnr, rt.payment_mode, rt.payment_gateway_ref, rt.invoice_date, rt.booking_ref_date,
             rt.office_id AS ticket_office_id, rt.invoice_number, v.voucher_no,
             rl.id AS line_id, rl.airline_code, rl.airline_name, rl.airline_category, rl.flight_no, rl.ticket_no, rl.passenger_name, rl.pax_type,
             rl.sector, rl.travel_date, rl.cabin, rl.travel_class, rl.fare_type,
@@ -2732,8 +2729,7 @@ BEGIN
                     travel_type = @TravelType, user_name = @UserName, currency = @CurrencyOrDefault, roe = ISNULL(@Roe, roe),
                     booking_given_by = @BookingGivenBy, booking_reference = @BookingReference, booking_ref_date = @BookingRefDate,
                     airline_pnr = @AirlinePnr, gds_pnr = @GdsPnr, office_id = @OfficeId,
-                    payment_mode = @PaymentMode, payment_gateway_ref = @PaymentGatewayRef, airline_category = @AirlineCategory,
-                    branch_name = @BranchName
+                    payment_mode = @PaymentMode, payment_gateway_ref = @PaymentGatewayRef, airline_category = @AirlineCategory
                 WHERE id = @Id;
 
                 -- A line dropped from this resubmission goes back to
@@ -2794,12 +2790,12 @@ BEGIN
             ELSE
             BEGIN
                 INSERT INTO dbo.Rescheduled_Al_Ticket
-                    (company_id, branch_name, original_ticket_id, invoice_number, invoice_date, invoice_type, booking_mode, booking_type, booking_status,
+                    (company_id, original_ticket_id, invoice_number, invoice_date, invoice_type, booking_mode, booking_type, booking_status,
                      customer_ledger_id, supplier_ledger_id, travel_type, user_name, currency, roe, booking_given_by,
                      booking_reference, booking_ref_date, airline_pnr, gds_pnr, office_id, payment_mode, payment_gateway_ref,
                      airline_category, created_at, updated_at)
                 VALUES
-                    (@CompanyId, @BranchName, @OriginalTicketId, @InvoiceNumber, @InvoiceDate, @InvoiceType, ISNULL(@BookingMode, 'Manual'), @BookingType, @BookingStatus,
+                    (@CompanyId, @OriginalTicketId, @InvoiceNumber, @InvoiceDate, @InvoiceType, ISNULL(@BookingMode, 'Manual'), @BookingType, @BookingStatus,
                      @CustLedgerId, @SuppLedgerId, @TravelType, @UserName, @CurrencyOrDefault, ISNULL(@Roe, 1), @BookingGivenBy,
                      @BookingReference, @BookingRefDate, @AirlinePnr, @GdsPnr, @OfficeId, @PaymentMode, @PaymentGatewayRef,
                      @AirlineCategory, SYSUTCDATETIME(), SYSUTCDATETIME());
@@ -2975,7 +2971,7 @@ BEGIN
 
             IF EXISTS (SELECT 1 FROM dbo.JournalVoucher WHERE source_reschedule_ticket_id = @ResultId)
                 UPDATE dbo.JournalVoucher
-                SET branch_name = ISNULL(@BranchName, 'Chennai Branch'), voucher_date = @InvoiceDate,
+                SET voucher_date = @InvoiceDate,
                     narration = @JvNarration, total_debit = @JvTotalDebit, total_credit = @JvTotalCredit,
                     updated_at = SYSUTCDATETIME()
                 WHERE source_reschedule_ticket_id = @ResultId;
@@ -2983,10 +2979,10 @@ BEGIN
             BEGIN
                 DECLARE @NextNum INT = (SELECT ISNULL(MAX(TRY_CAST(SUBSTRING(voucher_no, 5, 20) AS INT)), 0) + 1 FROM dbo.JournalVoucher WHERE company_id = @CompanyId AND category = 'AIRLINE_RESCHEDULE' AND voucher_no LIKE 'ALR-%');
                 INSERT INTO dbo.JournalVoucher
-                    (company_id, branch_name, voucher_type, voucher_date, narration, category, voucher_no,
+                    (company_id, voucher_type, voucher_date, narration, category, voucher_no,
                      source_reschedule_ticket_id, total_debit, total_credit, lines_json, created_at, updated_at)
                 VALUES
-                    (@CompanyId, ISNULL(@BranchName, 'Chennai Branch'), 'Tax Invoice', @InvoiceDate, @JvNarration, 'AIRLINE_RESCHEDULE',
+                    (@CompanyId, 'Tax Invoice', @InvoiceDate, @JvNarration, 'AIRLINE_RESCHEDULE',
                      'ALR-' + CAST(@NextNum AS NVARCHAR(10)), @ResultId, @JvTotalDebit, @JvTotalCredit, '[]', SYSUTCDATETIME(), SYSUTCDATETIME());
             END
 
@@ -3024,7 +3020,6 @@ CREATE OR ALTER PROCEDURE dbo.sp_Voucher
     @Action        NVARCHAR(50),
     @Id            INT            = NULL,
     @CompanyId     INT            = NULL,
-    @BranchName    NVARCHAR(100)  = NULL,
     @VoucherType   NVARCHAR(20)   = NULL,
     @VoucherTypeName NVARCHAR(100) = NULL,   -- Voucher Type master entry picked (NULL = a standard type)
     @ManualNo      NVARCHAR(30)   = NULL,   -- number typed on the screen (Manual / Automatic & Manual Override types)
@@ -3066,7 +3061,7 @@ BEGIN
 
     IF @Action = 'LIST'
     BEGIN
-        SELECT id, voucher_no, branch_name, voucher_type, voucher_type_name, voucher_date, narration,
+        SELECT id, voucher_no, voucher_type, voucher_type_name, voucher_date, narration,
                total_debit, total_credit, lines_json
         FROM dbo.Vouchers
         WHERE company_id = @CompanyId
@@ -3076,7 +3071,7 @@ BEGIN
 
     IF @Action = 'GET_BY_ID'
     BEGIN
-        SELECT id, voucher_no, branch_name, voucher_type, voucher_type_name, voucher_date, narration,
+        SELECT id, voucher_no, voucher_type, voucher_type_name, voucher_date, narration,
                total_debit, total_credit, lines_json
         FROM dbo.Vouchers
         WHERE id = @Id AND company_id = @CompanyId;
@@ -3203,7 +3198,7 @@ BEGIN
                                            AND ISNULL(v2.voucher_type_name, '') = ISNULL(@SeriesName, '')) AS NVARCHAR(10));
                 UPDATE dbo.Vouchers
                 SET voucher_no = ISNULL(@MovedNo, voucher_no),
-                    branch_name = ISNULL(@BranchName, branch_name), voucher_type = ISNULL(@VoucherType, 'Journal'), voucher_type_name = @VoucherTypeName, voucher_date = @VoucherDate,
+                    voucher_type = ISNULL(@VoucherType, 'Journal'), voucher_type_name = @VoucherTypeName, voucher_date = @VoucherDate,
                     narration = @Narration, total_debit = @TotalDebit, total_credit = @TotalCredit, lines_json = @ResolvedLinesJson
                 WHERE id = @Id;
                 -- Manual / Override types may change the number on edit too.
@@ -3219,10 +3214,10 @@ BEGIN
                     FROM dbo.Vouchers WHERE company_id = @CompanyId AND category = 'MANUAL' AND voucher_type = @SeriesType
                       AND ISNULL(voucher_type_name, '') = ISNULL(@SeriesName, ''));
                 INSERT INTO dbo.Vouchers
-                    (company_id, branch_name, voucher_type, voucher_type_name, voucher_date, narration, category, voucher_no,
+                    (company_id, voucher_type, voucher_type_name, voucher_date, narration, category, voucher_no,
                      total_debit, total_credit, lines_json, created_at, updated_at)
                 VALUES
-                    (@CompanyId, ISNULL(@BranchName, 'Chennai Branch'), ISNULL(@VoucherType, 'Journal'), @VoucherTypeName, @VoucherDate, @Narration, 'MANUAL',
+                    (@CompanyId, ISNULL(@VoucherType, 'Journal'), @VoucherTypeName, @VoucherDate, @Narration, 'MANUAL',
                      CASE WHEN @UseManualNo = 1 THEN @ManualFullNo ELSE CAST(@NextNum AS NVARCHAR(10)) END,
                      @TotalDebit, @TotalCredit, @ResolvedLinesJson, SYSUTCDATETIME(), SYSUTCDATETIME());
                 SET @ResultId = SCOPE_IDENTITY();
@@ -3230,7 +3225,7 @@ BEGIN
 
             COMMIT TRAN;
 
-            SELECT id, voucher_no, branch_name, voucher_type, voucher_type_name, voucher_date, narration,
+            SELECT id, voucher_no, voucher_type, voucher_type_name, voucher_date, narration,
                    total_debit, total_credit, lines_json, 'Success' AS status
             FROM dbo.Vouchers WHERE id = @ResultId;
         END TRY
@@ -3271,7 +3266,6 @@ CREATE OR ALTER PROCEDURE dbo.sp_CancellationTicket
     @OriginalTicketId        INT             = NULL,
     @CustomerName            NVARCHAR(150)   = NULL,
     @SupplierName            NVARCHAR(150)   = NULL,
-    @BranchName              NVARCHAR(100)   = NULL,
     @InvoiceNumber           NVARCHAR(20)    = NULL,
     @InvoiceDate             DATE            = NULL,
     @InvoiceType             NVARCHAR(100)   = NULL,
@@ -3331,7 +3325,7 @@ BEGIN
                ct.travel_type, ct.user_name, ct.currency, ct.roe, ct.booking_given_by,
                ct.cancellation_reference, ct.cancellation_ref_date, ct.airline_pnr, ct.gds_pnr,
                supp.name AS supplier_name, ct.office_id, ct.payment_mode, ct.payment_gateway_ref,
-               ct.airline_category, ct.branch_name, ct.customer_ledger_id,
+               ct.airline_category, ct.customer_ledger_id,
                jv.id AS voucher_id, jv.voucher_no, jv.total_debit AS jv_total_debit, jv.total_credit AS jv_total_credit,
                'Success' AS status
         FROM dbo.Cancellation_AL_Tickets ct
@@ -3495,12 +3489,12 @@ BEGIN
             BEGIN TRAN;
 
             INSERT INTO dbo.Cancellation_AL_Tickets
-                (company_id, branch_name, original_ticket_id, parent_pnr, invoice_number, invoice_date, invoice_type, booking_mode, booking_type, booking_status,
+                (company_id, original_ticket_id, parent_pnr, invoice_number, invoice_date, invoice_type, booking_mode, booking_type, booking_status,
                  customer_ledger_id, supplier_ledger_id, travel_type, user_name, currency, roe, booking_given_by,
                  cancellation_reference, cancellation_ref_date, airline_pnr, gds_pnr, office_id, payment_mode, payment_gateway_ref,
                  airline_category, created_at, updated_at)
             VALUES
-                (@CompanyId, @BranchName, @OriginalTicketId, @ParentPnr, @InvoiceNumber, @InvoiceDate, @InvoiceType, ISNULL(@BookingMode, 'Manual'), @BookingType, @BookingStatus,
+                (@CompanyId, @OriginalTicketId, @ParentPnr, @InvoiceNumber, @InvoiceDate, @InvoiceType, ISNULL(@BookingMode, 'Manual'), @BookingType, @BookingStatus,
                  @CustLedgerId, @SuppLedgerId, @TravelType, @UserName, ISNULL(@Currency, 'INR'), ISNULL(@Roe, 1), @BookingGivenBy,
                  @CancellationReference, @CancellationRefDate, @AirlinePnr, @GdsPnr, @OfficeId, @PaymentMode, @PaymentGatewayRef,
                  @AirlineCategory, SYSUTCDATETIME(), SYSUTCDATETIME());
@@ -3596,10 +3590,10 @@ BEGIN
             -- JV insert, separate ALC- sequence.
             DECLARE @NextNumCx INT = (SELECT ISNULL(MAX(TRY_CAST(SUBSTRING(voucher_no, 5, 20) AS INT)), 0) + 1 FROM dbo.JournalVoucher WHERE company_id = @CompanyId AND category = 'AIRLINE_CANCELLATION' AND voucher_no LIKE 'ALC-%');
             INSERT INTO dbo.JournalVoucher
-                (company_id, branch_name, voucher_type, voucher_date, narration, category, voucher_no,
+                (company_id, voucher_type, voucher_date, narration, category, voucher_no,
                  source_cancellation_ticket_id, total_debit, total_credit, lines_json, created_at, updated_at)
             VALUES
-                (@CompanyId, ISNULL(@BranchName, 'Chennai Branch'), 'Tax Invoice', @InvoiceDate, @JvNarration, 'AIRLINE_CANCELLATION',
+                (@CompanyId, 'Tax Invoice', @InvoiceDate, @JvNarration, 'AIRLINE_CANCELLATION',
                  'ALC-' + CAST(@NextNumCx AS NVARCHAR(10)), @ResultId, @JvTotalDebit, @JvTotalCredit, '[]', SYSUTCDATETIME(), SYSUTCDATETIME());
 
             COMMIT TRAN;
@@ -3727,8 +3721,8 @@ BEGIN
             -- cancellation). A cancellation saved before the JV feature
             -- existed (2026-10-07) has no row yet - it gets its first one
             -- here, on its first edit.
-            DECLARE @CxInvoiceDate DATE, @CxBranchName NVARCHAR(100);
-            SELECT @CxInvoiceDate = invoice_date, @CxBranchName = branch_name FROM dbo.Cancellation_AL_Tickets WHERE id = @Id;
+            DECLARE @CxInvoiceDate DATE;
+            SELECT @CxInvoiceDate = invoice_date FROM dbo.Cancellation_AL_Tickets WHERE id = @Id;
             IF EXISTS (SELECT 1 FROM dbo.JournalVoucher WHERE source_cancellation_ticket_id = @Id)
                 UPDATE dbo.JournalVoucher
                 SET voucher_date = @CxInvoiceDate, narration = @JvNarration,
@@ -3739,10 +3733,10 @@ BEGIN
             BEGIN
                 DECLARE @NextNumCxU INT = (SELECT ISNULL(MAX(TRY_CAST(SUBSTRING(voucher_no, 5, 20) AS INT)), 0) + 1 FROM dbo.JournalVoucher WHERE company_id = @CompanyId AND category = 'AIRLINE_CANCELLATION' AND voucher_no LIKE 'ALC-%');
                 INSERT INTO dbo.JournalVoucher
-                    (company_id, branch_name, voucher_type, voucher_date, narration, category, voucher_no,
+                    (company_id, voucher_type, voucher_date, narration, category, voucher_no,
                      source_cancellation_ticket_id, total_debit, total_credit, lines_json, created_at, updated_at)
                 VALUES
-                    (@CompanyId, ISNULL(@CxBranchName, 'Chennai Branch'), 'Tax Invoice', @CxInvoiceDate, @JvNarration, 'AIRLINE_CANCELLATION',
+                    (@CompanyId, 'Tax Invoice', @CxInvoiceDate, @JvNarration, 'AIRLINE_CANCELLATION',
                      'ALC-' + CAST(@NextNumCxU AS NVARCHAR(10)), @Id, @JvTotalDebit, @JvTotalCredit, '[]', SYSUTCDATETIME(), SYSUTCDATETIME());
             END
 
@@ -3774,7 +3768,6 @@ CREATE OR ALTER PROCEDURE dbo.sp_AppUser
     @FullName       NVARCHAR(150)   = NULL,
     @Email          NVARCHAR(200)   = NULL,
     @Role           NVARCHAR(50)    = NULL,
-    @BranchName     NVARCHAR(100)   = NULL,
     @IsSuperAdmin   BIT             = NULL,
     @IsActive       BIT             = NULL,
     @PasswordHash   NVARCHAR(256)   = NULL
@@ -3842,7 +3835,7 @@ BEGIN
             BEGIN
                 -- A blank password on edit means "keep the current one".
                 UPDATE dbo.AppUsers
-                SET full_name = @FullName, email = @Email, role = @Role, branch_name = @BranchName,
+                SET full_name = @FullName, email = @Email, role = @Role,
                     is_super_admin = @IsSuperAdmin, is_active = @IsActive,
                     password_hash = ISNULL(@PasswordHash, password_hash), updated_at = SYSUTCDATETIME()
                 WHERE id = @Id;
@@ -3850,8 +3843,8 @@ BEGIN
             END
             ELSE
             BEGIN
-                INSERT INTO dbo.AppUsers (full_name, email, role, branch_name, is_super_admin, is_active, password_hash, created_at, updated_at)
-                VALUES (@FullName, @Email, @Role, @BranchName, @IsSuperAdmin, @IsActive, @PasswordHash, SYSUTCDATETIME(), SYSUTCDATETIME());
+                INSERT INTO dbo.AppUsers (full_name, email, role, is_super_admin, is_active, password_hash, created_at, updated_at)
+                VALUES (@FullName, @Email, @Role, @IsSuperAdmin, @IsActive, @PasswordHash, SYSUTCDATETIME(), SYSUTCDATETIME());
                 SET @ResultId = SCOPE_IDENTITY();
                 SET @WasCreated = 1;
             END
@@ -4019,7 +4012,6 @@ CREATE OR ALTER PROCEDURE dbo.sp_SSRTicket
     @OriginalTicketId          INT             = NULL,
     @SourceRescheduleTicketId  INT             = NULL,
     @CustomerName              NVARCHAR(150)   = NULL,
-    @BranchName                NVARCHAR(100)   = NULL,
     @InvoiceNumber             NVARCHAR(20)    = NULL,
     @InvoiceDate               DATE            = NULL,
     @InvoiceType               NVARCHAR(100)   = NULL,
@@ -4083,7 +4075,7 @@ BEGIN
         SELECT st.id, st.original_ticket_id, st.source_reschedule_ticket_id, st.invoice_number, st.invoice_date,
                st.invoice_type, st.booking_mode, st.booking_status, cust.name AS customer_name, st.customer_ledger_id,
                cust.state_name AS customer_state, st.travel_type, st.user_name, st.currency, st.roe,
-               st.ssr_reference, st.ssr_ref_date, st.airline_pnr, st.gds_pnr, st.payment_mode, st.payment_gateway_ref, st.branch_name,
+               st.ssr_reference, st.ssr_ref_date, st.airline_pnr, st.gds_pnr, st.payment_mode, st.payment_gateway_ref,
                st.parent_pnr,
                ot.invoice_number AS original_invoice_number, rt.invoice_number AS source_reschedule_invoice_number,
                jv.id AS voucher_id, jv.voucher_no, jv.total_debit AS jv_total_debit, jv.total_credit AS jv_total_credit,
@@ -4188,11 +4180,11 @@ BEGIN
             IF @Id IS NULL
             BEGIN
                 INSERT INTO dbo.SSR_AL_Tickets
-                    (company_id, branch_name, original_ticket_id, source_reschedule_ticket_id, invoice_number, invoice_date,
+                    (company_id, original_ticket_id, source_reschedule_ticket_id, invoice_number, invoice_date,
                      invoice_type, booking_mode, booking_status, customer_ledger_id, travel_type, user_name, currency, roe,
                      ssr_reference, ssr_ref_date, airline_pnr, gds_pnr, payment_mode, payment_gateway_ref, parent_pnr, created_at, updated_at)
                 VALUES
-                    (@CompanyId, @BranchName, @OriginalTicketId, @SourceRescheduleTicketId, @InvoiceNumber, @InvoiceDate,
+                    (@CompanyId, @OriginalTicketId, @SourceRescheduleTicketId, @InvoiceNumber, @InvoiceDate,
                      @InvoiceType, ISNULL(NULLIF(@BookingMode, ''), 'Manual'), 'SSR Updated', @CustLedgerId, @TravelType, @UserName, ISNULL(@Currency, 'INR'), ISNULL(@Roe, 1),
                      @SsrReference, @SsrRefDate, @AirlinePnr, @GdsPnr, @PaymentMode, @PaymentGatewayRef,
                      CASE WHEN @OriginalTicketId IS NULL THEN NULLIF(LTRIM(RTRIM(@ParentPnr)), '') END, SYSUTCDATETIME(), SYSUTCDATETIME());
@@ -4249,10 +4241,10 @@ BEGIN
                                         FROM dbo.JournalVoucher
                                         WHERE company_id = @CompanyId AND category = 'AIRLINE_SSR' AND voucher_no LIKE 'ALS-%');
                 INSERT INTO dbo.JournalVoucher
-                    (company_id, branch_name, voucher_type, voucher_date, narration, category, voucher_no,
+                    (company_id, voucher_type, voucher_date, narration, category, voucher_no,
                      source_ssr_ticket_id, total_debit, total_credit, lines_json, created_at, updated_at)
                 VALUES
-                    (@CompanyId, ISNULL(@BranchName, 'Chennai Branch'), 'Tax Invoice', @InvoiceDate, @JvNarration, 'AIRLINE_SSR',
+                    (@CompanyId, 'Tax Invoice', @InvoiceDate, @JvNarration, 'AIRLINE_SSR',
                      'ALS-' + CAST(@NextNum AS NVARCHAR(10)), @ResultId, @JvTotalDebit, @JvTotalCredit, '[]', SYSUTCDATETIME(), SYSUTCDATETIME());
                 SET @VoucherId = CAST(SCOPE_IDENTITY() AS INT);
             END
@@ -4286,7 +4278,6 @@ CREATE OR ALTER PROCEDURE dbo.sp_MiscTransaction
     @Action             NVARCHAR(50),
     @Id                 INT             = NULL,
     @CompanyId          INT             = NULL,
-    @BranchName         NVARCHAR(100)   = NULL,
     @InvoiceNumber      NVARCHAR(20)    = NULL,
     @InvoiceDate        DATE            = NULL,
     @InvoiceType        NVARCHAR(100)   = NULL,
@@ -4334,7 +4325,7 @@ BEGIN
             SELECT NULL AS id, 'Error' AS status, 'Miscellaneous transaction not found.' AS error;
             RETURN;
         END
-        SELECT m.id, m.branch_name, m.invoice_number, m.invoice_date, m.invoice_type, m.status AS misc_status,
+        SELECT m.id, m.invoice_number, m.invoice_date, m.invoice_type, m.status AS misc_status,
                m.user_name, m.reference, m.ref_date, m.payment_mode, m.payment_gateway_ref, m.currency,
                m.customer_ledger_id, cust.name AS customer_name, cust.state_name AS customer_state,
                m.supplier_ledger_id, supp.name AS supplier_name, supp.state_name AS supplier_state,
@@ -4401,11 +4392,11 @@ BEGIN
             IF @Id IS NULL
             BEGIN
                 INSERT INTO dbo.Misc_Transactions
-                    (company_id, branch_name, invoice_number, invoice_date, invoice_type, status, user_name, reference, ref_date,
+                    (company_id, invoice_number, invoice_date, invoice_type, status, user_name, reference, ref_date,
                      payment_mode, payment_gateway_ref, currency, customer_ledger_id, supplier_ledger_id, description,
                      base_amount, other_taxes, markup, service_fee, supp_markup, supp_service_fee, total_billed, created_at, updated_at)
                 VALUES
-                    (@CompanyId, @BranchName, @InvoiceNumber, @InvoiceDate, @InvoiceType, @Status, @UserName, @Reference, @RefDate,
+                    (@CompanyId, @InvoiceNumber, @InvoiceDate, @InvoiceType, @Status, @UserName, @Reference, @RefDate,
                      @PaymentMode, @PaymentGatewayRef, ISNULL(@Currency, 'INR'), @CustLedgerId, @SuppLedgerId, @Description,
                      ISNULL(@BaseAmount, 0), ISNULL(@OtherTaxes, 0), ISNULL(@Markup, 0), ISNULL(@ServiceFee, 0), ISNULL(@SuppMarkup, 0), ISNULL(@SuppServiceFee, 0),
                      ISNULL(@TotalBilled, 0), SYSUTCDATETIME(), SYSUTCDATETIME());
@@ -4446,10 +4437,10 @@ BEGIN
                                         FROM dbo.JournalVoucher
                                         WHERE company_id = @CompanyId AND category = 'MISC' AND voucher_no LIKE 'MSC-%');
                 INSERT INTO dbo.JournalVoucher
-                    (company_id, branch_name, voucher_type, voucher_date, narration, category, voucher_no,
+                    (company_id, voucher_type, voucher_date, narration, category, voucher_no,
                      source_misc_ticket_id, total_debit, total_credit, lines_json, created_at, updated_at)
                 VALUES
-                    (@CompanyId, ISNULL(@BranchName, 'Chennai Branch'), 'Tax Invoice', @InvoiceDate, @JvNarration, 'MISC',
+                    (@CompanyId, 'Tax Invoice', @InvoiceDate, @JvNarration, 'MISC',
                      'MSC-' + CAST(@NextNum AS NVARCHAR(10)), @ResultId, @JvTotalDebit, @JvTotalCredit, '[]', SYSUTCDATETIME(), SYSUTCDATETIME());
                 SET @VoucherId = CAST(SCOPE_IDENTITY() AS INT);
             END
@@ -4665,7 +4656,7 @@ BEGIN
         FROM OPENJSON(@RowsJson) WITH (
             source_system NVARCHAR(50), doc_ref NVARCHAR(60), source_record_id NVARCHAR(100),
             ticket_status NVARCHAR(20), company_id INT,
-            branch_name NVARCHAR(100), invoice_number NVARCHAR(20), invoice_date DATE, invoice_type NVARCHAR(100),
+            invoice_number NVARCHAR(20), invoice_date DATE, invoice_type NVARCHAR(100),
             booking_mode NVARCHAR(20), booking_type NVARCHAR(50), booking_status NVARCHAR(20),
             customer_name NVARCHAR(150), supplier_name NVARCHAR(150), travel_type NVARCHAR(20), user_name NVARCHAR(100),
             currency NVARCHAR(5), roe DECIMAL(10,4), booking_given_by NVARCHAR(25), booking_reference NVARCHAR(30),
@@ -4719,7 +4710,7 @@ BEGIN
 
             INSERT INTO dbo.Ticket_Import_Staging (
                 batch_id, source_system, doc_ref, source_record_id, ticket_status, company_id,
-                branch_name, invoice_number, invoice_date, invoice_type, booking_mode, booking_type, booking_status,
+                invoice_number, invoice_date, invoice_type, booking_mode, booking_type, booking_status,
                 customer_name, supplier_name, travel_type, user_name, currency, roe, booking_given_by,
                 booking_reference, booking_ref_date, airline_pnr, gds_pnr, office_id, payment_mode, payment_gateway_ref,
                 airline_category, original_ticket_no, airline_code, airline_name, line_airline_category, flight_no,
@@ -4736,7 +4727,7 @@ BEGIN
                 tds_amount_override, supp_tds_amount_override, total_billed, raw_payload)
             SELECT
                 @BatchId, s.source_system, s.doc_ref, s.source_record_id, s.ticket_status, s.company_id,
-                s.branch_name, s.invoice_number, s.invoice_date, s.invoice_type, s.booking_mode, s.booking_type, s.booking_status,
+                s.invoice_number, s.invoice_date, s.invoice_type, s.booking_mode, s.booking_type, s.booking_status,
                 s.customer_name, s.supplier_name, s.travel_type, s.user_name, s.currency, s.roe, s.booking_given_by,
                 s.booking_reference, s.booking_ref_date, s.airline_pnr, s.gds_pnr, s.office_id, s.payment_mode, s.payment_gateway_ref,
                 s.airline_category, s.original_ticket_no, s.airline_code, s.airline_name, s.line_airline_category, s.flight_no,
@@ -4820,6 +4811,9 @@ CREATE OR ALTER PROCEDURE dbo.sp_TicketImport_Scheduler
     -- RESOLVE_PARENTS : the CURRENT live line of each Ticket No. in
     --                   @TicketNosJson (a reschedule line not yet rescheduled /
     --                   cancelled, else the original booking line) + its header.
+    -- PNR_TICKETS     : the live passenger lines of the booking / reschedule whose
+    --                   Booking Reference is @BookingReference (a Reschedule pushed
+    --                   with only its Parent PNR finds each passenger's ticket here).
     -- MARK_IMPORTED / MARK_ERROR / MARK_SKIPPED : by @DocKey.
     -- FINISH_RUN      : closes the run log row.
     @Action          NVARCHAR(30),
@@ -4829,6 +4823,7 @@ CREATE OR ALTER PROCEDURE dbo.sp_TicketImport_Scheduler
     @StuckMinutes    INT            = 30,
     @DocKey          NVARCHAR(200)  = NULL,
     @TicketNosJson   NVARCHAR(MAX)  = NULL,
+    @BookingReference NVARCHAR(30)  = NULL,
     @TargetHeaderId  INT            = NULL,
     @InvoiceNumber   NVARCHAR(20)   = NULL,
     @VoucherNo       NVARCHAR(30)   = NULL,
@@ -4925,7 +4920,6 @@ BEGIN
                -- header of the live document (h_ = header field)
                COALESCE(rt.invoice_number, t.invoice_number) AS h_invoice_number,
                COALESCE(rt.invoice_type, t.invoice_type) AS h_invoice_type,
-               COALESCE(rt.branch_name, t.branch_name) AS h_branch_name,
                COALESCE(rt.booking_type, t.booking_type) AS h_booking_type,
                COALESCE(rt.travel_type, t.travel_type) AS h_travel_type,
                COALESCE(rt.user_name, t.user_name) AS h_user_name,
@@ -5014,6 +5008,22 @@ BEGIN
         LEFT JOIN dbo.Ledgers hc ON hc.id = COALESCE(rt.customer_ledger_id, t.customer_ledger_id)
         LEFT JOIN dbo.Ledgers hs ON hs.id = COALESCE(rt.supplier_ledger_id, t.supplier_ledger_id)
         LEFT JOIN dbo.Ledgers ls ON ls.id = COALESCE(rl.supplier_ledger_id, tl.supplier_ledger_id);
+        RETURN;
+    END
+
+    IF @Action = 'PNR_TICKETS'
+    BEGIN
+        SELECT tl.ticket_no, tl.passenger_name, tl.pax_type
+        FROM dbo.AL_TicketLines tl
+        INNER JOIN dbo.AL_Tickets t ON t.id = tl.ticket_id
+        WHERE t.company_id = @CompanyId AND t.booking_reference = @BookingReference
+          AND tl.rescheduled = 0 AND tl.canceled = 0
+        UNION ALL
+        SELECT rl.ticket_no, rl.passenger_name, rl.pax_type
+        FROM dbo.Rescheduled_Al_TicketLines rl
+        INNER JOIN dbo.Rescheduled_Al_Ticket rt ON rt.id = rl.reschedule_ticket_id
+        WHERE rt.company_id = @CompanyId AND rt.booking_reference = @BookingReference
+          AND rl.rescheduled = 0 AND rl.canceled = 0;
         RETURN;
     END
 

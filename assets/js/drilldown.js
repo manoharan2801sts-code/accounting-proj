@@ -1,6 +1,6 @@
 ﻿/**
  * Voyager ERP - Drill-down modal
- * Every report screen can call VoyagerDrilldown.byLedger(...) / .byBranch(...)
+ * Every report screen can call VoyagerDrilldown.byLedger(...)
  * to zoom from a summary line down to the actual vouchers behind it, then
  * expand any voucher to see its full debit/credit detail - Tally-style zoom.
  */
@@ -50,7 +50,7 @@
             <span class="dd-vno">${v.voucher_no}</span>
             <span class="pill pill-neutral">${titleCaseLabel(v.voucher_type)}</span>
             <span class="dd-date">${fmtDate(v.voucher_date)}</span>
-            <span class="dd-narr">${v.narration || ""} <span class="text-muted-custom">- ${v.branch_name || ""}</span></span>
+            <span class="dd-narr">${v.narration || ""}</span>
             <span class="dd-amt">${fmtMoney(v.total_debit, ccy)}</span>
             <a href="${window.VoyagerEntry.zoomInUrl("voucher-entry.html", v.id, returnTo)}" class="btn-outline-brand" style="padding:0.18rem 0.45rem; font-size:0.7rem; margin-left:0.5rem; flex-shrink:0;" onclick="event.stopPropagation()">Edit</a>
           </div>
@@ -81,15 +81,6 @@
     }
     const vouchers = window.VoyagerMock.getVouchersForAccount(companyId, accountName);
     render(accountName, `${vouchers.length} voucher(s) posted to this ledger - click a row to view its debit/credit lines`, vouchers, ccy);
-  }
-
-  function byBranch(branchName, companyId, ccy) {
-    if (!window.VoyagerAPI.Store.isMockMode()) {
-      voyagerAlert("Drill-down works in Demo Mode (sample data). Connected to a real backend, this would call a filtered vouchers API - not built in this preview.", { icon: "info" });
-      return;
-    }
-    const vouchers = window.VoyagerMock.getVouchersForBranch(companyId, branchName);
-    render(branchName, `${vouchers.length} voucher(s) posted for this branch`, vouchers, ccy);
   }
 
   function renderTransactions(title, subtitle, items, ccy) {
@@ -138,5 +129,5 @@
     renderTransactions(supplierName, `${items.length} transaction(s) for this supplier`, items, ccy);
   }
 
-  window.VoyagerDrilldown = { byLedger, byBranch, byCustomer, bySupplier, close };
+  window.VoyagerDrilldown = { byLedger, byCustomer, bySupplier, close };
 })(window);
