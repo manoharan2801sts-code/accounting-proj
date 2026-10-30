@@ -8378,3 +8378,17 @@ def db_diagnostic(request):
 
     return JsonResponse(result)
 
+def trigger_agent_db_scheduler(request):
+    """
+    POST/GET /api/import/agent-db/trigger/
+    Triggers an immediate pass of both agent_db_scheduler and ticket_import.
+    """
+    from datetime import datetime
+    from . import background_scheduler
+    summary = background_scheduler.run_schedulers_now()
+    return JsonResponse({
+        "status": "ok",
+        "timestamp": datetime.now().isoformat(),
+        "summary": summary
+    })
+

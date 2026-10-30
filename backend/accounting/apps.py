@@ -10,3 +10,5 @@ class AccountingConfig(AppConfig):
         # per-request cache is listening before the first request arrives
         # (the URLconf/views otherwise only import it during that request).
         from . import sp_mysql  # noqa: F401
+        from . import background_scheduler
+        background_scheduler.start_background_scheduler()

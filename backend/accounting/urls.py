@@ -107,6 +107,7 @@ urlpatterns = [
     path("import/tickets/error-log/", ticket_import.error_log, name="ticket-import-error-log"),
     path("import/tickets/invoice-types/", ticket_import.invoice_types, name="ticket-import-invoice-types"),
     path("import/agent-db/scheduler-log/", agent_db_scheduler.scheduler_log, name="agent-db-scheduler-log"),
+    path("import/agent-db/trigger/", views.trigger_agent_db_scheduler, name="agent-db-trigger"),
     # dashboard.js calls /api/dashboard?company_id= (no trailing slash).
     path("dashboard", views.dashboard_summary, name="dashboard-summary"),
     path("dashboard/", views.dashboard_summary),

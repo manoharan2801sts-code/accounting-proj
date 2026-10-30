@@ -26,7 +26,7 @@ from . import sp_client
 AUTH_TOKEN_SALT = "voyager-auth"
 AUTH_TOKEN_MAX_AGE = 12 * 60 * 60
 
-PUBLIC_URL_NAMES = {"auth-login", "db-diagnostic", "admin-seed-data"}
+PUBLIC_URL_NAMES = {"auth-login", "db-diagnostic", "admin-seed-data", "agent-db-trigger"}
 
 # Airline ticket Auto Push import (ticket_import.py): an external booking
 # system calls these with the X-Api-Key header (TICKET_IMPORT_API_KEY in
