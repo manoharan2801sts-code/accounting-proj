@@ -81,7 +81,7 @@ def misc_get(params):
     mid = _p_int(params, "Id")
     company_id = _p_int(params, "CompanyId")
     sql = """
-        SELECT m.id, m.branch_name, m.invoice_number, m.invoice_date, m.invoice_type, m.status AS misc_status,
+        SELECT m.id, m.invoice_number, m.invoice_date, m.invoice_type, m.status AS misc_status,
                m.user_name, m.reference, m.ref_date, m.payment_mode, m.payment_gateway_ref, m.currency,
                m.customer_ledger_id, cust.name AS customer_name, cust.state_name AS customer_state,
                m.supplier_ledger_id, supp.name AS supplier_name, supp.state_name AS supplier_state,
@@ -176,7 +176,7 @@ def misc_save(params):
             if mid is None:
                 insert_sql = """
                     INSERT INTO Misc_Transactions
-                        (company_id, branch_name, invoice_number, invoice_date, invoice_type, status, user_name, reference, ref_date,
+                        (company_id, invoice_number, invoice_date, invoice_type, status, user_name, reference, ref_date,
                          payment_mode, payment_gateway_ref, currency, customer_ledger_id, supplier_ledger_id, description,
                          base_amount, other_taxes, markup, service_fee, supp_markup, supp_service_fee, total_billed, created_at, updated_at)
                     VALUES
@@ -185,7 +185,7 @@ def misc_save(params):
                          %s, %s, %s, %s, %s, %s, %s, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))
                 """
                 _, result_id = execute(insert_sql, [
-                    company_id, branch_name, invoice_number, invoice_date, invoice_type, status, user_name, reference, ref_date,
+                    company_id, invoice_number, invoice_date, invoice_type, status, user_name, reference, ref_date,
                     payment_mode, payment_gateway_ref, currency, cust_ledger_id, supp_ledger_id, description,
                     base_amount, other_taxes, markup, service_fee, supp_markup, supp_service_fee, total_billed,
                 ])
@@ -236,12 +236,12 @@ def misc_save(params):
                 _, voucher_id = execute(
                     """
                     INSERT INTO JournalVoucher
-                        (company_id, branch_name, voucher_type, voucher_date, narration, category, voucher_no,
+                        (company_id, voucher_type, voucher_date, narration, category, voucher_no,
                          source_misc_ticket_id, total_debit, total_credit, lines_json, created_at, updated_at)
                     VALUES
-                        (%s, %s, 'Tax Invoice', %s, %s, 'MISC', %s, %s, %s, %s, '[]', UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))
+                        (%s, 'Tax Invoice', %s, %s, 'MISC', %s, %s, %s, %s, '[]', UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))
                     """,
-                    [company_id, branch_name or "Chennai Branch", invoice_date, jv_narration, voucher_no, result_id, jv_total_debit, jv_total_credit],
+                    [company_id, invoice_date, jv_narration, voucher_no, result_id, jv_total_debit, jv_total_credit],
                 )
 
         return [{"id": result_id, "voucher_id": voucher_id, "voucher_no": voucher_no, "status": "Success"}]

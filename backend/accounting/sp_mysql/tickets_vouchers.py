@@ -461,7 +461,7 @@ def ticket_list_for_balance(p):
     return query("""
         SELECT
             t.id AS ticket_id, t.company_id, cust.id AS customer_id, cust.name AS customer_name, cust.state_name AS customer_state_name,
-            t.booking_reference, t.airline_pnr, t.payment_mode, t.payment_gateway_ref, t.invoice_date, t.booking_ref_date, t.branch_name,
+            t.booking_reference, t.airline_pnr, t.payment_mode, t.payment_gateway_ref, t.invoice_date, t.booking_ref_date,
             t.office_id AS ticket_office_id, t.invoice_number, v.voucher_no,
             tl.id AS line_id, tl.airline_code, tl.airline_name, tl.airline_category, tl.flight_no, tl.ticket_no, tl.passenger_name, tl.pax_type,
             tl.sector, tl.travel_date, tl.cabin, tl.travel_class, tl.fare_type,
@@ -495,7 +495,7 @@ def ticket_get_header(p):
                t.booking_status, cust.name AS customer_name, t.travel_type, t.user_name, t.currency, t.roe,
                t.booking_given_by, t.booking_reference, t.booking_ref_date, t.airline_pnr, t.gds_pnr,
                supp.name AS supplier_name, t.office_id, t.payment_mode, t.payment_gateway_ref,
-               t.airline_category, t.branch_name, 'Success' AS status
+               t.airline_category, 'Success' AS status
         FROM `AL_Tickets` t
         INNER JOIN `Ledgers` cust ON cust.id = t.customer_ledger_id
         LEFT JOIN `Ledgers` supp ON supp.id = t.supplier_ledger_id
@@ -711,13 +711,12 @@ def ticket_save(p):
                         travel_type = %s, user_name = %s, currency = COALESCE(%s, currency), roe = COALESCE(%s, roe),
                         booking_given_by = %s, booking_reference = %s, booking_ref_date = %s,
                         airline_pnr = %s, gds_pnr = %s, office_id = %s,
-                        payment_mode = %s, payment_gateway_ref = %s, airline_category = %s,
-                        branch_name = %s
+                        payment_mode = %s, payment_gateway_ref = %s, airline_category = %s
                     WHERE id = %s
                 """, [cust_ledger_id, supp_ledger_id, invoice_number, invoice_date, invoice_type,
                       booking_mode, booking_type, booking_status, travel_type, user_name, currency, roe,
                       booking_given_by, booking_reference, booking_ref_date, airline_pnr, gds_pnr, office_id,
-                      payment_mode, payment_gateway_ref, airline_category, branch_name, tid])
+                      payment_mode, payment_gateway_ref, airline_category, tid])
 
                 existing = query(
                     "SELECT id, ticket_no, rescheduled FROM `AL_TicketLines` WHERE ticket_id = %s ORDER BY id", [tid]
@@ -763,22 +762,21 @@ def ticket_save(p):
                 if query_one("SELECT 1 AS x FROM `JournalVoucher` WHERE source_ticket_id = %s LIMIT 1", [tid]):
                     execute("""
                         UPDATE `JournalVoucher`
-                        SET branch_name = %s, voucher_date = %s, narration = %s, total_debit = %s, total_credit = %s,
+                        SET voucher_date = %s, narration = %s, total_debit = %s, total_credit = %s,
                             updated_at = %s
                         WHERE source_ticket_id = %s
-                    """, [branch_name if branch_name is not None else "Chennai Branch", invoice_date, jv_narration,
-                          jv_total_debit, jv_total_credit, now, tid])
+                    """, [invoice_date, jv_narration, jv_total_debit, jv_total_credit, now, tid])
                 else:
-                    _insert_ticket_jv(cid, branch_name, invoice_date, jv_narration, tid, jv_total_debit, jv_total_credit, now)
+                    _insert_ticket_jv(cid, invoice_date, jv_narration, tid, jv_total_debit, jv_total_credit, now)
             else:
                 _, result_id = execute("""
                     INSERT INTO `AL_Tickets`
-                        (company_id, branch_name, invoice_number, invoice_date, invoice_type, booking_mode, booking_type, booking_status,
+                        (company_id, invoice_number, invoice_date, invoice_type, booking_mode, booking_type, booking_status,
                          customer_ledger_id, supplier_ledger_id, travel_type, user_name, currency, roe, booking_given_by,
                          booking_reference, booking_ref_date, airline_pnr, gds_pnr, office_id, payment_mode, payment_gateway_ref,
                          airline_category, created_at, updated_at)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                """, [cid, branch_name, invoice_number, invoice_date, invoice_type,
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """, [cid, invoice_number, invoice_date, invoice_type,
                       booking_mode if booking_mode is not None else "Manual", booking_type, booking_status,
                       cust_ledger_id, supp_ledger_id, travel_type, user_name,
                       currency if currency is not None else "INR", roe if roe is not None else Decimal(1),
@@ -788,7 +786,7 @@ def ticket_save(p):
                 was_created = True
                 for r in src_rows():
                     insert_line(result_id, r)
-                _insert_ticket_jv(cid, branch_name, invoice_date, jv_narration, result_id, jv_total_debit, jv_total_credit, now)
+                _insert_ticket_jv(cid, invoice_date, jv_narration, result_id, jv_total_debit, jv_total_credit, now)
 
         line_ids = query("SELECT id FROM `AL_TicketLines` WHERE ticket_id = %s ORDER BY id", [result_id])
         line_ids_str = ",".join(str(r["id"]) for r in line_ids) if line_ids else None
@@ -803,22 +801,21 @@ def ticket_save(p):
         return _err(_db_message(exc))
 
 
-def _insert_ticket_jv(cid, branch_name, invoice_date, narration, ticket_id, total_debit, total_credit, now):
+def _insert_ticket_jv(cid, invoice_date, narration, ticket_id, total_debit, total_credit, now):
     voucher_no = _next_jv_no(cid, "AL", "AIRLINE")
     execute("""
         INSERT INTO `JournalVoucher`
-            (company_id, branch_name, voucher_type, voucher_date, narration, category, voucher_no,
+            (company_id, voucher_type, voucher_date, narration, category, voucher_no,
              source_ticket_id, total_debit, total_credit, lines_json, created_at, updated_at)
-        VALUES (%s, %s, 'Tax Invoice', %s, %s, 'AIRLINE', %s, %s, %s, %s, '[]', %s, %s)
-    """, [cid, branch_name if branch_name is not None else "Chennai Branch", invoice_date, narration, voucher_no,
-          ticket_id, total_debit, total_credit, now, now])
+        VALUES (%s, 'Tax Invoice', %s, %s, 'AIRLINE', %s, %s, %s, %s, '[]', %s, %s)
+    """, [cid, invoice_date, narration, voucher_no, ticket_id, total_debit, total_credit, now, now])
 
 
 # ---------------------------------------------------------------------------
 # dbo.sp_Voucher
 # ---------------------------------------------------------------------------
 
-_VOUCHER_COLS = "id, voucher_no, branch_name, voucher_type, voucher_type_name, voucher_date, narration, total_debit, total_credit, lines_json"
+_VOUCHER_COLS = "id, voucher_no, voucher_type, voucher_type_name, voucher_date, narration, total_debit, total_credit, lines_json"
 
 
 def _text(rows):
@@ -990,10 +987,10 @@ def voucher_save(p):
             if vid is not None:
                 execute("""
                     UPDATE `Vouchers`
-                    SET branch_name = %s, voucher_type = %s, voucher_type_name = %s, voucher_date = %s,
+                    SET voucher_type = %s, voucher_type_name = %s, voucher_date = %s,
                         narration = %s, total_debit = %s, total_credit = %s, lines_json = %s
                     WHERE id = %s
-                """, [branch_name, vtype, voucher_type_name, voucher_date, narration, total_debit, total_credit, resolved_json, vid])
+                """, [vtype, voucher_type_name, voucher_date, narration, total_debit, total_credit, resolved_json, vid])
                 if use_manual_no:
                     execute("UPDATE `Vouchers` SET `voucher_no` = %s WHERE `id` = %s", [manual_full_no, vid])
                 result_id = vid
@@ -1022,10 +1019,10 @@ def voucher_save(p):
                 now = _now()
                 _, result_id = execute("""
                     INSERT INTO `Vouchers`
-                        (company_id, branch_name, voucher_type, voucher_type_name, voucher_date, narration, category, voucher_no,
+                        (company_id, voucher_type, voucher_type_name, voucher_date, narration, category, voucher_no,
                          total_debit, total_credit, lines_json, created_at, updated_at)
-                    VALUES (%s, %s, %s, %s, %s, %s, 'MANUAL', %s, %s, %s, %s, %s, %s)
-                """, [cid, branch_name, vtype, voucher_type_name, voucher_date, narration, vch_no,
+                    VALUES (%s, %s, %s, %s, %s, 'MANUAL', %s, %s, %s, %s, %s, %s)
+                """, [cid, vtype, voucher_type_name, voucher_date, narration, vch_no,
                       total_debit, total_credit, resolved_json, now, now])
                 result_id = int(result_id)
         rows = _text(query(f"SELECT {_VOUCHER_COLS}, 'Success' AS status FROM `Vouchers` WHERE id = %s", [result_id]))

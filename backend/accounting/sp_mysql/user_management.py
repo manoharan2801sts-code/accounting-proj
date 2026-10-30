@@ -99,19 +99,19 @@ def app_user_save(p):
         if uid is not None and query_one("SELECT 1 AS x FROM AppUsers WHERE id = %s", [uid]):
             sql = """
                 UPDATE AppUsers
-                SET full_name = %s, email = %s, role = %s, branch_name = %s,
+                SET full_name = %s, email = %s, role = %s,
                     is_super_admin = %s, is_active = %s,
                     password_hash = COALESCE(%s, password_hash), updated_at = %s
                 WHERE id = %s
             """
-            execute(sql, [full_name, email, role, branch_name, is_super_admin, is_active, password_hash, now, uid])
+            execute(sql, [full_name, email, role, is_super_admin, is_active, password_hash, now, uid])
             result_id = uid
         else:
             sql = """
-                INSERT INTO AppUsers (full_name, email, role, branch_name, is_super_admin, is_active, password_hash, created_at, updated_at)
+                INSERT INTO AppUsers (full_name, email, role, is_super_admin, is_active, password_hash, created_at, updated_at)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             """
-            _, result_id = execute(sql, [full_name, email, role, branch_name, is_super_admin, is_active, password_hash, now, now])
+            _, result_id = execute(sql, [full_name, email, role, is_super_admin, is_active, password_hash, now, now])
             was_created = True
 
         row = query_one("SELECT * FROM AppUsers WHERE id = %s", [result_id])

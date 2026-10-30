@@ -375,7 +375,7 @@ def ticket_import_stage_insert(p):
             if outcome in ("Inserted", "Refreshed"):
                 cols = [
                     "batch_id", "source_system", "doc_ref", "source_record_id", "received_at", "ticket_status",
-                    "company_id", "branch_name", "invoice_number", "invoice_date", "invoice_type", "booking_mode",
+                    "company_id", "invoice_number", "invoice_date", "invoice_type", "booking_mode",
                     "booking_type", "booking_status", "customer_name", "supplier_name", "travel_type", "user_name",
                     "currency", "roe", "booking_given_by", "booking_reference", "booking_ref_date", "airline_pnr",
                     "gds_pnr", "office_id", "payment_mode", "payment_gateway_ref", "airline_category",
@@ -395,7 +395,7 @@ def ticket_import_stage_insert(p):
                 ]
                 vals = [
                     batch_id, s_sys, d_ref, s_rec, datetime.datetime.now(datetime.timezone.utc), t_stat,
-                    cid, _p_str(r.get("branch_name"), 100), _p_str(r.get("invoice_number"), 20), to_date(r.get("invoice_date")),
+                    cid, _p_str(r.get("invoice_number"), 20), to_date(r.get("invoice_date")),
                     _p_str(r.get("invoice_type"), 100), _p_str(r.get("booking_mode"), 20), _p_str(r.get("booking_type"), 50),
                     _p_str(r.get("booking_status"), 20), _p_str(r.get("customer_name"), 150), _p_str(r.get("supplier_name"), 150),
                     _p_str(r.get("travel_type"), 20), _p_str(r.get("user_name"), 100), _p_str(r.get("currency"), 5),

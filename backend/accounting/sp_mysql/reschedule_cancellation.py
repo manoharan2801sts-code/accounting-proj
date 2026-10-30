@@ -284,7 +284,7 @@ def _rt_list_for_balance(p):
         """
         SELECT
             rt.id AS reschedule_ticket_id, rt.company_id, cust.id AS customer_id, cust.name AS customer_name, cust.state_name AS customer_state_name,
-            rt.booking_reference, rt.airline_pnr, rt.payment_mode, rt.payment_gateway_ref, rt.invoice_date, rt.booking_ref_date, rt.branch_name,
+            rt.booking_reference, rt.airline_pnr, rt.payment_mode, rt.payment_gateway_ref, rt.invoice_date, rt.booking_ref_date,
             rt.office_id AS ticket_office_id, rt.invoice_number, v.voucher_no,
             rl.id AS line_id, rl.airline_code, rl.airline_name, rl.airline_category, rl.flight_no, rl.ticket_no, rl.passenger_name, rl.pax_type,
             rl.sector, rl.travel_date, rl.cabin, rl.travel_class, rl.fare_type,
@@ -653,14 +653,13 @@ def _rt_save(p):
                     travel_type = %s, user_name = %s, currency = %s, roe = IFNULL(%s, roe),
                     booking_given_by = %s, booking_reference = %s, booking_ref_date = %s,
                     airline_pnr = %s, gds_pnr = %s, office_id = %s,
-                    payment_mode = %s, payment_gateway_ref = %s, airline_category = %s,
-                    branch_name = %s
+                    payment_mode = %s, payment_gateway_ref = %s, airline_category = %s
                 WHERE id = %s
                 """,
                 [cust_ledger_id, supp_ledger_id, invoice_number, invoice_date, invoice_type,
                  booking_mode, booking_type, booking_status, travel_type, user_name, currency_or_default, roe,
                  booking_given_by, booking_reference, booking_ref_date, airline_pnr, gds_pnr, office_id,
-                 payment_mode, payment_gateway_ref, airline_category, branch_name, rid],
+                 payment_mode, payment_gateway_ref, airline_category, rid],
             )
             # A line dropped from this resubmission goes back to eligible.
             new_orig = {j["original_ticket_line_id"] for j in _openjson(elems, [("original_ticket_line_id", "int")])}
@@ -680,13 +679,13 @@ def _rt_save(p):
             _, result_id = execute(
                 """
                 INSERT INTO `Rescheduled_Al_Ticket`
-                    (company_id, branch_name, original_ticket_id, invoice_number, invoice_date, invoice_type, booking_mode, booking_type, booking_status,
+                    (company_id, original_ticket_id, invoice_number, invoice_date, invoice_type, booking_mode, booking_type, booking_status,
                      customer_ledger_id, supplier_ledger_id, travel_type, user_name, currency, roe, booking_given_by,
                      booking_reference, booking_ref_date, airline_pnr, gds_pnr, office_id, payment_mode, payment_gateway_ref,
                      airline_category, created_at, updated_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
-                [company_id, branch_name, original_ticket_id, invoice_number, invoice_date, invoice_type,
+                [company_id, original_ticket_id, invoice_number, invoice_date, invoice_type,
                  booking_mode if booking_mode is not None else "Manual", booking_type, booking_status,
                  cust_ledger_id, supp_ledger_id, travel_type, user_name, currency_or_default,
                  roe if roe is not None else Decimal(1), booking_given_by,
@@ -716,12 +715,11 @@ def _rt_save(p):
         if set_rtl:
             execute(f"UPDATE `Rescheduled_Al_TicketLines` SET `rescheduled` = 1 WHERE `id` IN ({_in(len(set_rtl))})", set_rtl)
 
-        jv_branch = branch_name if branch_name is not None else "Chennai Branch"
         if query_one("SELECT 1 AS x FROM `JournalVoucher` WHERE `source_reschedule_ticket_id` = %s LIMIT 1", [result_id]):
             execute(
-                "UPDATE `JournalVoucher` SET `branch_name` = %s, `voucher_date` = %s, `narration` = %s, "
+                "UPDATE `JournalVoucher` SET `voucher_date` = %s, `narration` = %s, "
                 "`total_debit` = %s, `total_credit` = %s, `updated_at` = %s WHERE `source_reschedule_ticket_id` = %s",
-                [jv_branch, invoice_date, jv_narration, jv_total_debit, jv_total_credit, _utcnow(), result_id],
+                [invoice_date, jv_narration, jv_total_debit, jv_total_credit, _utcnow(), result_id],
             )
         else:
             max_vch = query_one(
@@ -733,10 +731,10 @@ def _rt_save(p):
             next_num = int((max_vch and max_vch.get("m")) or 0) + 1
             now2 = _utcnow()
             execute(
-                "INSERT INTO `JournalVoucher` (company_id, branch_name, voucher_type, voucher_date, narration, category, voucher_no, "
+                "INSERT INTO `JournalVoucher` (company_id, voucher_type, voucher_date, narration, category, voucher_no, "
                 "source_reschedule_ticket_id, total_debit, total_credit, lines_json, created_at, updated_at) "
-                "VALUES (%s, %s, 'Tax Invoice', %s, %s, 'AIRLINE_RESCHEDULE', %s, %s, %s, %s, '[]', %s, %s)",
-                [company_id, jv_branch, invoice_date, jv_narration, "ALR-" + str(next_num), result_id,
+                "VALUES (%s, 'Tax Invoice', %s, %s, 'AIRLINE_RESCHEDULE', %s, %s, %s, %s, '[]', %s, %s)",
+                [company_id, invoice_date, jv_narration, "ALR-" + str(next_num), result_id,
                  jv_total_debit, jv_total_credit, now2, now2],
             )
         return result_id, was_created
@@ -789,7 +787,7 @@ def _ct_get_header(p):
                ct.travel_type, ct.user_name, ct.currency, ct.roe, ct.booking_given_by,
                ct.cancellation_reference, ct.cancellation_ref_date, ct.airline_pnr, ct.gds_pnr,
                supp.name AS supplier_name, ct.office_id, ct.payment_mode, ct.payment_gateway_ref,
-               ct.airline_category, ct.branch_name, ct.customer_ledger_id,
+               ct.airline_category, ct.customer_ledger_id,
                jv.id AS voucher_id, jv.voucher_no, jv.total_debit AS jv_total_debit, jv.total_credit AS jv_total_credit,
                'Success' AS status
         FROM `Cancellation_AL_Tickets` ct
@@ -932,13 +930,13 @@ def _next_alc(company_id):
     )["n"] + 1
 
 
-def _insert_cx_jv(company_id, branch_name, voucher_date, narration, cx_id, debit, credit):
+def _insert_cx_jv(company_id, voucher_date, narration, cx_id, debit, credit):
     now = _utcnow()
     execute(
-        "INSERT INTO `JournalVoucher` (company_id, branch_name, voucher_type, voucher_date, narration, category, voucher_no, "
+        "INSERT INTO `JournalVoucher` (company_id, voucher_type, voucher_date, narration, category, voucher_no, "
         "source_cancellation_ticket_id, total_debit, total_credit, lines_json, created_at, updated_at) "
-        "VALUES (%s, %s, 'Tax Invoice', %s, %s, 'AIRLINE_CANCELLATION', %s, %s, %s, %s, '[]', %s, %s)",
-        [company_id, branch_name if branch_name is not None else "Chennai Branch", voucher_date, narration,
+        "VALUES (%s, 'Tax Invoice', %s, %s, 'AIRLINE_CANCELLATION', %s, %s, %s, %s, '[]', %s, %s)",
+        [company_id, voucher_date, narration,
          "ALC-" + str(_next_alc(company_id)), cx_id, debit, credit, now, now],
     )
 
@@ -1055,13 +1053,13 @@ def _ct_save(p):
         _, result_id = execute(
             """
             INSERT INTO `Cancellation_AL_Tickets`
-                (company_id, branch_name, original_ticket_id, invoice_number, invoice_date, invoice_type, booking_mode, booking_type, booking_status,
+                (company_id, original_ticket_id, invoice_number, invoice_date, invoice_type, booking_mode, booking_type, booking_status,
                  customer_ledger_id, supplier_ledger_id, travel_type, user_name, currency, roe, booking_given_by,
                  cancellation_reference, cancellation_ref_date, airline_pnr, gds_pnr, office_id, payment_mode, payment_gateway_ref,
                  airline_category, created_at, updated_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
-            [company_id, branch_name, original_ticket_id, invoice_number, invoice_date, invoice_type,
+            [company_id, original_ticket_id, invoice_number, invoice_date, invoice_type,
              booking_mode if booking_mode is not None else "Manual", booking_type, booking_status,
              cust_ledger_id, supp_ledger_id, travel_type, user_name, currency if currency is not None else "INR",
              roe if roe is not None else Decimal(1), booking_given_by,
@@ -1091,7 +1089,7 @@ def _ct_save(p):
         if set_rl:
             execute(f"UPDATE `Rescheduled_Al_TicketLines` SET `canceled` = 1 WHERE `id` IN ({_in(len(set_rl))})", set_rl)
 
-        _insert_cx_jv(company_id, branch_name, invoice_date, jv_narration, result_id, jv_total_debit, jv_total_credit)
+        _insert_cx_jv(company_id, invoice_date, jv_narration, result_id, jv_total_debit, jv_total_credit)
         return result_id
 
     result_id, err = _run_try(work)
@@ -1170,9 +1168,8 @@ def _ct_update(p):
             pen = [j[c] if j[c] is not None else Decimal("0.00") for c in _CX_PENALTY_COLS]
             execute(upd_sql, [j[c] for c in _CT_UPDATE_PLAIN_COLS] + pen + [now, j["id"], cid])
 
-        hdr = query_one("SELECT `invoice_date`, `branch_name` FROM `Cancellation_AL_Tickets` WHERE `id` = %s", [cid])
+        hdr = query_one("SELECT `invoice_date` FROM `Cancellation_AL_Tickets` WHERE `id` = %s", [cid])
         cx_invoice_date = hdr["invoice_date"] if hdr else None
-        cx_branch_name = hdr["branch_name"] if hdr else None
         if query_one("SELECT 1 AS x FROM `JournalVoucher` WHERE `source_cancellation_ticket_id` = %s LIMIT 1", [cid]):
             execute(
                 "UPDATE `JournalVoucher` SET `voucher_date` = %s, `narration` = %s, `total_debit` = %s, "
@@ -1180,7 +1177,7 @@ def _ct_update(p):
                 [cx_invoice_date, jv_narration, jv_total_debit, jv_total_credit, _utcnow(), cid],
             )
         else:
-            _insert_cx_jv(company_id, cx_branch_name, cx_invoice_date, jv_narration, cid, jv_total_debit, jv_total_credit)
+            _insert_cx_jv(company_id, cx_invoice_date, jv_narration, cid, jv_total_debit, jv_total_credit)
 
     _, err = _run_try(work)
     if err:

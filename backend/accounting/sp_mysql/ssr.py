@@ -115,7 +115,7 @@ def ssr_ticket_get_header(params):
         "SELECT st.id, st.original_ticket_id, st.source_reschedule_ticket_id, st.invoice_number, st.invoice_date, "
         "st.invoice_type, st.booking_mode, st.booking_status, cust.name AS customer_name, st.customer_ledger_id, "
         "cust.state_name AS customer_state, st.travel_type, st.user_name, st.currency, st.roe, "
-        "st.ssr_reference, st.ssr_ref_date, st.airline_pnr, st.gds_pnr, st.payment_mode, st.payment_gateway_ref, st.branch_name, "
+        "st.ssr_reference, st.ssr_ref_date, st.airline_pnr, st.gds_pnr, st.payment_mode, st.payment_gateway_ref, "
         "ot.invoice_number AS original_invoice_number, rt.invoice_number AS source_reschedule_invoice_number, "
         "jv.id AS voucher_id, jv.voucher_no, jv.total_debit AS jv_total_debit, jv.total_credit AS jv_total_credit, "
         "'Success' AS status "
@@ -239,13 +239,13 @@ def ssr_ticket_save(params):
             if ssr_id is None:
                 _, result_id = execute(
                     "INSERT INTO `SSR_AL_Tickets` "
-                    "(`company_id`, `branch_name`, `original_ticket_id`, `source_reschedule_ticket_id`, "
+                    "(`company_id`, `original_ticket_id`, `source_reschedule_ticket_id`, "
                     "`invoice_number`, `invoice_date`, `invoice_type`, `booking_mode`, `booking_status`, "
                     "`customer_ledger_id`, `travel_type`, `user_name`, `currency`, `roe`, "
                     "`ssr_reference`, `ssr_ref_date`, `airline_pnr`, `gds_pnr`, `payment_mode`, `payment_gateway_ref`, `created_at`, `updated_at`) "
                     "VALUES (%s, %s, %s, %s, %s, %s, %s, 'Manual', 'SSR Updated', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
                     [
-                        company_id, branch_name, original_ticket_id, source_reschedule_ticket_id,
+                        company_id, original_ticket_id, source_reschedule_ticket_id,
                         invoice_number, invoice_date, invoice_type,
                         cust_ledger_id, travel_type, user_name, currency, roe,
                         ssr_reference, ssr_ref_date, airline_pnr, gds_pnr, payment_mode, payment_gateway_ref, now, now,
@@ -343,11 +343,11 @@ def ssr_ticket_save(params):
                 voucher_no = f"ALS-{max_n + 1}"
                 _, voucher_id = execute(
                     "INSERT INTO `JournalVoucher` "
-                    "(`company_id`, `branch_name`, `voucher_type`, `voucher_date`, `narration`, `category`, "
+                    "(`company_id`, `voucher_type`, `voucher_date`, `narration`, `category`, "
                     "`voucher_no`, `source_ssr_ticket_id`, `total_debit`, `total_credit`, `lines_json`, `created_at`, `updated_at`) "
-                    "VALUES (%s, %s, 'Tax Invoice', %s, %s, 'AIRLINE_SSR', %s, %s, %s, %s, '[]', %s, %s)",
+                    "VALUES (%s, 'Tax Invoice', %s, %s, 'AIRLINE_SSR', %s, %s, %s, %s, '[]', %s, %s)",
                     [
-                        company_id, branch_name, invoice_date, jv_narration,
+                        company_id, invoice_date, jv_narration,
                         voucher_no, result_id, jv_total_debit, jv_total_credit, now, now,
                     ],
                 )
