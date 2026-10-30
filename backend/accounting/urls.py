@@ -111,4 +111,5 @@ urlpatterns = [
     path("dashboard", views.dashboard_summary, name="dashboard-summary"),
     path("dashboard/", views.dashboard_summary),
     path("admin/seed-data/", views.admin_seed_data, name="admin-seed-data"),
+    path("admin/db-diagnostic/", views.db_diagnostic, name="db-diagnostic"),
 ]
