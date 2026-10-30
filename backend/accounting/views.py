@@ -599,6 +599,16 @@ def accounts_list(request):
     if not company_id:
         return JsonResponse({"error": "company_id is required"}, status=400)
 
+    try:
+        return _accounts_list_inner(request, company_id)
+    except Exception as exc:
+        import traceback
+        import logging
+        logging.getLogger(__name__).exception("accounts_list error: %s", exc)
+        return JsonResponse({"error": str(exc), "traceback": traceback.format_exc()}, status=500)
+
+
+def _accounts_list_inner(request, company_id):
     rows = []
     for g in LedgerGroup.objects.filter(company_id=company_id):
         rows.append({
