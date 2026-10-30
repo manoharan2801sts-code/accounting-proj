@@ -8284,3 +8284,21 @@ def airline_dropdowns(request):
         if r["is_default"]:
             lst["default"] = r["name"]
     return JsonResponse(lists)
+
+def admin_seed_data(request):
+    """
+    POST/GET /api/admin/seed-data/
+    Seeds initial database records from converted_inserts.sql into the active database.
+    """
+    try:
+        from load_initial_data import load_data
+    except ImportError:
+        import sys
+        from pathlib import Path
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+        from load_initial_data import load_data
+
+    force = request.GET.get("force", "true").lower() in ("true", "1", "yes")
+    result = load_data(force=force)
+    return JsonResponse(result)
+

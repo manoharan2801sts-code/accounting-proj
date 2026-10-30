@@ -404,15 +404,15 @@ def load_data(force=False):
         with connection.cursor() as cursor:
             cursor.execute("SELECT COUNT(*) FROM `Ledgers`;")
             cnt = cursor.fetchone()[0]
-            ssr_cnt = 0
+            ticket_cnt = 0
             try:
-                cursor.execute("SELECT COUNT(*) FROM `SSR_AL_Tickets`;")
-                ssr_cnt = cursor.fetchone()[0]
+                cursor.execute("SELECT COUNT(*) FROM `AL_Tickets`;")
+                ticket_cnt = cursor.fetchone()[0]
             except Exception:
-                ssr_cnt = 0
+                ticket_cnt = 0
 
-            if cnt > 5 and ssr_cnt > 0 and not force:
-                print(f"[OK] Database already has {cnt} ledgers and {ssr_cnt} SSR tickets. Data is ready!")
+            if cnt > 5 and ticket_cnt > 0 and not force:
+                print(f"[OK] Database already has {cnt} ledgers and {ticket_cnt} tickets. Data is ready!")
                 try:
                     from django.contrib.auth.hashers import make_password
                     pwd_hash = make_password("admin123")

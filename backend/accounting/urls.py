@@ -110,4 +110,5 @@ urlpatterns = [
     # dashboard.js calls /api/dashboard?company_id= (no trailing slash).
     path("dashboard", views.dashboard_summary, name="dashboard-summary"),
     path("dashboard/", views.dashboard_summary),
+    path("admin/seed-data/", views.admin_seed_data, name="admin-seed-data"),
 ]
