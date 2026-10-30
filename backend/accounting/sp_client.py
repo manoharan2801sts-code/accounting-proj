@@ -998,10 +998,59 @@ def ticket_chain_lock_message(company_id, ticket_id=None, reschedule_id=None):
     """Why a Booking (ticket_id) / Reschedule (reschedule_id) can't be edited -
     the later processes built on it (dbo.fn_TicketChainLock) - or None when free."""
     from django.db import connection
+    if connection.vendor == "microsoft":
+        with connection.cursor() as cur:
+            cur.execute("SELECT message FROM dbo.fn_TicketChainLock(%s, %s, %s)", [company_id, ticket_id, reschedule_id])
+            row = cur.fetchone()
+        return row[0] if row else None
+
+    # MySQL / TiDB compatibility: emulate fn_TicketChainLock in Python
+    chain = []
     with connection.cursor() as cur:
-        cur.execute("SELECT message FROM dbo.fn_TicketChainLock(%s, %s, %s)", [company_id, ticket_id, reschedule_id])
-        row = cur.fetchone()
-    return row[0] if row else None
+        if ticket_id is not None:
+            cur.execute("SELECT 'Reschedule', invoice_number FROM `Rescheduled_Al_Ticket` WHERE company_id = %s AND original_ticket_id = %s", [company_id, ticket_id])
+            for k, inv in cur.fetchall():
+                chain.append(f"{k} {inv}")
+            cur.execute("SELECT 'Cancellation', invoice_number FROM `Cancellation_AL_Tickets` WHERE company_id = %s AND original_ticket_id = %s", [company_id, ticket_id])
+            for k, inv in cur.fetchall():
+                chain.append(f"{k} {inv}")
+            cur.execute("SELECT 'SSR Updation', invoice_number FROM `SSR_AL_Tickets` WHERE company_id = %s AND original_ticket_id = %s", [company_id, ticket_id])
+            for k, inv in cur.fetchall():
+                chain.append(f"{k} {inv}")
+        elif reschedule_id is not None:
+            cur.execute("""
+                SELECT DISTINCT 'Reschedule', r2.invoice_number
+                FROM `Rescheduled_Al_TicketLines` l2
+                INNER JOIN `Rescheduled_Al_Ticket` r2 ON r2.id = l2.reschedule_ticket_id
+                WHERE r2.id <> %s
+                  AND l2.based_on_reschedule_line_id IN (SELECT id FROM `Rescheduled_Al_TicketLines` WHERE reschedule_ticket_id = %s)
+            """, [reschedule_id, reschedule_id])
+            for k, inv in cur.fetchall():
+                chain.append(f"{k} {inv}")
+            cur.execute("SELECT 'SSR Updation', invoice_number FROM `SSR_AL_Tickets` WHERE company_id = %s AND source_reschedule_ticket_id = %s", [company_id, reschedule_id])
+            for k, inv in cur.fetchall():
+                chain.append(f"{k} {inv}")
+            cur.execute("""
+                SELECT 'Cancellation', c.invoice_number FROM `Cancellation_AL_Tickets` c
+                WHERE c.company_id = %s
+                  AND c.original_ticket_id = (SELECT original_ticket_id FROM `Rescheduled_Al_Ticket` WHERE id = %s)
+            """, [company_id, reschedule_id])
+            for k, inv in cur.fetchall():
+                chain.append(f"{k} {inv}")
+            cur.execute("""
+                SELECT 'Cancellation', c.invoice_number
+                FROM `Cancellation_Al_TicketLines` cl
+                INNER JOIN `Cancellation_AL_Tickets` c ON c.id = cl.cancellation_ticket_id
+                WHERE cl.reschedule_line_id IN (SELECT id FROM `Rescheduled_Al_TicketLines` WHERE reschedule_ticket_id = %s)
+            """, [reschedule_id])
+            for k, inv in cur.fetchall():
+                chain.append(f"{k} {inv}")
+
+    if not chain:
+        return None
+    used_in = ", ".join(sorted(set(chain)))
+    kind = "Reschedule" if reschedule_id is not None else "Booking"
+    return f"This {kind} cannot be edited - it is already used in {used_in}. A ticket that has a Reschedule, Cancellation or SSR Updation built on it is locked."
 
 
 def misc_list(company_id):
