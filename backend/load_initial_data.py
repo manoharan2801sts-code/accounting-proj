@@ -417,9 +417,9 @@ def load_data(force=False):
                     from django.contrib.auth.hashers import make_password
                     pwd_hash = make_password("admin123")
                     cursor.execute("""
-                        INSERT INTO `AppUsers` (`full_name`, `email`, `role`, `branch_name`, `is_super_admin`, `is_active`, `password_hash`, `created_at`, `updated_at`)
-                        VALUES ('Ananya Krishnan', 'ananya.krishnan@travelagency.com', 'Administrator', 'Delhi HQ', 1, 1, %s, NOW(), NOW()),
-                               ('Administrator', 'admin@travelagency.com', 'Super Admin', 'Delhi HQ', 1, 1, %s, NOW(), NOW())
+                        INSERT INTO `AppUsers` (`full_name`, `email`, `role`, `is_super_admin`, `is_active`, `password_hash`, `created_at`, `updated_at`)
+                        VALUES ('Ananya Krishnan', 'ananya.krishnan@travelagency.com', 'Administrator', 1, 1, %s, NOW(), NOW()),
+                               ('Administrator', 'admin@travelagency.com', 'Super Admin', 1, 1, %s, NOW(), NOW())
                         ON DUPLICATE KEY UPDATE `is_super_admin` = 1, `is_active` = 1, `password_hash` = VALUES(`password_hash`);
                     """, [pwd_hash, pwd_hash])
                     print("[OK] Seeded/updated Super Admin users with admin123 password.")
@@ -494,9 +494,9 @@ def load_data(force=False):
             from django.contrib.auth.hashers import make_password
             pwd_hash = make_password("admin123")
             cursor.execute("""
-                INSERT INTO `AppUsers` (`full_name`, `email`, `role`, `branch_name`, `is_super_admin`, `is_active`, `password_hash`, `created_at`, `updated_at`)
-                VALUES ('Ananya Krishnan', 'ananya.krishnan@travelagency.com', 'Administrator', 'Delhi HQ', 1, 1, %s, NOW(), NOW()),
-                       ('Administrator', 'admin@travelagency.com', 'Super Admin', 'Delhi HQ', 1, 1, %s, NOW(), NOW())
+                INSERT INTO `AppUsers` (`full_name`, `email`, `role`, `is_super_admin`, `is_active`, `password_hash`, `created_at`, `updated_at`)
+                VALUES ('Ananya Krishnan', 'ananya.krishnan@travelagency.com', 'Administrator', 1, 1, %s, NOW(), NOW()),
+                       ('Administrator', 'admin@travelagency.com', 'Super Admin', 1, 1, %s, NOW(), NOW())
                 ON DUPLICATE KEY UPDATE `is_super_admin` = 1, `is_active` = 1, `password_hash` = VALUES(`password_hash`);
             """, [pwd_hash, pwd_hash])
         except Exception as e:

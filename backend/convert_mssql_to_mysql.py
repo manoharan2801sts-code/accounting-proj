@@ -69,12 +69,32 @@ def convert_insert_statement(line):
     cols_raw = m.group(2)
     vals_raw = m.group(3)
 
-    # Format columns: [col] -> `col`
-    cols = [f"`{c.strip().strip('[]`')}`" for c in cols_raw.split(",") if c.strip()]
-    cols_str = ", ".join(cols)
+    raw_col_list = [c.strip().strip('[]`') for c in cols_raw.split(",") if c.strip()]
+    vals_parts = []
+    cur = []
+    in_quote = False
+    for char in vals_raw.strip():
+        if char == "'" and (not cur or cur[-1] != "\\"):
+            in_quote = not in_quote
+        if char == "," and not in_quote:
+            vals_parts.append("".join(cur).strip())
+            cur = []
+        else:
+            cur.append(char)
+    if cur:
+        vals_parts.append("".join(cur).strip())
 
-    # Convert values
-    converted_vals = convert_val(vals_raw.strip())
+    filtered_cols = []
+    filtered_vals = []
+    for idx_c, col_name in enumerate(raw_col_list):
+        if col_name.lower() == 'branch_name':
+            continue
+        filtered_cols.append(f"`{col_name}`")
+        if idx_c < len(vals_parts):
+            filtered_vals.append(convert_val(vals_parts[idx_c]))
+
+    cols_str = ", ".join(filtered_cols)
+    converted_vals = ", ".join(filtered_vals)
 
     return f"INSERT INTO `{tbl}` ({cols_str}) VALUES ({converted_vals});"
 
