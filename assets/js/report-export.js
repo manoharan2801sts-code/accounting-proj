@@ -212,7 +212,7 @@
     if (!id) return {};
     if (companyCache && String(companyCache.id) === String(id)) return companyCache;
     try {
-      const res = await fetch(`http://127.0.0.1:8000/api/company-master/?id=${id}`);
+      const res = await fetch(`/api/company-master/?id=${id}`);
       if (res.ok) companyCache = await res.json();
     } catch (_) { /* backend unreachable - print without the address */ }
     return companyCache || {};

@@ -1,6 +1,6 @@
 (function () {
-  const VOUCHER_TYPE_API = "http://127.0.0.1:8000/api/voucher-type/";
-  const AUTO_PUSH_API = "http://127.0.0.1:8000/api/import/tickets/invoice-types/";
+  const VOUCHER_TYPE_API = "/api/voucher-type/";
+  const AUTO_PUSH_API = "/api/import/tickets/invoice-types/";
   let activeCompanyId;
   let editingId = null; // null = creating new, number = editing that Voucher Type's id
 

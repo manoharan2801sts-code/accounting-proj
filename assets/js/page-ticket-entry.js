@@ -42,10 +42,10 @@
   let editLockMessage = null;
   let editLockBypass = false; // Super Admin - may edit anyway, after a warning
   let voucherTypes = []; // active Voucher Types for the active company - drives the Invoice Type dropdown + Invoice Number auto-numbering
-  const VOUCHER_TYPE_API = "http://127.0.0.1:8000/api/voucher-type/";
+  const VOUCHER_TYPE_API = "/api/voucher-type/";
   let fopMasterCards = []; // active FOP Master cards for the active company, refreshed by populateFopOptions
   let pgMasterGateways = []; // PG Master gateways for the active company, refreshed by populatePgOptions
-  const PG_MASTER_EFFECTIVE_API = "http://127.0.0.1:8000/api/pg-master/effective/";
+  const PG_MASTER_EFFECTIVE_API = "/api/pg-master/effective/";
   const pgEffectiveCache = new Map(); // `${gatewayName}|${asOfDateISO}` -> resolved snapshot (or null), so re-renders don't refetch
   let passengers = []; // array of passenger objects - source of truth for the register table
   let editingIndex = null;
@@ -286,8 +286,8 @@
   // ============================================================
   // Customers / Suppliers - real backend
   // ============================================================
-  const CUSTOMERS_API = "http://127.0.0.1:8000/api/customers/";
-  const SUPPLIERS_API = "http://127.0.0.1:8000/api/suppliers/";
+  const CUSTOMERS_API = "/api/customers/";
+  const SUPPLIERS_API = "/api/suppliers/";
 
   async function populateRefs(companyId) {
     const ref = window.VoyagerMock.getReferenceData(companyId);
@@ -333,7 +333,7 @@
   // for the PG Receipts tab's own copy of that same comparison).
   let companyState = "";
   let companyMaster = null; // full Company Master record - the printed invoice's letterhead
-  const COMPANY_MASTER_API = "http://127.0.0.1:8000/api/company-master/";
+  const COMPANY_MASTER_API = "/api/company-master/";
   async function populateCompanyState(companyId) {
     try {
       const res = await fetch(`${COMPANY_MASTER_API}?id=${companyId}`);
@@ -362,7 +362,7 @@
   // rows (see renderPgReceiptsTab), same convention as the backend's
   // mapped_ledger() in views._compute_jv_lines.
   let mappedFieldLedgerName = {};
-  const MASTER_MAPPING_API = "http://127.0.0.1:8000/api/master-mapping/";
+  const MASTER_MAPPING_API = "/api/master-mapping/";
   async function populateMappedFieldNames(companyId) {
     try {
       // Ledger Mapping in force on this document's Invoice Date (effective
@@ -447,7 +447,7 @@
 
   // Gateway Ref dropdown - lists PG Master's active Payment Gateway Names
   // (same idea as the FOP Card Number dropdown pulling from FOP Master).
-  const PG_MASTER_API = "http://127.0.0.1:8000/api/pg-master/";
+  const PG_MASTER_API = "/api/pg-master/";
   async function populatePgOptions(companyId) {
     try {
       const res = await fetch(`${PG_MASTER_API}?company_id=${companyId}`);
@@ -552,7 +552,7 @@
   // FOP dropdown starts Cash-only; "Own Card"/"Client Card" are only added
   // when FOP Master (fop-master.html) has at least one ACTIVE card of that
   // type - no active cards at all means the dropdown stays just "Cash".
-  const FOP_MASTER_API = "http://127.0.0.1:8000/api/fop-master/";
+  const FOP_MASTER_API = "/api/fop-master/";
   async function populateFopOptions(companyId) {
     const fopSelect = document.getElementById("modal-fop");
     const current = fopSelect.value;
@@ -621,7 +621,7 @@
   // (office ID, airline category, travel type, or a sector's cabin/fare
   // type via Save in the Add Sector popup). No exact match -> the Supplier
   // Commission fields are cleared, not left showing a stale value.
-  const SUPPLIER_RULES_API = "http://127.0.0.1:8000/api/supplier-commission-rules/";
+  const SUPPLIER_RULES_API = "/api/supplier-commission-rules/";
   function clearSupplierCommissionAutofill() {
     document.getElementById("modal-supp-comm-on").value = "";
     document.getElementById("modal-supp-comm-type").value = "";
@@ -2999,10 +2999,10 @@
       // Saved voucher only while VIEWING - once Edit is clicked, preview
       // the on-screen (unsaved) figures live instead.
       if (editId && viewMode) {
-        res = await fetch(`http://127.0.0.1:8000/api/tickets/${editId}/jv-preview/?company_id=${activeCompanyId}`);
+        res = await fetch(`/api/tickets/${editId}/jv-preview/?company_id=${activeCompanyId}`);
       } else {
         if (passengers.length === 0) throw new Error("Add at least one passenger (via Proceed ->) to preview the JV.");
-        res = await fetch("http://127.0.0.1:8000/api/tickets/jv-preview-draft/", {
+        res = await fetch("/api/tickets/jv-preview-draft/", {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify(buildTicketPayload()),
         });
@@ -3011,7 +3011,7 @@
       if (!res.ok) throw new Error(jv.error || "Could not compute JV.");
       if (editId && !viewMode) {
         jv.editing_saved = true;
-        jv.voucher_no = await savedVoucherNo(`http://127.0.0.1:8000/api/tickets/${editId}/jv-preview/?company_id=${activeCompanyId}`);
+        jv.voucher_no = await savedVoucherNo(`/api/tickets/${editId}/jv-preview/?company_id=${activeCompanyId}`);
       }
       if (seq !== jvLoadSeq) return; // a newer preview is on its way
       await renderJvPreview(jv);
@@ -3163,10 +3163,10 @@
     try {
       let res;
       if (editingRescheduleId && viewMode) {
-        res = await fetch(`http://127.0.0.1:8000/api/reschedule-tickets/${editingRescheduleId}/jv-preview/?company_id=${activeCompanyId}`);
+        res = await fetch(`/api/reschedule-tickets/${editingRescheduleId}/jv-preview/?company_id=${activeCompanyId}`);
       } else {
         if (passengers.length === 0) throw new Error("Fill in the Reschedule PNR Details passenger to preview the JV.");
-        res = await fetch("http://127.0.0.1:8000/api/reschedule-tickets/jv-preview-draft/", {
+        res = await fetch("/api/reschedule-tickets/jv-preview-draft/", {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify(buildTicketPayload()),
         });
@@ -3175,7 +3175,7 @@
       if (!res.ok) throw new Error(jv.error || "Could not compute JV.");
       if (editingRescheduleId && !viewMode) {
         jv.editing_saved = true;
-        jv.voucher_no = await savedVoucherNo(`http://127.0.0.1:8000/api/reschedule-tickets/${editingRescheduleId}/jv-preview/?company_id=${activeCompanyId}`);
+        jv.voucher_no = await savedVoucherNo(`/api/reschedule-tickets/${editingRescheduleId}/jv-preview/?company_id=${activeCompanyId}`);
       }
       if (seq !== jvLoadSeq) return; // a newer preview is on its way
       await renderRescheduleJvPreview(jv);
@@ -3213,10 +3213,10 @@
     try {
       let res;
       if (cxEditSavedCancellationId && viewMode) {
-        res = await fetch(`http://127.0.0.1:8000/api/cancellation-tickets/${cxEditSavedCancellationId}/jv-preview/?company_id=${activeCompanyId}`);
+        res = await fetch(`/api/cancellation-tickets/${cxEditSavedCancellationId}/jv-preview/?company_id=${activeCompanyId}`);
       } else {
         if (passengers.length === 0) throw new Error("Pick a passenger (via New ->) to preview the JV.");
-        res = await fetch("http://127.0.0.1:8000/api/cancellation-tickets/jv-preview-draft/", {
+        res = await fetch("/api/cancellation-tickets/jv-preview-draft/", {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify(buildCancellationPreviewPayload()),
         });
@@ -3225,7 +3225,7 @@
       if (!res.ok) throw new Error(jv.error || "Could not compute JV.");
       if (cxEditSavedCancellationId && !viewMode) {
         jv.editing_saved = true;
-        jv.voucher_no = await savedVoucherNo(`http://127.0.0.1:8000/api/cancellation-tickets/${cxEditSavedCancellationId}/jv-preview/?company_id=${activeCompanyId}`);
+        jv.voucher_no = await savedVoucherNo(`/api/cancellation-tickets/${cxEditSavedCancellationId}/jv-preview/?company_id=${activeCompanyId}`);
       }
       if (seq !== jvLoadSeq) return; // a newer preview is on its way
       await renderCancellationJvPreview(jv);
@@ -3458,10 +3458,10 @@
     // Cancellations instead - the whole point is to show ONLY already-
     // cancelled tickets here, not the full tickets list.
     const findApi = rescheduleMode
-      ? `http://127.0.0.1:8000/api/reschedule-tickets/list/?company_id=${activeCompanyId}`
+      ? `/api/reschedule-tickets/list/?company_id=${activeCompanyId}`
       : cancellationMode
-      ? `http://127.0.0.1:8000/api/cancellation-tickets/list/?company_id=${activeCompanyId}`
-      : `http://127.0.0.1:8000/api/tickets/?company_id=${activeCompanyId}`;
+      ? `/api/cancellation-tickets/list/?company_id=${activeCompanyId}`
+      : `/api/tickets/?company_id=${activeCompanyId}`;
     let rows = [];
     try {
       const res = await fetch(findApi);
@@ -3585,8 +3585,8 @@
     let rows = [];
     try {
       const [tRes, rRes] = await Promise.all([
-        fetch(`http://127.0.0.1:8000/api/tickets/?company_id=${activeCompanyId}`),
-        fetch(`http://127.0.0.1:8000/api/reschedule-tickets/list/?company_id=${activeCompanyId}`),
+        fetch(`/api/tickets/?company_id=${activeCompanyId}`),
+        fetch(`/api/reschedule-tickets/list/?company_id=${activeCompanyId}`),
       ]);
       const tRows = tRes.ok ? await tRes.json() : [];
       const rRows = rRes.ok ? await rRes.json() : [];
@@ -3883,7 +3883,7 @@
     }
     try {
       const params = new URLSearchParams({ company_id: activeCompanyId, s_pnr: sPnr, airline_pnr: airlinePnr, ticket_no: ticketNo });
-      const res = await fetch(`http://127.0.0.1:8000/api/tickets/lookup-for-cancellation/?${params}`);
+      const res = await fetch(`/api/tickets/lookup-for-cancellation/?${params}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Ticket not found.");
       cxLookupTicketId = data.ticket_id || null;
@@ -4054,8 +4054,8 @@
   async function enterCancellationMode(ticketId, pickedPax, sourceRescheduleId) {
     try {
       const url = sourceRescheduleId
-        ? `http://127.0.0.1:8000/api/reschedule-tickets/${sourceRescheduleId}/?company_id=${activeCompanyId}`
-        : `http://127.0.0.1:8000/api/tickets/${ticketId}/?company_id=${activeCompanyId}`;
+        ? `/api/reschedule-tickets/${sourceRescheduleId}/?company_id=${activeCompanyId}`
+        : `/api/tickets/${ticketId}/?company_id=${activeCompanyId}`;
       const res = await fetch(url);
       const t = await res.json();
       if (!res.ok) throw new Error(t.error || "Ticket not found.");
@@ -4123,7 +4123,7 @@
           original_ticket_line_id: sourceRescheduleId ? p.original_ticket_line_id : p.id,
           reschedule_line_id: sourceRescheduleId ? p.id : null,
         }));
-        const totalsRes = await fetch("http://127.0.0.1:8000/api/cancellation-tickets/fare-totals/", {
+        const totalsRes = await fetch("/api/cancellation-tickets/fare-totals/", {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ company_id: activeCompanyId, lines: totalsReq }),
         });
@@ -4259,7 +4259,7 @@
         lines: passengers.map((p) => ({ ...p, id: p.id, ...markupReversalComponents(p) })),
       };
       try {
-        const res = await fetch(`http://127.0.0.1:8000/api/cancellation-tickets/${cxEditSavedCancellationId}/update/`, {
+        const res = await fetch(`/api/cancellation-tickets/${cxEditSavedCancellationId}/update/`, {
           method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
         });
         const result = await res.json();
@@ -4301,7 +4301,7 @@
     };
 
     try {
-      const res = await fetch("http://127.0.0.1:8000/api/cancellation-tickets/create/", {
+      const res = await fetch("/api/cancellation-tickets/create/", {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
       });
       const result = await res.json();
@@ -4440,7 +4440,7 @@
     }
     try {
       const params = new URLSearchParams({ company_id: activeCompanyId, s_pnr: sPnr, airline_pnr: airlinePnr, ticket_no: ticketNo });
-      const res = await fetch(`http://127.0.0.1:8000/api/tickets/lookup-for-reschedule/?${params}`);
+      const res = await fetch(`/api/tickets/lookup-for-reschedule/?${params}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Ticket not found.");
       rsLookupTicketId = data.ticket_id || null;
@@ -4723,7 +4723,7 @@
       let ancestorLevels = [];
       try {
         const chainUrl =
-          `http://127.0.0.1:8000/api/reschedule-tickets/parent-chain-line/?company_id=${activeCompanyId}&original_ticket_line_id=${pickedLineId}` +
+          `/api/reschedule-tickets/parent-chain-line/?company_id=${activeCompanyId}&original_ticket_line_id=${pickedLineId}` +
           (pickedBasedOnId ? `&based_on_reschedule_line_id=${pickedBasedOnId}` : "");
         const chainRes = await fetch(chainUrl);
         if (chainRes.ok) {
@@ -4840,7 +4840,7 @@
       // Parent PNR Details tab - see openFareModal).
       if (savedLine.original_ticket_line_id) try {
         const chainUrl =
-          `http://127.0.0.1:8000/api/reschedule-tickets/parent-chain-line/?company_id=${activeCompanyId}&original_ticket_line_id=${savedLine.original_ticket_line_id}` +
+          `/api/reschedule-tickets/parent-chain-line/?company_id=${activeCompanyId}&original_ticket_line_id=${savedLine.original_ticket_line_id}` +
           (savedLine.reschedule_line_id ? `&based_on_reschedule_line_id=${savedLine.reschedule_line_id}` : "");
         const chainRes = await fetch(chainUrl);
         if (chainRes.ok) {
@@ -4977,11 +4977,11 @@
     const payload = buildTicketPayload();
     const url = rescheduleMode
       ? (editingRescheduleId
-          ? `http://127.0.0.1:8000/api/reschedule-tickets/${editingRescheduleId}/update/`
-          : "http://127.0.0.1:8000/api/reschedule-tickets/create/")
+          ? `/api/reschedule-tickets/${editingRescheduleId}/update/`
+          : "/api/reschedule-tickets/create/")
       : editId
-      ? `http://127.0.0.1:8000/api/tickets/${editId}/update/`
-      : "http://127.0.0.1:8000/api/tickets/create/";
+      ? `/api/tickets/${editId}/update/`
+      : "/api/tickets/create/";
 
     try {
       const res = await fetch(url, {
@@ -5237,7 +5237,7 @@
       try {
         const [, res] = await Promise.all([
           populateRefs(activeCompanyId),
-          fetch(`http://127.0.0.1:8000/api/tickets/${editId}/?company_id=${activeCompanyId}`),
+          fetch(`/api/tickets/${editId}/?company_id=${activeCompanyId}`),
         ]);
         const ticket = await res.json();
         if (!res.ok) throw new Error(ticket.error || "Ticket not found.");
@@ -5255,20 +5255,20 @@
       try {
         const [, res] = await Promise.all([
           populateRefs(activeCompanyId),
-          fetch(`http://127.0.0.1:8000/api/tickets/?company_id=${activeCompanyId}`),
+          fetch(`/api/tickets/?company_id=${activeCompanyId}`),
         ]);
         existingTickets = res.ok ? await res.json() : [];
       } catch (_) { existingTickets = []; }
       if (rescheduleSavedId) {
         try {
-          const res = await fetch(`http://127.0.0.1:8000/api/reschedule-tickets/${rescheduleSavedId}/?company_id=${activeCompanyId}`);
+          const res = await fetch(`/api/reschedule-tickets/${rescheduleSavedId}/?company_id=${activeCompanyId}`);
           const rt = await res.json();
           if (!res.ok) throw new Error(rt.error || "Saved reschedule ticket not found.");
           // A direct Reschedule (Auto Push - its booking was never entered
           // here) has no original ticket to load; only its Parent PNR.
           let originalTicket = { lines: [], booking_reference: "" };
           if (rt.original_ticket_id) {
-            const origRes = await fetch(`http://127.0.0.1:8000/api/tickets/${rt.original_ticket_id}/?company_id=${activeCompanyId}`);
+            const origRes = await fetch(`/api/tickets/${rt.original_ticket_id}/?company_id=${activeCompanyId}`);
             originalTicket = await origRes.json();
             if (!origRes.ok) throw new Error(originalTicket.error || "Original ticket not found.");
           }
@@ -5280,12 +5280,12 @@
       } else if (rescheduleTicketId) {
         try {
           const [res, parentRes] = await Promise.all([
-            fetch(`http://127.0.0.1:8000/api/tickets/${rescheduleTicketId}/?company_id=${activeCompanyId}`),
+            fetch(`/api/tickets/${rescheduleTicketId}/?company_id=${activeCompanyId}`),
             // Chaining - also fetch the PREVIOUS reschedule this one was
             // found via, so "Parent PNR Details" reflects its data instead
             // of the several-steps-back original ticket's.
             parentRescheduleId
-              ? fetch(`http://127.0.0.1:8000/api/reschedule-tickets/${parentRescheduleId}/?company_id=${activeCompanyId}`)
+              ? fetch(`/api/reschedule-tickets/${parentRescheduleId}/?company_id=${activeCompanyId}`)
               : Promise.resolve(null),
           ]);
           const ticket = await res.json();
@@ -5328,7 +5328,7 @@
         enterBlankCancellationShell();
       } else if (cancellationSavedId) {
         try {
-          const res = await fetch(`http://127.0.0.1:8000/api/cancellation-tickets/${cancellationSavedId}/?company_id=${activeCompanyId}`);
+          const res = await fetch(`/api/cancellation-tickets/${cancellationSavedId}/?company_id=${activeCompanyId}`);
           const ct = await res.json();
           if (!res.ok) throw new Error(ct.error || "Saved cancellation not found.");
           enterSavedCancellationMode(ct);

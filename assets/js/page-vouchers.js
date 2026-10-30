@@ -90,7 +90,7 @@
 
   async function load(companyId, country) {
     try {
-      const res = await fetch(`http://127.0.0.1:8000/api/vouchers/?company_id=${companyId}`);
+      const res = await fetch(`/api/vouchers/?company_id=${companyId}`);
       if (!res.ok) throw new Error(`Vouchers API returned ${res.status}`);
       allVouchers = await res.json();
     } catch (err) {

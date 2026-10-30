@@ -1,5 +1,5 @@
 (async function () {
-  const COMPANY_MASTER_API = "http://127.0.0.1:8000/api/company-master/";
+  const COMPANY_MASTER_API = "/api/company-master/";
   let activeCompanyId = null;
   // This page always edits ONE row - whichever CompanyMaster row's id
   // matches the active company from the top-nav switcher (creating it on

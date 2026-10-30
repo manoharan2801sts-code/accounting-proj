@@ -48,6 +48,10 @@
       url = url.replace(/^http:\/\/(127\.0\.0\.1|localhost):8000\/api/, API_BASE);
       finalInput = typeof input === "string" ? url : new Request(url, input);
     }
+    else if (API_BASE !== "/api" && url.startsWith("/api")) {
+      url = API_BASE + url.substring(4);
+      finalInput = typeof input === "string" ? url : new Request(url, input);
+    }
 
     const token = localStorage.getItem(TOKEN_KEY);
     const isApi = url.startsWith(API_BASE) || API_PREFIXES.some((p) => url.startsWith(p));

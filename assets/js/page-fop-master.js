@@ -6,8 +6,8 @@
 
   const CARD_MASK_PREFIX = "XXXXXXXXXXXX"; // 12 X's — same for Own Card and Client Card
   const LEDGER_GROUP = "Current Liabilities";
-  const FOP_MASTER_API = "http://127.0.0.1:8000/api/fop-master/";
-  const LEDGERS_BY_GROUP_API = "http://127.0.0.1:8000/api/ledgers-by-group/";
+  const FOP_MASTER_API = "/api/fop-master/";
+  const LEDGERS_BY_GROUP_API = "/api/ledgers-by-group/";
 
   // DOM Elements - Top Toolbar
   const cardTypeSelect = document.getElementById("fm-card-type-select");

@@ -113,7 +113,7 @@
         );
         if (!ok) return;
         try {
-          const res = await fetch(`http://127.0.0.1:8000/api/ledgers/${btn.dataset.id}/delete/?company_id=${currentCompanyId}`, {
+          const res = await fetch(`/api/ledgers/${btn.dataset.id}/delete/?company_id=${currentCompanyId}`, {
             method: "DELETE",
           });
           const result = await res.json();
@@ -126,7 +126,7 @@
     });
   }
 
-  const ACCOUNTS_API = "http://127.0.0.1:8000/api/accounts/";
+  const ACCOUNTS_API = "/api/accounts/";
 
   async function load(companyId, country) {
     currentCompanyId = companyId; currentCountryCode = country;

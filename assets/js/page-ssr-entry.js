@@ -5,7 +5,7 @@
   // /api/ssr-tickets/ (dbo.sp_SSRTicket) and posts its own ALS-n JV. GST % and
   // the JV ledgers come from Ledger Mapping (SSR Markup / SSR Service Fee and
   // the Supplier SSR Markup / Supplier SSR Service Fee fields).
-  const API = "http://127.0.0.1:8000/api/";
+  const API = "/api/";
   const n = (v) => Number(String(v || "").replace(/,/g, "")) || 0;
   // Money amounts follow Company Master's "No. of Decimals" (same as the
   // ticket screen's fmtN) - f2 for display, fmtN for amount input boxes.

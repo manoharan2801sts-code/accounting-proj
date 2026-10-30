@@ -128,7 +128,7 @@
   const productBadgeName = document.getElementById("mm-product-badge-name");
   fillPlain(productSel, PRODUCT_TYPES, "Select...");
 
-  const LEDGERS_BY_GROUP_API = "http://127.0.0.1:8000/api/ledgers-by-group/";
+  const LEDGERS_BY_GROUP_API = "/api/ledgers-by-group/";
   async function ledgersForGroup(groupName) {
     if (ledgerCache[groupName]) return ledgerCache[groupName];
     try {
@@ -324,7 +324,7 @@
       return;
     }
     try {
-      const res = await fetch("http://127.0.0.1:8000/api/master-mapping/save/", {
+      const res = await fetch("/api/master-mapping/save/", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           company_id: activeCompanyId, product_type: product, masters_category: row.dataset.category,
@@ -387,7 +387,7 @@
       const id = row.dataset.mappingId;
       if (id) {
         try {
-          await fetch(`http://127.0.0.1:8000/api/master-mapping/${id}/delete/?company_id=${activeCompanyId}`, { method: "DELETE" });
+          await fetch(`/api/master-mapping/${id}/delete/?company_id=${activeCompanyId}`, { method: "DELETE" });
         } catch (err) {
           console.error("Could not delete Master Mapping row", err);
         }
@@ -406,7 +406,7 @@
   async function loadMappings() {
     if (!activeCompanyId || !productSel.value) return;
     try {
-      const res = await fetch(`http://127.0.0.1:8000/api/master-mapping/?company_id=${activeCompanyId}&product_type=${encodeURIComponent(productSel.value)}`);
+      const res = await fetch(`/api/master-mapping/?company_id=${activeCompanyId}&product_type=${encodeURIComponent(productSel.value)}`);
       if (!res.ok) throw new Error(`Master Mapping API returned ${res.status}`);
       allMappings = await res.json();
     } catch (err) {

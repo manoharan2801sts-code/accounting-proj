@@ -157,19 +157,19 @@
   </div>
 
   <script src="assets/js/mock-data.js"></script>
-  <script src="assets/js/api.js?v=52"></script>
+  <script src="assets/js/api.js?v=53"></script>
   <script src="assets/js/hardcode.js?v=12"></script>
-  <script src="assets/js/util.js?v=52"></script>
-  <script src="assets/js/shell.js?v=52"></script>
+  <script src="assets/js/util.js?v=53"></script>
+  <script src="assets/js/shell.js?v=53"></script>
   <script src="assets/js/report-export.js?v=5"></script>
   <script>
     // Not gated on DOMContentLoaded - this page's <script> can be injected
-    // by the app's SPA navigation (shell.js?v=52's navigateTo) into a document
+    // by the app's SPA navigation (shell.js?v=53's navigateTo) into a document
     // that already finished loading, so DOMContentLoaded never fires again
     // and this would silently never run except on a hard refresh.
     //
     // Wrapped in an IIFE (unlike a naive top-level script) because
-    // shell.js?v=52 re-executes this exact block every time this page is
+    // shell.js?v=53 re-executes this exact block every time this page is
     // navigated to - a second execution's top-level `let`/`const` in the
     // SAME document throws "Identifier has already been declared" (a
     // classic-script global lexical environment persists across separately

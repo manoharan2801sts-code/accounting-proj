@@ -6,7 +6,7 @@
  * Same API as the modal (/api/user-management/ - Super Admin only).
  */
 (async function () {
-  const API = "http://127.0.0.1:8000/api/user-management/";
+  const API = "/api/user-management/";
   const MODULE_ORDER = ["Masters", "Transactions", "Reports", "Control Panel"];
   const MODULE_LABEL = { Transactions: "Transactions › Airline" };
   const FLAGS = ["can_view", "can_add", "can_edit", "can_delete", "can_print", "can_export"];

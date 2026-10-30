@@ -5,7 +5,7 @@
   // through /api/misc/ (dbo.sp_MiscTransaction) and posts its own MSC-n JV -
   // none while Status is Cancelled. GST % and the JV ledgers come from Ledger
   // Mapping (Misc Markup / Misc Service Fee and the Supplier ones).
-  const API = "http://127.0.0.1:8000/api/";
+  const API = "/api/";
   const n = (v) => Number(String(v || "").replace(/,/g, "")) || 0;
   // Money follows Company Master's "No. of Decimals" (same as the ticket /
   // SSR screens) - f2 for display, fmtN for amount input boxes.

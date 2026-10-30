@@ -9,7 +9,7 @@
   // time Yes is clicked. null result = the lookup failed.
   let defaultBankLookup = null;
   function loadDefaultBank() {
-    defaultBankLookup = fetch(`http://127.0.0.1:8000/api/ledgers/default-bank/?company_id=${activeCompanyId}`)
+    defaultBankLookup = fetch(`/api/ledgers/default-bank/?company_id=${activeCompanyId}`)
       .then((res) => (res.ok ? res.json() : null))
       .catch(() => null);
     return defaultBankLookup;
@@ -35,7 +35,7 @@
     );
     if (!ok) { document.getElementById("is_default_bank_no").checked = true; return; }
     const setDefault = async (id, value) => {
-      const res = await fetch(`http://127.0.0.1:8000/api/ledgers/${id}/update/?company_id=${activeCompanyId}`, {
+      const res = await fetch(`/api/ledgers/${id}/update/?company_id=${activeCompanyId}`, {
         method: "PUT", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ is_default_bank: value }),
       });
@@ -81,7 +81,7 @@
   await loadStatesFromXml();
   document.getElementById("cancel-link").href = returnTo;
 
-  const API = "http://127.0.0.1:8000/api";
+  const API = "/api";
 
   const SECTIONS = ["section-bank", "section-debtor-in", "section-debtor-ae", "section-creditor", "section-taxledger", "section-duties-taxes"];
   function hideAllSections() { SECTIONS.forEach((id) => (document.getElementById(id).style.display = "none")); }
