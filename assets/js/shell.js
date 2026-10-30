@@ -1039,7 +1039,7 @@
   async function applyCompanyLogo(companyId) {
     let logo = null;
     try {
-      const res = await fetch(`http://127.0.0.1:8000/api/company-master/?id=${companyId}&images=logo`);
+      const res = await fetch(`${window.VoyagerAPI.API_BASE}/company-master/?id=${companyId}&images=logo`);
       if (res.ok) logo = (await res.json()).logo_base64 || null;
     } catch (err) {
       console.error("Could not load the company logo", err);
@@ -1216,7 +1216,7 @@
         try {
           const controller = new AbortController();
           const timeoutId = setTimeout(() => controller.abort(), 2500);
-          const res = await fetch("http://127.0.0.1:8000/api/company-master/", { signal: controller.signal });
+          const res = await fetch(`${window.VoyagerAPI.API_BASE}/company-master/`, { signal: controller.signal });
           clearTimeout(timeoutId);
           const rows = res.ok ? await res.json() : [];
           companies = rows.map((c) => ({ id: c.id, name: c.company_name, country_code: countryCodeFromText(c.country),

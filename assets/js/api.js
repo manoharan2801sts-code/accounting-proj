@@ -39,10 +39,19 @@
   const nativeFetch = window.fetch.bind(window);
   const API_PREFIXES = [API_BASE, "http://127.0.0.1:8000/api", "http://localhost:8000/api"];
   window.fetch = function (input, init) {
-    const url = typeof input === "string" ? input : (input && input.url) || "";
+    let url = typeof input === "string" ? input : (input && input.url) || "";
+    let finalInput = input;
+
+    // Rewrite any hardcoded local dev backend URLs to the active API_BASE (/api)
+    // so production / deployed calls never leak to a local port or trigger mixed-content / 401 errors.
+    if (url.startsWith("http://127.0.0.1:8000/api") || url.startsWith("http://localhost:8000/api")) {
+      url = url.replace(/^http:\/\/(127\.0\.0\.1|localhost):8000\/api/, API_BASE);
+      finalInput = typeof input === "string" ? url : new Request(url, input);
+    }
+
     const token = localStorage.getItem(TOKEN_KEY);
-    const isApi = API_PREFIXES.some((p) => url.startsWith(p));
-    if (!isApi || !token || token === "demo-token") return nativeFetch(input, init);
+    const isApi = url.startsWith(API_BASE) || API_PREFIXES.some((p) => url.startsWith(p));
+    if (!isApi || !token || token === "demo-token") return nativeFetch(finalInput, init);
     const opts = { ...(init || {}) };
     const headers = new Headers(opts.headers || (typeof input !== "string" && input.headers) || {});
     if (!headers.has("Authorization")) headers.set("Authorization", `Bearer ${token}`);
@@ -57,8 +66,9 @@
         return Promise.resolve(new Response(hit.body, { status: hit.status, headers: { "Content-Type": "application/json" } }));
       }
     }
-    return nativeFetch(input, opts).then((res) => {
-      if (res.status === 401 && !url.includes("/auth/login")) {
+    return nativeFetch(finalInput, opts).then((res) => {
+      // Only redirect on 401 if the request was to the active API server, not a third-party or mismatched host
+      if (res.status === 401 && !url.includes("/auth/login") && (url.startsWith(API_BASE) || url.startsWith(window.location.origin))) {
         Store.clear();
         try { sessionStorage.removeItem("voyager_permissions"); } catch (_) {}
         window.location.href = "index.html";
