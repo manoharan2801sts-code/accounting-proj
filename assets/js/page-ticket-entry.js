@@ -2463,9 +2463,14 @@
       : "";
     linesBody.innerHTML = rowsHtml + addRowHtml || blankRescheduleHtml || `<tr id="no-pax-row"><td colspan="13" style="text-align:center; padding:18px; color:#64748B; font-size:11.5px;">No passengers to show.</td></tr>`;
 
-    // Double-click to view/edit a row's passenger & fare details works in
-    // both view mode (read-only) and edit mode.
+    // Double-click or single-click to view/edit a row's passenger & fare details
+    // works in both view mode (read-only) and edit mode.
     document.querySelectorAll(".pax-row[data-idx]").forEach((row) => {
+      row.style.cursor = "pointer";
+      row.addEventListener("click", (e) => {
+        if (e.target.closest(".pax-remove-btn")) return;
+        openFareModal(Number(row.dataset.idx));
+      });
       row.addEventListener("dblclick", () => openFareModal(Number(row.dataset.idx)));
     });
     if (!viewMode) {
@@ -3750,14 +3755,20 @@
     { match: "suppliers.html", label: "Payables" },
   ];
   function applyReportBackLink(defaultLabel, defaultHref) {
-    const backTarget = REPORT_BACK_TARGETS.find((r) => document.referrer.includes(r.match));
+    const fromParam = new URLSearchParams(window.location.search).get("from");
+    let backTarget = REPORT_BACK_TARGETS.find((r) => document.referrer && document.referrer.includes(r.match));
+    if (!backTarget && fromParam === "dsr") {
+      backTarget = { match: "report-dsr.html", label: "DSR" };
+    }
     const cancelLink = document.getElementById("cancel-link");
-    if (backTarget) {
-      cancelLink.textContent = `<- Back to ${backTarget.label}`;
-      cancelLink.setAttribute("href", document.referrer);
-    } else {
-      cancelLink.textContent = `<- Back to ${defaultLabel}`;
-      if (defaultHref) cancelLink.setAttribute("href", defaultHref);
+    if (cancelLink) {
+      if (backTarget) {
+        cancelLink.textContent = `<- Back to ${backTarget.label}`;
+        cancelLink.setAttribute("href", document.referrer && document.referrer.includes(backTarget.match) ? document.referrer : backTarget.match);
+      } else {
+        cancelLink.textContent = `<- Back to ${defaultLabel}`;
+        if (defaultHref) cancelLink.setAttribute("href", defaultHref);
+      }
     }
   }
 
