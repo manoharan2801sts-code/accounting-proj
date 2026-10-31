@@ -261,7 +261,7 @@
       if (fromDate) params += `&from_date=${fromDate}`;
       if (toDate) params += `&to_date=${toDate}`;
       try {
-        const res = await fetch(`http://127.0.0.1:8000/api/ledger-book/monthly/?${params}`);
+        const res = await fetch(`/api/ledger-book/monthly/?${params}`);
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || `Server returned ${res.status}`);
 

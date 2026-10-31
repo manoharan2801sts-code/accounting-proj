@@ -315,17 +315,22 @@
     // ?reschedule_saved_id=<reschedule ticket id> instead.
     function navigateToTicket(row) {
       if (row.dataset.cancellationId) {
-        window.location.href = `ticket-entry.html?cancellation_saved_id=${row.dataset.cancellationId}`;
+        window.location.href = `ticket-entry.html?cancellation_saved_id=${row.dataset.cancellationId}&from=dsr`;
         return;
       }
       if (row.dataset.ssrId) {
-        window.location.href = `trans-airline-ssr.html?ssr_saved_id=${row.dataset.ssrId}`;
+        window.location.href = `trans-airline-ssr.html?ssr_saved_id=${row.dataset.ssrId}&from=dsr`;
         return;
       }
       window.location.href = row.dataset.rescheduleId
-        ? `ticket-entry.html?reschedule_saved_id=${row.dataset.rescheduleId}`
-        : `ticket-entry.html?id=${row.dataset.id}`;
+        ? `ticket-entry.html?reschedule_saved_id=${row.dataset.rescheduleId}&from=dsr`
+        : `ticket-entry.html?id=${row.dataset.id}&from=dsr`;
     }
+    document.getElementById("main-data-tbody").addEventListener("click", (e) => {
+      const row = e.target.closest(".dsr-data-row");
+      if (!row) return;
+      navigateToTicket(row);
+    });
     document.getElementById("main-data-tbody").addEventListener("dblclick", (e) => {
       const row = e.target.closest(".dsr-data-row");
       if (!row) return;
@@ -384,12 +389,12 @@
     // from the Django backend (same /api/tickets/ endpoint ticket-entry.js
     // and tickets.html already use).
     // ============================================================
-    const TICKETS_API = "http://127.0.0.1:8000/api/tickets/";
-    const RESCHEDULE_TICKETS_API = "http://127.0.0.1:8000/api/reschedule-tickets/list/";
-    const CANCELLATION_DSR_API = "http://127.0.0.1:8000/api/cancellation-tickets/dsr/";
-    const SSR_DSR_API = "http://127.0.0.1:8000/api/ssr-tickets/dsr/";
+    const TICKETS_API = "/api/tickets/";
+    const RESCHEDULE_TICKETS_API = "/api/reschedule-tickets/list/";
+    const CANCELLATION_DSR_API = "/api/cancellation-tickets/dsr/";
+    const SSR_DSR_API = "/api/ssr-tickets/dsr/";
     // DSR page: every column of the agreed format, one row per passenger line.
-    const DSR_DETAILED_API = "http://127.0.0.1:8000/api/dsr/detailed/";
+    const DSR_DETAILED_API = "/api/dsr/detailed/";
     let allRows = [];
 
     function fmtAmt(n) {

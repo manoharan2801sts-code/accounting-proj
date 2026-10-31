@@ -245,7 +245,7 @@
       document.getElementById("tb-detailed-toggle-wrap").style.display = currentGroupId ? "none" : "";
 
       try {
-        const res = await fetch(`http://127.0.0.1:8000/api/trial-balance/?${params}`);
+        const res = await fetch(`/api/trial-balance/?${params}`);
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || `Server returned ${res.status}`);
         lastLoadedData = data;

@@ -286,7 +286,7 @@
       try {
         const params = new URLSearchParams({ company_id: activeCompanyId, to_date: toDate });
         if (currentGroupId) params.set("group_id", currentGroupId);
-        const res = await fetch(`http://127.0.0.1:8000/api/balance-sheet/?${params}`);
+        const res = await fetch(`/api/balance-sheet/?${params}`);
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || "Could not load the Balance Sheet.");
         if (currentGroupId) renderDrill(data);

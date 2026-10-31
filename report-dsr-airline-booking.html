@@ -421,10 +421,10 @@
     // from the Django backend (same /api/tickets/ endpoint ticket-entry.js
     // and tickets.html already use).
     // ============================================================
-    const TICKETS_API = "http://127.0.0.1:8000/api/tickets/";
-    const RESCHEDULE_TICKETS_API = "http://127.0.0.1:8000/api/reschedule-tickets/list/";
-    const CANCELLATION_DSR_API = "http://127.0.0.1:8000/api/cancellation-tickets/dsr/";
-    const SSR_DSR_API = "http://127.0.0.1:8000/api/ssr-tickets/dsr/";
+    const TICKETS_API = "/api/tickets/";
+    const RESCHEDULE_TICKETS_API = "/api/reschedule-tickets/list/";
+    const CANCELLATION_DSR_API = "/api/cancellation-tickets/dsr/";
+    const SSR_DSR_API = "/api/ssr-tickets/dsr/";
     let allRows = [];
 
     function fmtAmt(n) {

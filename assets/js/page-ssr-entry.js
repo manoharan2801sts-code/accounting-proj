@@ -335,6 +335,10 @@
     lines.splice(editing, 1);
     close("ssr-modal"); render();
   });
+  $("ssr-lines").addEventListener("click", (e) => {
+    const row = e.target.closest(".ssr-row");
+    if (row) openLine(Number(row.dataset.idx));
+  });
   $("ssr-lines").addEventListener("dblclick", (e) => {
     const row = e.target.closest(".ssr-row");
     if (row) openLine(Number(row.dataset.idx));
@@ -604,11 +608,18 @@
     $("ssr-print-btn").style.display = on && savedId ? "" : "none";
     // Opened from a report row (Day Book / Ledger) -> Back returns there,
     // same as the ticket screen's own Back link.
-    const fromReport = [["report-day-book.html", "Day Book"], ["report-ledger-book.html", "Ledger"], ["customers.html", "Receivables"], ["suppliers.html", "Payables"], ["report-dsr-airline-booking.html", "Returns"], ["report-dsr.html", "DSR"]]
+    const fromParam = new URLSearchParams(window.location.search).get("from");
+    const reportMap = {
+      "dsr": ["report-dsr.html", "DSR"],
+      "returns": ["report-dsr-airline-booking.html", "Returns"],
+      "day-book": ["report-day-book.html", "Day Book"],
+      "ledger": ["report-ledger-book.html", "Ledger"],
+    };
+    const fromReport = (fromParam && reportMap[fromParam.toLowerCase()]) || [["report-day-book.html", "Day Book"], ["report-ledger-book.html", "Ledger"], ["customers.html", "Receivables"], ["suppliers.html", "Payables"], ["report-dsr-airline-booking.html", "Returns"], ["report-dsr.html", "DSR"]]
       .find(([page]) => document.referrer.includes(page));
     $("ssr-discard-btn").textContent = on ? `<- Back to ${fromReport ? fromReport[1] : "SSR"}` : "Discard";
     $("ssr-discard-btn").setAttribute("href", on
-      ? (fromReport ? document.referrer : "trans-airline-ssr.html")
+      ? (fromReport ? (document.referrer || fromReport[0]) : "trans-airline-ssr.html")
       : (savedId ? `trans-airline-ssr.html?ssr_saved_id=${savedId}` : "trans-airline-ssr.html"));
     render();
   }

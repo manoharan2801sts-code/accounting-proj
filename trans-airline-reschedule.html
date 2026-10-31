@@ -231,7 +231,7 @@
       }
       try {
         const params = new URLSearchParams({ company_id: activeCompanyId, s_pnr: sPnr, airline_pnr: airlinePnr, ticket_no: ticketNo });
-        const res = await fetch(`http://localhost:8000/api/tickets/lookup-for-reschedule/?${params}`);
+        const res = await fetch(`/api/tickets/lookup-for-reschedule/?${params}`);
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || "Ticket not found.");
         lookupTicketId = data.ticket_id || null;
@@ -273,7 +273,7 @@
       }
       try {
         const params = new URLSearchParams({ company_id: activeCompanyId, s_pnr: sPnr, airline_pnr: airlinePnr, ticket_no: ticketNo });
-        const res = await fetch(`http://localhost:8000/api/reschedule-tickets/lookup/?${params}`);
+        const res = await fetch(`/api/reschedule-tickets/lookup/?${params}`);
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || "Saved reschedule ticket not found.");
         window.location.href = `ticket-entry.html?reschedule_saved_id=${data.reschedule_ticket_id}`;

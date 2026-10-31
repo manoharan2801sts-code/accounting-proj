@@ -415,7 +415,7 @@
     // ============================================================
     async function loadLedgerList() {
       try {
-        const res = await fetch(`http://127.0.0.1:8000/api/accounts/?company_id=${activeCompanyId}`);
+        const res = await fetch(`/api/accounts/?company_id=${activeCompanyId}`);
         const rows = res.ok ? await res.json() : [];
         allLedgers = rows.filter((r) => !r.is_group).sort((a, b) => a.name.localeCompare(b.name));
       } catch (err) {
@@ -598,7 +598,7 @@
       if (toDate) params += `&to_date=${toDate}`;
 
       try {
-        const res = await fetch(`http://127.0.0.1:8000/api/ledger-book/?${params}`);
+        const res = await fetch(`/api/ledger-book/?${params}`);
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || `Server returned ${res.status}`);
 

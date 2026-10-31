@@ -211,7 +211,7 @@
       if (toDate) params += `&to_date=${toDate}`;
 
       try {
-        const res = await fetch(`http://127.0.0.1:8000/api/cash-bank-book/?${params}`);
+        const res = await fetch(`/api/cash-bank-book/?${params}`);
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || `Server returned ${res.status}`);
 
