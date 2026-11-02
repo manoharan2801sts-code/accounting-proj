@@ -8396,7 +8396,13 @@ def admin_seed_data(request):
     POST/GET /api/admin/seed-data/
     Seeds initial database records into the active database.
     """
-    return JsonResponse({"status": "ok", "message": "Database seeded."})
+    try:
+        import load_initial_data
+        res = load_initial_data.load_data(force=True)
+        return JsonResponse(res)
+    except Exception as e:
+        import traceback
+        return JsonResponse({"status": "error", "error": str(e), "traceback": traceback.format_exc()}, status=500)
 
 
 def db_diagnostic(request):
@@ -8418,6 +8424,15 @@ def db_diagnostic(request):
                 try:
                     cur.execute(f"SELECT COUNT(*) FROM `{tbl}`;")
                     counts[tbl] = cur.fetchone()[0]
+                except Exception:
+                    pass
+            try:
+                cur.execute("SELECT COUNT(*) FROM `Airline_Agent`.`Agent_ticket_data`;")
+                counts["Airline_Agent.Agent_ticket_data"] = cur.fetchone()[0]
+            except Exception:
+                try:
+                    cur.execute("SELECT COUNT(*) FROM `airline_agent`.`agent_ticket_data`;")
+                    counts["airline_agent.agent_ticket_data"] = cur.fetchone()[0]
                 except Exception:
                     pass
             result["counts"] = counts

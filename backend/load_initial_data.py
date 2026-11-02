@@ -502,24 +502,58 @@ def load_data(force=False):
         except Exception as e:
             print(f"[WARN] Super Admin sync failed: {e}")
 
-    # Ensure Airline_Agent database and table are initialized
+    # Ensure Airline_Agent database and table are initialized & seeded
     try:
         airline_sql_file = BASE_DIR / "airline_agent_mysql.sql"
         if airline_sql_file.exists():
             with open(airline_sql_file, "r", encoding="utf-8") as af:
                 a_content = af.read()
-            a_stmts = [s.strip() for s in a_content.split(";") if s.strip()]
+            a_statements = []
+            a_curr = []
+            for line in a_content.splitlines():
+                line_s = line.strip()
+                if not line_s or line_s.startswith("--"):
+                    continue
+                a_curr.append(line_s)
+                if line_s.endswith(";"):
+                    stmt = " ".join(a_curr).rstrip(";").strip()
+                    if stmt:
+                        a_statements.append(stmt)
+                    a_curr = []
+            if a_curr:
+                stmt = " ".join(a_curr).rstrip(";").strip()
+                if stmt:
+                    a_statements.append(stmt)
+
+            a_success = 0
             with connection.cursor() as cursor:
                 cursor.execute("SET FOREIGN_KEY_CHECKS = 0;")
-                for s in a_stmts:
+                for s in a_statements:
                     try:
                         cursor.execute(s)
-                    except Exception:
-                        pass
+                        a_success += 1
+                    except Exception as ex:
+                        if "Duplicate entry" not in str(ex):
+                            print(f"[WARN] Airline_Agent stmt failed: {ex}")
                 cursor.execute("SET FOREIGN_KEY_CHECKS = 1;")
-            print("[OK] Airline_Agent database & Agent_ticket_data verified!")
+            try:
+                connection.commit()
+            except Exception:
+                pass
+            print(f"[OK] Airline_Agent database & Agent_ticket_data: executed {a_success} statements!")
     except Exception as e:
         print(f"[INFO] Airline_Agent init check: {e}")
+
+    try:
+        with connection.cursor() as cursor:
+            try:
+                cursor.execute("SELECT COUNT(*) FROM `Airline_Agent`.`Agent_ticket_data`;")
+                counts["Airline_Agent.Agent_ticket_data"] = cursor.fetchone()[0]
+            except Exception:
+                cursor.execute("SELECT COUNT(*) FROM `airline_agent`.`agent_ticket_data`;")
+                counts["airline_agent.agent_ticket_data"] = cursor.fetchone()[0]
+    except Exception:
+        pass
 
     print(f"[OK] Successfully executed {success} statements into database!")
     print(f"[OK] Row counts: {counts}")
