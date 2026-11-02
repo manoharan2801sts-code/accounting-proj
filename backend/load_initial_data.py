@@ -70,6 +70,7 @@ def ensure_schema(cursor):
         "ALTER TABLE `ssr_al_tickets` MODIFY `airline_category` VARCHAR(200) NULL;",
         "ALTER TABLE `ssr_al_ticketlines` MODIFY `airline_category` VARCHAR(200) NULL;",
         "ALTER TABLE `ticket_import_staging` MODIFY `airline_category` VARCHAR(200) NULL;",
+        "ALTER TABLE `ticket_import_staging` MODIFY `line_airline_category` VARCHAR(200) NULL;",
         "ALTER TABLE `al_ticketlines` DROP CHECK `ck_ticketlines_airline_category`;",
 
         """CREATE TABLE IF NOT EXISTS `AirlineDropdownValues` (
@@ -305,7 +306,7 @@ def ensure_schema(cursor):
           `original_ticket_no` varchar(30) DEFAULT NULL,
           `airline_code` varchar(200) DEFAULT NULL,
           `airline_name` varchar(200) DEFAULT NULL,
-          `line_airline_category` varchar(5) DEFAULT NULL,
+          `line_airline_category` varchar(200) DEFAULT NULL,
           `flight_no` varchar(200) DEFAULT NULL,
           `ticket_no` varchar(30) DEFAULT NULL,
           `passenger_name` varchar(50) DEFAULT NULL,

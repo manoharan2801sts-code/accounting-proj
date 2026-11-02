@@ -10,5 +10,8 @@ class AccountingConfig(AppConfig):
         # per-request cache is listening before the first request arrives
         # (the URLconf/views otherwise only import it during that request).
         from . import sp_mysql  # noqa: F401
-        from . import background_scheduler
-        background_scheduler.start_background_scheduler()
+        import sys
+        skip_cmds = ["load_initial_data", "migrate", "makemigrations", "collectstatic", "init_tidb"]
+        if not any(cmd in " ".join(sys.argv) for cmd in skip_cmds):
+            from . import background_scheduler
+            background_scheduler.start_background_scheduler()
