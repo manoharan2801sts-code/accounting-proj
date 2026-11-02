@@ -21,7 +21,7 @@ python backend/manage.py migrate --noinput || python backend/manage.py migrate -
 
 # 4. Populate initial data (Ledgers, Customers, Suppliers, Tickets, Vouchers)
 echo "[4/4] Checking and seeding database records..."
-python backend/load_initial_data.py --force
+python backend/load_initial_data.py
 
 echo "=============================================="
 echo " Build Completed Successfully!"
