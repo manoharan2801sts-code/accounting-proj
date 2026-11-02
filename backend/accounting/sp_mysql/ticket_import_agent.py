@@ -777,7 +777,7 @@ def ticket_import_error_log_resolve(p):
 def ticket_import_invoice_type_list(p):
     cid = _p_int(p.get("CompanyId"))
     sql = """
-        SELECT m.ticket_status, m.voucher_type_id, vt.name AS voucher_type_name, vt.voucher_category
+        SELECT m.ticket_status, m.voucher_type_id, vt.name AS voucher_type_name, vt.voucher_category, vt.is_active
         FROM Ticket_Import_Invoice_Type m
         JOIN VoucherType vt ON vt.id = m.voucher_type_id
         WHERE m.company_id = %s

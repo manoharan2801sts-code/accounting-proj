@@ -584,10 +584,13 @@ def _ledger_subquery(cid, name, category, cache):
 
 
 def _next_jv_no(cid, prefix, category):
-    n = query_one(
-        f"SELECT COUNT(*) AS n FROM `JournalVoucher` WHERE company_id = %s AND {_ci_lit('category', category)}", [cid]
-    )["n"]
-    return f"{prefix}-{int(n) + 1}"
+    row = query_one(
+        "SELECT MAX(CAST(SUBSTRING_INDEX(voucher_no, '-', -1) AS UNSIGNED)) AS max_num "
+        "FROM `JournalVoucher` WHERE company_id = %s AND voucher_no LIKE %s",
+        [cid, f"{prefix}-%"]
+    )
+    max_num = row.get("max_num") if row else None
+    return f"{prefix}-{int(max_num or 0) + 1}"
 
 
 @sp("dbo.sp_Ticket", "SAVE")
