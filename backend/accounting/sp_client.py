@@ -1453,3 +1453,48 @@ def agent_ticket_log_refresh(doc_key, process_status, invoice_number=None, vouch
     row = _agent_ticket_log("REFRESH", DocKey=doc_key, ProcessStatus=process_status, InvoiceNumber=invoice_number,
                             VoucherNo=voucher_no, ErrorMessage=error_message)
     return (row or {}).get("updated") or 0
+
+# Year-wise ledger tables [YY-YY-Accounting_Ledger] - accounting/ledger_months.py
+# ---------------------------------------------------------------------------
+def accounting_ledger_save_year(company_id, table_name, months, rows):
+    """Replaces this company's rows of one year table; months = the month columns the rows carry (Apr..)."""
+    import json as _json
+    row = exec_sp_one("dbo.sp_AccountingLedger", {
+        "Action": "SAVE_YEAR", "CompanyId": company_id, "TableName": table_name,
+        "MonthsJson": _json.dumps(list(months)), "RowsJson": _json.dumps(rows),
+    })
+    if not row or row.get("status") != "Success":
+        raise StoredProcedureError((row or {}).get("error") or f"Could not save {table_name}.")
+    return row
+
+
+def accounting_ledger_read_year(company_id, table_name):
+    """This company's rows of one year table (every column) - [] when the table does not exist."""
+    return exec_sp("dbo.sp_AccountingLedger", {"Action": "READ_YEAR", "CompanyId": company_id, "TableName": table_name})
+
+
+def accounting_ledger_tables():
+    """Names of every year table that exists."""
+    return [r["table_name"] for r in exec_sp("dbo.sp_AccountingLedger", {"Action": "LIST_TABLES"})]
+
+
+def accounting_ledger_document_date(doc_type, doc_id):
+    """{company_id, voucher_date} of one document, or None (not saved / no voucher)."""
+    return exec_sp_one("dbo.sp_AccountingLedger", {"Action": "DOC_DATE", "DocType": doc_type, "DocId": doc_id})
+
+
+def accounting_ledger_date_range(company_id):
+    """(first, last) voucher date of the company - (None, None) when it has none."""
+    row = exec_sp_one("dbo.sp_AccountingLedger", {"Action": "DATE_RANGE", "CompanyId": company_id}) or {}
+    return row.get("first_date"), row.get("last_date")
+
+
+def accounting_ledger_is_dirty(company_id):
+    """True when the company's month tables were never built or must be rebuilt."""
+    row = exec_sp_one("dbo.sp_AccountingLedger", {"Action": "GET_STATUS", "CompanyId": company_id})
+    return not row or bool(row["is_dirty"])
+
+
+def accounting_ledger_set_dirty(company_id, is_dirty):
+    """company_id None = every company."""
+    exec_sp("dbo.sp_AccountingLedger", {"Action": "SET_STATUS", "CompanyId": company_id, "IsDirty": bool(is_dirty)})

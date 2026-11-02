@@ -10,9 +10,11 @@ Agent's data - the scheduler only READS it.
 Every AGENT_DB_SCHEDULER_MINUTES (`manage.py run_agent_db_scheduler`,
 started by start.bat) one run:
   1. picks up the Agent rows not yet in our dbo.Agent_DB_Ticket_Log (same
-     SQL Server, checked in SQL): every row of the same company_id +
-     booking_status + booking_reference is one invoice, picked up together,
-     and logged as 'Processing';
+     SQL Server, checked in SQL): ONE agent_ref_no = ONE invoice - every
+     row of the same company_id + agent_ref_no is a passenger of it, picked
+     up together and logged as 'Processing'. Refused: rows missing
+     agent_ref_no, an agent_ref_no an earlier invoice already used, and rows
+     of one agent_ref_no with different booking_status / booking_reference;
   2. sends them through the SAME pipeline as an API push -
      ticket_import.receive_documents() with source_system AGENT_DB: every
      value checked, problems in the Error Log ("Automated Database
@@ -55,7 +57,12 @@ HEADER_COLUMNS = [k for k in ticket_import.HEADER_PARAMS if k != "passengers"]
 # No original_ticket_no: a Reschedule's old ticket is found from its Parent PNR + passenger name.
 PAX_COLUMNS = [k for k in ticket_import.PAX_TEXT_PARAMS if k != "original_ticket_no"]
 DROPPED_COLUMNS = ["original_ticket_no"]
-AMOUNT_COLUMNS = list(ticket_import.AMOUNT_PARAMS)
+# SSR amounts that may hold one value per sector ("120/150") are text; the rest DECIMAL.
+SECTOR_AMOUNT_COLUMNS = [k for k in ticket_import.AMOUNT_PARAMS if k in ticket_import.SSR_SECTOR_VALUES]
+AMOUNT_COLUMNS = [k for k in ticket_import.AMOUNT_PARAMS if k not in SECTOR_AMOUNT_COLUMNS]
+# Agent's own reference of one invoice: one agent_ref_no = one invoice, every
+# passenger row of it has the same agent_ref_no - not an API parameter.
+REF_COLUMN = "agent_ref_no"
 TEXT_SIZES = {   # NVARCHAR sizes - roomy on purpose: a value too long is reported by the checks, not refused by SQL
     "user_name": 200, "sector": 400, "airline_code": 400, "travel_date": 400, "flight_no": 400,
     "cabin": 400, "class": 400, "fare_type": 400,
@@ -78,18 +85,29 @@ def create_sql(db, table):
     cols = [f"    agent_row_id        BIGINT IDENTITY(1,1) NOT NULL CONSTRAINT pk_{table} PRIMARY KEY,",
             f"    created_at          DATETIME2      NOT NULL CONSTRAINT df_{table}_created DEFAULT SYSUTCDATETIME(),",
             "    -- API parameters - invoice (repeated on every passenger row of the invoice)",
-            "    company_id          INT            NOT NULL,"]
+            "    company_id          INT            NOT NULL,",
+            f"    {'[' + REF_COLUMN + ']':<20} NVARCHAR(100)  NULL,   -- one agent_ref_no = one invoice (every passenger row of it)"]
     cols += [f"    {'[' + c + ']':<20} NVARCHAR({TEXT_SIZES.get(c, 100)})  NULL," for c in HEADER_COLUMNS]
     cols.append("    -- API parameters - passenger")
     cols += [f"    {'[' + c + ']':<20} NVARCHAR({TEXT_SIZES.get(c, 100)})  NULL," for c in PAX_COLUMNS]
     cols.append("    -- API parameters - amounts (NULL = \"\")")
     cols += [f"    {'[' + c + ']':<28} DECIMAL(18,2)  NULL," for c in AMOUNT_COLUMNS]
+    cols.append("    -- SSR Updation amounts - one value, or one per sector separated by / (e.g. 120/150)")
+    cols += [f"    {'[' + c + ']':<28} NVARCHAR(100)  NULL," for c in SECTOR_AMOUNT_COLUMNS]
     cols[-1] = cols[-1].rstrip(",")
     # A table created before a parameter was added (e.g. the SSR Updation ones) gets the new column.
     added = [f"IF COL_LENGTH('dbo.[{table}]', '{c}') IS NULL ALTER TABLE dbo.[{table}] ADD [{c}] NVARCHAR({TEXT_SIZES.get(c, 100)}) NULL;"
-             for c in HEADER_COLUMNS + PAX_COLUMNS]
+             for c in [REF_COLUMN] + HEADER_COLUMNS + PAX_COLUMNS]
     added += [f"IF COL_LENGTH('dbo.[{table}]', '{c}') IS NULL ALTER TABLE dbo.[{table}] ADD [{c}] DECIMAL(18,2) NULL;"
               for c in AMOUNT_COLUMNS]
+    added += [f"IF COL_LENGTH('dbo.[{table}]', '{c}') IS NULL ALTER TABLE dbo.[{table}] ADD [{c}] NVARCHAR(100) NULL;"
+              for c in SECTOR_AMOUNT_COLUMNS]
+    # Created as DECIMAL before multi-sector SSR rows: now text (the values are kept).
+    added += [f"IF EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.[{table}]') AND name = '{c}' "
+              f"AND system_type_id = TYPE_ID('decimal')) ALTER TABLE dbo.[{table}] ALTER COLUMN [{c}] NVARCHAR(100) NULL;"
+              for c in SECTOR_AMOUNT_COLUMNS]
+    added += [f"IF COL_LENGTH('dbo.[{table}]', '{c}') IS NOT NULL ALTER TABLE dbo.[{table}] DROP COLUMN [{c}];"
+              for c in DROPPED_COLUMNS]
     return f"""IF DB_ID('{db}') IS NULL
     CREATE DATABASE [{db}];
 GO
@@ -105,7 +123,7 @@ CREATE TABLE dbo.[{table}] (
 """ + "\n".join(cols) + f"""
 );
 GO
--- Columns added to the API after the table was created (safe to run again)
+-- Columns added to / removed from the API after the table was created (safe to run again)
 """ + "\n".join(added) + f"""
 GO
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'ix_{table}_invoice')
@@ -134,7 +152,7 @@ def _value(v):
 def _document(rows):
     first = rows[0]
     doc = {c: _value(first[c]) for c in HEADER_COLUMNS}
-    doc["passengers"] = [{c: _value(r[c]) for c in PAX_COLUMNS + AMOUNT_COLUMNS} for r in rows]
+    doc["passengers"] = [{c: _value(r[c]) for c in PAX_COLUMNS + AMOUNT_COLUMNS + SECTOR_AMOUNT_COLUMNS} for r in rows]
     return doc
 
 
@@ -142,7 +160,7 @@ def _new_rows(db, table, invoices):
     """
     The Agent rows of up to `invoices` invoices not yet in our log, oldest
     first - all rows of an invoice together. Read only: the log lives in the
-    accounting database on the same SQL Server or MySQL/TiDB server.
+    accounting database on the same SQL Server.
     """
     our_db = _checked("DB_NAME", settings.DATABASES["default"]["NAME"])
     conn = connections[ALIAS]
@@ -155,38 +173,63 @@ def _new_rows(db, table, invoices):
                                       WHERE l.source_database = %s AND l.source_table = %s
                                         AND l.agent_row_id = t.agent_row_id)
                 ), pick AS (
-                    SELECT TOP ({int(invoices)}) company_id, ISNULL(booking_status, N'') AS bs, ISNULL(booking_reference, N'') AS br
+                    SELECT TOP ({int(invoices)}) company_id, LTRIM(RTRIM(ISNULL([{REF_COLUMN}], N''))) AS ar
                     FROM waiting
-                    GROUP BY company_id, ISNULL(booking_status, N''), ISNULL(booking_reference, N'')
+                    GROUP BY company_id, LTRIM(RTRIM(ISNULL([{REF_COLUMN}], N'')))
                     HAVING MAX(created_at) < DATEADD(SECOND, -{SETTLE_SECONDS}, SYSUTCDATETIME())
                     ORDER BY MIN(agent_row_id)
                 )
-                SELECT w.* FROM waiting w
-                JOIN pick p ON p.company_id = w.company_id AND p.bs = ISNULL(w.booking_status, N'')
-                           AND p.br = ISNULL(w.booking_reference, N'')
+                SELECT w.*, CASE WHEN EXISTS (
+                           SELECT 1 FROM dbo.[{table}] o
+                           JOIN [{our_db}].dbo.Agent_DB_Ticket_Log l ON l.source_database = %s AND l.source_table = %s
+                                                                    AND l.agent_row_id = o.agent_row_id
+                           WHERE o.company_id = w.company_id AND p.ar <> N''
+                             AND LTRIM(RTRIM(o.[{REF_COLUMN}])) = p.ar) THEN 1 ELSE 0 END AS ref_used
+                FROM waiting w
+                JOIN pick p ON p.company_id = w.company_id AND p.ar = LTRIM(RTRIM(ISNULL(w.[{REF_COLUMN}], N'')))
                 ORDER BY w.agent_row_id;
-            """, [db, table])
+            """, [db, table, db, table])
         else:
             cursor.execute(f"""
                 WITH waiting AS (
                     SELECT t.* FROM `{table}` t
-                    WHERE NOT EXISTS (SELECT 1 FROM `{our_db}`.`Agent_DB_Ticket_Log` l
+                    WHERE NOT EXISTS (SELECT 1 FROM `{our_db}`.`agent_db_ticket_log` l
                                       WHERE l.source_database = %s AND l.source_table = %s
                                         AND l.agent_row_id = t.agent_row_id)
                 ), pick AS (
-                    SELECT company_id, IFNULL(booking_status, '') AS bs, IFNULL(booking_reference, '') AS br
+                    SELECT company_id, TRIM(IFNULL(`{REF_COLUMN}`, '')) AS ar
                     FROM waiting
-                    GROUP BY company_id, IFNULL(booking_status, ''), IFNULL(booking_reference, '')
+                    GROUP BY company_id, TRIM(IFNULL(`{REF_COLUMN}`, ''))
                     HAVING MAX(created_at) < DATE_SUB(UTC_TIMESTAMP(6), INTERVAL {SETTLE_SECONDS} SECOND)
                     ORDER BY MIN(agent_row_id)
                     LIMIT {int(invoices)}
                 )
-                SELECT w.* FROM waiting w
-                JOIN pick p ON p.company_id = w.company_id AND p.bs = IFNULL(w.booking_status, '')
-                           AND p.br = IFNULL(w.booking_reference, '')
+                SELECT w.*, CASE WHEN EXISTS (
+                           SELECT 1 FROM `{table}` o
+                           JOIN `{our_db}`.`agent_db_ticket_log` l ON l.source_database = %s AND l.source_table = %s
+                                                                   AND l.agent_row_id = o.agent_row_id
+                           WHERE o.company_id = w.company_id AND p.ar <> ''
+                             AND TRIM(o.`{REF_COLUMN}`) = p.ar) THEN 1 ELSE 0 END AS ref_used
+                FROM waiting w
+                JOIN pick p ON p.company_id = w.company_id AND p.ar = TRIM(IFNULL(w.`{REF_COLUMN}`, ''))
                 ORDER BY w.agent_row_id;
-            """, [db, table])
+            """, [db, table, db, table])
         return _rows(cursor)
+
+
+def _ref_problem(ref, group):
+    """Why the rows of one agent_ref_no cannot be an invoice - or None."""
+    if not ref:
+        return (f"{REF_COLUMN} is missing - every passenger row of an invoice must have its {REF_COLUMN} "
+                f"(Booking Reference {group[0]['booking_reference'] or '-'}).")
+    if group[0].get("ref_used"):
+        return f"{REF_COLUMN} {ref} is already used by an earlier invoice - one {REF_COLUMN} is one invoice."
+    for key, label in (("booking_status", "Booking Status"), ("booking_reference", "Booking Reference")):
+        values = sorted({(r[key] or "").strip() for r in group})
+        if len(values) > 1:
+            return (f"{REF_COLUMN} {ref} has rows with different {label} ({', '.join(v or '-' for v in values)}) - "
+                    f"one {REF_COLUMN} is one invoice: give each invoice its own {REF_COLUMN}.")
+    return None
 
 
 def _result_status(r):
@@ -242,8 +285,8 @@ def run_once(invoices=None):
         return summary   # nothing posted - no log row
 
     groups = {}
-    for r in rows:
-        groups.setdefault((r["company_id"], r["booking_status"] or "", r["booking_reference"] or ""), []).append(r)
+    for r in rows:   # one agent_ref_no = one invoice
+        groups.setdefault((r["company_id"], (r.get(REF_COLUMN) or "").strip()), []).append(r)
     summary.update(records_fetched=len(rows), invoices_fetched=len(groups))
     batch_id = f"AGENTDB-{started:%Y%m%d%H%M%S}"
     message = None
@@ -259,7 +302,12 @@ def run_once(invoices=None):
 
     try:
         by_company = {}
-        for (company_id, _, _), group in groups.items():
+        for (company_id, ref), group in groups.items():
+            text = _ref_problem(ref, group)
+            if text:
+                ticket_import._push_error(text, 400, company_id, SOURCE_SYSTEM, batch_id, REF_COLUMN, ref or None)
+                write(group, "Rejected", error=text)
+                continue
             by_company.setdefault(company_id, []).append(group)
         for company_id, company_groups in by_company.items():
             if not sp_client.company_master_get(company_id):
@@ -279,6 +327,7 @@ def run_once(invoices=None):
                           None if status == "Imported" else _result_error(r))
                     summary["documents"].append({
                         "booking_status": group[0]["booking_status"], "booking_reference": group[0]["booking_reference"],
+                        REF_COLUMN: group[0].get(REF_COLUMN),
                         "rows": len(group), "status": status, "invoice_number": r.get("invoice_number"),
                     })
     except Exception as err:  # noqa: BLE001 - rows not finished are picked up again by the next run

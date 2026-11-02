@@ -335,7 +335,7 @@
     lines.splice(editing, 1);
     close("ssr-modal"); render();
   });
-  $("ssr-lines").addEventListener("click", (e) => {
+    $("ssr-lines").addEventListener("click", (e) => {
     const row = e.target.closest(".ssr-row");
     if (row) openLine(Number(row.dataset.idx));
   });
@@ -513,6 +513,13 @@
       original_invoice: t.invoice_number, customer_name: t.customer_name, travel_type: t.travel_type,
       airline_pnr: t.airline_pnr, gds_pnr: t.gds_pnr, currency: t.currency, roe: t.roe,
     });
+    // The ticket line's Airline Category of one sector - one per sector, "/"
+    // separated like its Sector (an older line holds one category for every sector).
+    const sectorCategory = (tl, sector) => {
+      const cats = (tl.airline_category || "").split("/").map((c) => c.trim());
+      const idx = (tl.sector || "").split("/").map((x) => x.trim()).indexOf(sector);
+      return cats.length === 1 ? cats[0] : (cats[idx] || "");
+    };
     // One SSR line per picked passenger x picked sector the passenger flies.
     // A rescheduled passenger's line_id is its reschedule line; the booking
     // line it traces back to is that line's original_ticket_line_id.
@@ -523,7 +530,7 @@
       secs.filter((s) => flies.has(s.sector)).forEach((s) => lines.push({
         original_ticket_line_id: rid ? tl.original_ticket_line_id : p.line_id, reschedule_line_id: rid ? p.line_id : null,
         ticket_no: p.ticket_no, pax_name: p.passenger_name, pax_type: p.pax_type || tl.pax_type || "",
-        sector: s.sector, airline_category: tl.airline_category || "", office_id: tl.office_id || "",
+        sector: s.sector, airline_category: sectorCategory(tl, s.sector), office_id: tl.office_id || "",
         // FOP starts as Cash (not the ticket's own) - changed in the SSR popup when the SSR is paid by card.
         supplier: tl.supplier_name || t.supplier_name || "", fop: "Cash", card_number: "",
         ssr_items: {}, ssr_ticket_numbers: {}, ssr_charges: {}, seat: 0, meal: 0, baggage: 0, other_ssr: 0, markup: 0, service_fee: 0, supp_markup: 0, supp_service_fee: 0,
@@ -608,18 +615,11 @@
     $("ssr-print-btn").style.display = on && savedId ? "" : "none";
     // Opened from a report row (Day Book / Ledger) -> Back returns there,
     // same as the ticket screen's own Back link.
-    const fromParam = new URLSearchParams(window.location.search).get("from");
-    const reportMap = {
-      "dsr": ["report-dsr.html", "DSR"],
-      "returns": ["report-dsr-airline-booking.html", "Returns"],
-      "day-book": ["report-day-book.html", "Day Book"],
-      "ledger": ["report-ledger-book.html", "Ledger"],
-    };
-    const fromReport = (fromParam && reportMap[fromParam.toLowerCase()]) || [["report-day-book.html", "Day Book"], ["report-ledger-book.html", "Ledger"], ["customers.html", "Receivables"], ["suppliers.html", "Payables"], ["report-dsr-airline-booking.html", "Returns"], ["report-dsr.html", "DSR"]]
+    const fromReport = [["report-day-book.html", "Day Book"], ["report-ledger-book.html", "Ledger"], ["customers.html", "Receivables"], ["suppliers.html", "Payables"], ["report-dsr-airline-booking.html", "Returns"], ["report-dsr.html", "DSR"]]
       .find(([page]) => document.referrer.includes(page));
     $("ssr-discard-btn").textContent = on ? `<- Back to ${fromReport ? fromReport[1] : "SSR"}` : "Discard";
     $("ssr-discard-btn").setAttribute("href", on
-      ? (fromReport ? (document.referrer || fromReport[0]) : "trans-airline-ssr.html")
+      ? (fromReport ? document.referrer : "trans-airline-ssr.html")
       : (savedId ? `trans-airline-ssr.html?ssr_saved_id=${savedId}` : "trans-airline-ssr.html"));
     render();
   }

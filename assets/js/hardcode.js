@@ -273,7 +273,7 @@
       ((window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") && window.location.port !== "8000");
     try {
       const xhr = new XMLHttpRequest();
-      xhr.open("GET", (local ? "http://127.0.0.1:8000/api" : "/api") + "/airline-dropdowns/", false);
+      xhr.open("GET", (local ? "/api" : "/api") + "/airline-dropdowns/", false);
       xhr.setRequestHeader("Authorization", "Bearer " + token);
       xhr.send();
       if (xhr.status !== 200) throw new Error("HTTP " + xhr.status);

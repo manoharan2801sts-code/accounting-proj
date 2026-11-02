@@ -417,9 +417,6 @@
       <div class="dom-modal-col-left">
         <div class="dom-modal-section-title">Passenger &amp; Segment Details</div>
         <div class="dom-modal-form-grid">
-          <label>Airline Category</label>
-          <select class="dom-select" id="modal-airline-category"></select>
-
           <label>Ticket No<span class="dom-req">*</span></label>
           <!-- No flat maxlength - the 10-digit cap applies to the base
                ticket number only (readModalPassenger/Save validates this),
@@ -891,6 +888,9 @@
           <input class="dom-input" type="text" id="sector-airline-name" list="sector-airline-name-options" placeholder="e.g. IndiGo" autocomplete="off" style="flex:1;" />
           <datalist id="sector-airline-name-options"></datalist>
         </div>
+
+        <label>Airline Category</label>
+        <select class="dom-select" id="sector-airline-category"></select>
 
         <label>Travel Date</label>
         <div class="date-group" id="sector-travel-date">
@@ -1531,10 +1531,10 @@
 <script src="assets/js/hardcode.js?v=12"></script>
 <script src="assets/js/mock-data.js"></script>
 <script src="assets/js/loader.js?v=5"></script>
-<script src="assets/js/api.js?v=53"></script>
-<script src="assets/js/util.js?v=53"></script>
-<script src="assets/js/shell.js?v=53"></script>
+<script src="assets/js/api.js?v=5"></script>
+<script src="assets/js/util.js?v=6"></script>
+<script src="assets/js/shell.js?v=49"></script>
 <script src="assets/js/entry-common.js"></script>
-<script src="assets/js/invoice-templates.js?v=22"></script>
-<script src="assets/js/page-ticket-entry.js?v=179"></script>
+<script src="assets/js/invoice-templates.js?v=23"></script>
+<script src="assets/js/page-ticket-entry.js?v=180"></script>
 </body></html>

@@ -52,7 +52,7 @@ from django.http import HttpResponseNotAllowed, HttpResponseRedirect, JsonRespon
 from django.test import RequestFactory
 from django.views.decorators.csrf import csrf_exempt
 
-from . import models, permissions, sp_client, views
+from . import ledger_months, models, permissions, sp_client, views
 
 logger = logging.getLogger(__name__)
 
@@ -145,6 +145,21 @@ AMOUNT_PARAMS = {
     "supp_addl_markup_reversal": ("Supplier Additional Markup Reversal", "supp_addl_markup_reversal"),
     "supp_ssr_markup_reversal": ("Supplier SSR Markup Reversal", "supp_ssr_markup_reversal"),
 }
+# SSR Updation - Supplier / Customer SSR Markup and Service Fee per SSR type
+# (the SSR screen's SSR Charges grid), e.g. baggage_sup_ssr_markup. Saved on
+# the SSR line as ssr_charges; the line's markup / service fee are their sums.
+SSR_TYPE_PREFIX = {"Baggage": "baggage", "Meal": "meal", "Seat": "seat", "Other SSR": "other"}
+SSR_TYPE_CHARGES = {   # ssr_charges key -> (parameter suffix, label)
+    "supp_markup": ("sup_ssr_markup", "Supplier SSR Markup"),
+    "supp_service_fee": ("sup_ssr_service_fee", "Supplier SSR Service Fee"),
+    "markup": ("cus_ssr_markup", "Customer SSR Markup"),
+    "service_fee": ("cus_ssr_service_fee", "Customer SSR Service Fee"),
+}
+SSR_TYPE_PARAMS = {f"{prefix}_{suffix}": (f"{ssr_type} {label}", None)
+                   for ssr_type, prefix in SSR_TYPE_PREFIX.items() for suffix, label in SSR_TYPE_CHARGES.values()}
+AMOUNT_PARAMS.update(SSR_TYPE_PARAMS)
+# SSR totals replaced by the per-type parameters above (still used by Booking / Reschedule).
+SSR_TOTAL_PARAMS = ("cust_ssr_markup", "cust_ssr_service_fee", "supp_ssr_markup", "supp_ssr_service_fee")
 PENALTY_PARAMS = ("supplier_penalty", "agent_penalty", "penalty_amount")
 REVERSAL_PARAMS = (
     "cust_markup_reversal", "cust_addl_markup_reversal", "cust_ssr_markup_reversal",
@@ -189,9 +204,9 @@ REQUIRED_PAX["SSR"] = ("ticket_no", "pax_name", "pax_type", "airline_category", 
 # Parameters that belong to another Booking Status - a value (other than
 # blank / 0) is refused, so it is never silently dropped.
 NOT_ALLOWED = {
-    "Confirmed": ("parent_pnr", "original_ticket_no") + PENALTY_PARAMS + REVERSAL_PARAMS,
-    "Rescheduled": REVERSAL_PARAMS,
-    "Cancelled": ("original_ticket_no",),
+    "Confirmed": ("parent_pnr", "original_ticket_no") + PENALTY_PARAMS + REVERSAL_PARAMS + tuple(SSR_TYPE_PARAMS),
+    "Rescheduled": REVERSAL_PARAMS + tuple(SSR_TYPE_PARAMS),
+    "Cancelled": ("original_ticket_no",) + tuple(SSR_TYPE_PARAMS),
     # SSR line amounts are only the SSR charges + SSR Markup / Service Fee (+ their GST).
     "SSR": ("original_ticket_no", "basic_fare", "yq_tax", "yr_tax", "k3_tax", "tax_others",
             "cust_discount_amount", "cust_tds_amount", "cust_markup", "cust_addl_markup", "cust_service_fee",
@@ -199,6 +214,16 @@ NOT_ALLOWED = {
             "supp_commission_amount", "supp_tds_amount", "supp_markup", "supp_addl_markup", "supp_service_fee",
             "supp_addl_service_fee", "supp_service_fee_gst", "supp_addl_service_fee_gst") + PENALTY_PARAMS + REVERSAL_PARAMS,
 }
+# SSR Updation on several sectors - one passenger row, split into one SSR line
+# per sector: Agent table = Sector "DXB-AMD/AMD-DEL" and every per-sector value
+# "/"-separated in the same order (e.g. baggage_charges "120/150"; an empty
+# part = nothing on that sector); API = a "sectors" list, one object per sector
+# holding "sector" and that sector's values. Airline Category and the flight details may be sent once
+# (kept for every sector) or one per sector ("/"; Travel Date "," - a date has
+# "/" in it).
+SSR_SECTOR_VALUES = (tuple(SSR_TEXT_PARAMS) + tuple(charge for _emd, _detail, charge in SSR_PARAMS.values())
+                     + tuple(SSR_TYPE_PARAMS) + ("cust_ssr_service_fee_gst", "supp_ssr_service_fee_gst"))
+SSR_SECTOR_FLIGHT = ("airline_category", "airline_code", "flight_no", "cabin", "class", "fare_type", "travel_date")
 # SSR line field <- the passenger's SSR Markup / Service Fee (AMOUNT_PARAMS field).
 SSR_LINE_AMOUNTS = {"seat": "seat", "meal": "meal", "baggage": "baggage", "other_ssr": "other_ssr",
                     "markup": "ssr_markup", "service_fee": "ssr_service_fee",
@@ -215,12 +240,12 @@ HEADER_TEXT = {
     "invoice_number": 20, "invoice_type": 100, "booking_type": 50,
     "customer_name": 150, "supplier_name": 150, "travel_type": 20, "user_name": 100, "currency": 5,
     "booking_given_by": 25, "booking_reference": 30, "airline_pnr": 13, "gds_pnr": 13, "office_id": 30,
-    "payment_mode": 20, "payment_gateway_ref": 60, "airline_category": 5,
+    "payment_mode": 20, "payment_gateway_ref": 60, "airline_category": 200,
 }
 HEADER_DATES = ("invoice_date", "booking_ref_date")
 HEADER_NUMBERS = ("roe",)
 PAX_TEXT = {
-    "original_ticket_no": 30, "airline_code": 200, "airline_name": 200, "airline_category": 5, "flight_no": 200,
+    "original_ticket_no": 30, "airline_code": 200, "airline_name": 200, "airline_category": 200, "flight_no": 200,
     "ticket_no": 30, "passenger_name": 50, "pax_type": 10, "sector": 200, "travel_date": 200, "cabin": 200,
     "travel_class": 200, "fare_type": 300, "supplier_name": 150, "office_id": 30, "fop": 20, "card_number": 40,
     "status": 15, "disc_on": 20, "disc_type": 12, "supp_comm_on": 20, "supp_comm_type": 12,
@@ -256,6 +281,8 @@ REVERSAL_LIMITS = {
 DATA_DIR = Path(settings.BASE_DIR).parent / "assets" / "data"
 ALNUM = re.compile(r"^[A-Za-z0-9]+$")
 SECTOR_PAIR = re.compile(r"^([A-Z]{3})-([A-Z]{3})$")
+# Several sectors: "/" between them (models.SEGMENT_SEP); Travel Date keeps ",".
+SEGMENT_SEP = models.SEGMENT_SEP
 # Ticket No: letters, numbers and special characters, at most 14 in all (any -1/-2
 # suffix included) - the same limit as the Ticket Entry screen (TICKET_NO_MAX).
 TICKET_NO_MAX = 14
@@ -302,7 +329,7 @@ def _airline_names():
     for code, name in _xml_records("Airlinenames.xml", "AIRLINEDET", ("_CODE", "_NAME")):
         code = code.upper().rstrip("*")
         if code and name and code not in out:
-            out[code] = name
+            out[code] = re.sub(r"\s*/\s*", " - ", name.strip())   # "Air Central / ANA" -> "Air Central - ANA"
     return out
 
 
@@ -471,7 +498,7 @@ class _DocumentCheck:
         return str(value).strip()
 
     def _codes(self, src, key, label, list_key, pax=None, exclude=()):
-        """Names of the comma-separated codes in src[key] (one code -> one name), or None."""
+        """Names of the "/"-separated codes in src[key] (one code -> one name), or None."""
         value = src.get(key)
         if _blank(value):
             return None
@@ -482,7 +509,7 @@ class _DocumentCheck:
             self.problems.add("Invalid Format", key, label, f"{label} must be a code ({listing}).", value, listing, pax)
             return None
         names = []
-        for code in [c.strip() for c in text.split(",")]:
+        for code in [c.strip() for c in text.split(SEGMENT_SEP)]:
             name = valid.get(code.upper())
             if name is None:
                 self.problems.add(
@@ -584,6 +611,8 @@ class _DocumentCheck:
         self.status = STATUS_BY_NAME.get(name)
         if not self.status:
             return None   # what is required depends on it
+        if self.status == "SSR":
+            doc = self.doc = self._split_sectors(doc)
 
         header = self._header(doc)
         passengers = self._passengers(doc, header)
@@ -593,6 +622,81 @@ class _DocumentCheck:
         if self.status == "SSR":
             doc_ref = _ssr_doc_ref(doc_ref, doc)
         return {"ticket_status": self.status, "doc_ref": doc_ref, "header": header, "passengers": passengers}
+
+    def _split_sectors(self, doc):
+        """SSR: a passenger on several sectors ("/" Sector or a "sectors" list) -> one passenger per sector."""
+        passengers = doc.get("passengers")
+        if not isinstance(passengers, list):
+            return doc
+        out = []
+        for n, pax in enumerate(passengers, 1):
+            if not isinstance(pax, dict):
+                out.append(pax)
+                continue
+            if "sectors" in pax:
+                out.extend(self._sector_list(pax, n))
+            elif isinstance(pax.get("sector"), str) and "/" in pax["sector"]:
+                out.extend(self._sector_slashes(pax, n))
+            else:
+                out.append(pax)
+        return {**doc, "passengers": out}
+
+    def _sector_list(self, pax, n):
+        """API: "sectors": [{"sector": "DXB-AMD", "baggage_charges": 120, ...}, ...]."""
+        sectors = pax["sectors"]
+        base = {k: v for k, v in pax.items() if k != "sectors"}
+        if not isinstance(sectors, list) or not sectors or not all(isinstance(s, dict) for s in sectors):
+            self.problems.add("Invalid Format", "sectors", "Sectors",
+                              "Sectors must be a list of objects, one per sector, e.g. [{\"sector\": \"DXB-AMD\", ...}].",
+                              sectors, "a non-empty list of objects", n)
+            return [base]
+        allowed = ("sector",) + SSR_SECTOR_VALUES + SSR_SECTOR_FLIGHT
+        for key in ("sector",) + SSR_SECTOR_VALUES:
+            if not _blank(base.get(key)) and not (key in AMOUNT_PARAMS and self._is_zero(base.get(key))):
+                self.problems.add("Not Allowed", key, key,
+                                  f"\"{key}\" is sent per sector when \"sectors\" is used - put it inside each sectors "
+                                  f"item, not on the passenger.", base.get(key), "inside sectors", n)
+        out = []
+        for i, item in enumerate(sectors, 1):
+            for key in item:
+                if key not in allowed:
+                    self.problems.add("Not Allowed", key, key,
+                                      f"\"{key}\" is not a per-sector value (sectors item {i}) - send it on the passenger.",
+                                      item[key], ", ".join(allowed), n)
+            out.append({**base, **{k: v for k, v in item.items() if k in allowed}})
+        return out
+
+    def _sector_slashes(self, pax, n):
+        """Agent table: Sector "DXB-AMD/AMD-DEL", each per-sector value "/"-separated in the same order."""
+        sectors = [s.strip() for s in pax["sector"].split("/")]
+        count = len(sectors)
+        out = [{**pax, "sector": sector} for sector in sectors]
+
+        def spread(key, parts):
+            if len(parts) != count:
+                self.problems.add("Invalid Format", key, key,
+                                  f"\"{key}\" has {len(parts)} value(s) but Sector \"{pax['sector']}\" has {count} sectors - "
+                                  f"send one per sector separated by \"/\" (leave a part empty for none).",
+                                  pax.get(key), f"{count} values separated by /", n)
+                return
+            for row, part in zip(out, parts):
+                row[key] = part.strip()
+
+        for key in SSR_SECTOR_VALUES:
+            value = pax.get(key)
+            if _blank(value):
+                continue
+            if isinstance(value, str) and "/" in value:
+                spread(key, value.split("/"))
+            elif not (key in AMOUNT_PARAMS and self._is_zero(value)):
+                spread(key, [str(value)])   # one value for several sectors - refused (would be counted on every sector)
+        for key in SSR_SECTOR_FLIGHT:   # optional; one value = the same on every sector
+            value = pax.get(key)
+            if isinstance(value, str):
+                parts = value.split(",") if key == "travel_date" else value.split(SEGMENT_SEP)
+                if len(parts) > 1:
+                    spread(key, parts)
+        return out
 
     def doc_ref_guess(self):
         """doc_ref of an invoice that was rejected - to tie its error log rows to a later good push."""
@@ -776,9 +880,6 @@ class _DocumentCheck:
         pax_type = self._code(pax, "pax_type", "Pax Type", "paxTypes", n)
         if pax_type:
             line["pax_type"] = pax_type
-        category = self._code(pax, "airline_category", "Airline Category", "airlineCategories", n)
-        if category:
-            line["airline_category"] = category
 
         self._segments(pax, n, line)
         self._supplier(pax, n, line)
@@ -796,11 +897,17 @@ class _DocumentCheck:
 
     def _ssr(self, pax, n, line):
         """SSR Updation: one sector per row, SSR Details per type (+ its EMD Ticket No), at least one."""
-        if "," in (line.get("sector") or ""):
+        if SEGMENT_SEP in (line.get("sector") or ""):
             self.problems.add("Invalid Format", "sector", "Sector",
                               f"Sector \"{line['sector']}\" has more than one segment - an SSR Updation row is one passenger "
                               f"on ONE sector: send one row per sector.", pax.get("sector"), "one sector, e.g. MAA-DEL", n)
-        items, numbers, problems_before = {}, {}, len(self.problems.errors)
+        for key in SSR_TOTAL_PARAMS:
+            if not _blank(pax.get(key)) and not self._is_zero(pax.get(key)):
+                prefix = key.replace("cust_", "cus_").replace("supp_", "sup_")
+                self.problems.add("Not Allowed", key, AMOUNT_PARAMS[key][0],
+                                  f"{AMOUNT_PARAMS[key][0]} is sent per SSR type for an SSR Updation - use baggage_{prefix}, "
+                                  f"meal_{prefix}, seat_{prefix} / other_{prefix} and send this empty.", pax.get(key), "empty", n)
+        items, numbers, charges, problems_before = {}, {}, {}, len(self.problems.errors)
         for ssr_type, (emd_key, detail_key, charge_key) in SSR_PARAMS.items():
             detail = self._text(pax, detail_key, SSR_TEXT_PARAMS[detail_key], 100, n)
             emd = self._text(pax, emd_key, SSR_TEXT_PARAMS[emd_key], 30, n)
@@ -808,30 +915,46 @@ class _DocumentCheck:
                 items[ssr_type] = detail
             if emd:
                 numbers[ssr_type] = emd
-            charged = not _blank(pax.get(charge_key)) and not self._is_zero(pax.get(charge_key))
+            row = {"amount": line.get(AMOUNT_PARAMS[charge_key][1]) or 0}
+            for field, (suffix, _label) in SSR_TYPE_CHARGES.items():
+                param = f"{SSR_TYPE_PREFIX[ssr_type]}_{suffix}"
+                row[field] = self._amount(pax, param, AMOUNT_PARAMS[param][0], n) or 0
+            charged = next((k for k, v in row.items() if v), None)
+            if charged:
+                charges[ssr_type] = row
             if not detail and _blank(pax.get(detail_key)) and (emd or charged):
-                why = f"{SSR_TEXT_PARAMS[emd_key]} is sent" if emd else f"{AMOUNT_PARAMS[charge_key][0]} is sent"
-                self._missing(detail_key, SSR_TEXT_PARAMS[detail_key], n, f" - {why} for {ssr_type}")
+                if emd:
+                    why = SSR_TEXT_PARAMS[emd_key]
+                elif charged == "amount":
+                    why = AMOUNT_PARAMS[charge_key][0]
+                else:
+                    why = AMOUNT_PARAMS[f"{SSR_TYPE_PREFIX[ssr_type]}_{SSR_TYPE_CHARGES[charged][0]}"][0]
+                self._missing(detail_key, SSR_TEXT_PARAMS[detail_key], n, f" - {why} is sent for {ssr_type}")
         if not items and len(self.problems.errors) == problems_before:
             self._missing("ssr_baggage_details", "SSR Details", n,
                           " - send at least one: ssr_baggage_details, ssr_meal_details, ssr_seat_details or ssr_other_details")
         line["ssr_items"] = items
         line["ssr_ticket_numbers"] = numbers
+        line["ssr_charges"] = charges
+        # The line's SSR Markup / Service Fee = the per-type sums (what the SSR screen saves).
+        for field, line_field in (("markup", "ssr_markup"), ("service_fee", "ssr_service_fee"),
+                                  ("supp_markup", "supp_ssr_markup"), ("supp_service_fee", "supp_ssr_service_fee")):
+            line[line_field] = _round2(sum(c[field] for c in charges.values()))
 
     def _segments(self, pax, n, line):
-        """Sector + the per-segment fields (comma separated, same order as the sectors)."""
+        """Sector + the per-segment fields ("/" separated, same order as the sectors; Travel Date ",")."""
         segments = None
         raw = pax.get("sector")
         if not _blank(raw):
             text = self._text(pax, "sector", "Sector", 200, n)
             if text:
                 segments = []
-                for part in [s.strip().upper() for s in text.split(",")]:
+                for part in [s.strip().upper() for s in text.split(SEGMENT_SEP)]:
                     match = SECTOR_PAIR.match(part)
                     if not match or match.group(1) == match.group(2):
                         self.problems.add("Invalid Format", "sector", "Sector",
                                           f"Sector \"{part}\" is not valid - send Origin-Destination airport codes, e.g. "
-                                          f"MAA-DEL (comma for a connecting trip: MAA-DEL,DEL-BOM).", raw, "AAA-BBB", n)
+                                          f"MAA-DEL (\"/\" for a connecting trip: MAA-DEL/DEL-BOM).", raw, "AAA-BBB", n)
                         segments = None
                         break
                     unknown = [c for c in match.groups() if c not in self.masters.airports]
@@ -843,7 +966,7 @@ class _DocumentCheck:
                         break
                     segments.append(part)
         if segments:
-            line["sector"] = ",".join(segments)
+            line["sector"] = SEGMENT_SEP.join(segments)
         count = len(segments) if segments else None
 
         def per_segment(key, label, values, allow_single):
@@ -851,9 +974,10 @@ class _DocumentCheck:
             if values is None:
                 return None
             if count and len(values) != count and not (allow_single and len(values) == 1):
+                sep = "," if key == "travel_date" else SEGMENT_SEP
                 self.problems.add("Mismatch", key, label,
                                   f"{label} has {len(values)} value(s) but Sector has {count} segment(s) - send one per "
-                                  f"segment, comma separated, in the same order.", pax.get(key), f"{count} value(s)", n)
+                                  f"segment, separated by \"{sep}\", in the same order.", pax.get(key), f"{count} value(s)", n)
                 return None
             if count and len(values) == 1 and allow_single:
                 values = values * count
@@ -863,7 +987,7 @@ class _DocumentCheck:
         if not _blank(pax.get("airline_code")):
             text = self._text(pax, "airline_code", "Airline Code", 200, n)
             if text:
-                codes = [c.strip().upper() for c in text.split(",")]
+                codes = [c.strip().upper() for c in text.split(SEGMENT_SEP)]
                 unknown = [c for c in codes if c not in self.masters.airlines]
                 if unknown:
                     self.problems.add("Not Mapped", "airline_code", "Airline Code",
@@ -872,8 +996,8 @@ class _DocumentCheck:
                     codes = None
         codes = per_segment("airline_code", "Airline Code", codes, True)
         if codes:
-            line["airline_code"] = ",".join(codes)
-            line["airline_name"] = ",".join(self.masters.airlines[c] for c in codes)
+            line["airline_code"] = SEGMENT_SEP.join(codes)
+            line["airline_name"] = SEGMENT_SEP.join(self.masters.airlines[c] for c in codes)
 
         dates = None
         if not _blank(pax.get("travel_date")):
@@ -894,7 +1018,7 @@ class _DocumentCheck:
         if not _blank(pax.get("flight_no")):
             text = self._text(pax, "flight_no", "Flight No", 200, n)
             if text:
-                flights = [f.strip() for f in text.split(",")]
+                flights = [f.strip() for f in text.split(SEGMENT_SEP)]
                 bad = [f for f in flights if not FLIGHT_NO.match(f)]
                 if bad:
                     self.problems.add("Invalid Format", "flight_no", "Flight No",
@@ -903,20 +1027,25 @@ class _DocumentCheck:
                     flights = None
         flights = per_segment("flight_no", "Flight No", flights, False)
         if flights:
-            line["flight_no"] = ",".join(flights)
+            line["flight_no"] = SEGMENT_SEP.join(flights)
 
+        # Airline Category - one per sector like Cabin (LCC/FSC); a single code is every sector's.
+        categories = per_segment("airline_category", "Airline Category",
+                                 self._codes(pax, "airline_category", "Airline Category", "airlineCategories", n), True)
+        if categories:
+            line["airline_category"] = SEGMENT_SEP.join(categories)
         cabins = per_segment("cabin", "Cabin", self._codes(pax, "cabin", "Cabin", "cabinOptions", n), True)
         if cabins:
-            line["cabin"] = ",".join(cabins)
+            line["cabin"] = SEGMENT_SEP.join(cabins)
         fares = per_segment("fare_type", "Fare Type", self._codes(pax, "fare_type", "Fare Type", "fareTypeOptions", n), True)
         if fares:
-            line["fare_type"] = ",".join(fares)
+            line["fare_type"] = SEGMENT_SEP.join(fares)
 
         classes = None
         if not _blank(pax.get("class")):
             text = self._text(pax, "class", "Class", 200, n)
             if text:
-                classes = [c.strip() for c in text.split(",")]
+                classes = [c.strip() for c in text.split(SEGMENT_SEP)]
                 bad = [c for c in classes if not CLASS_TEXT.match(c)]
                 if bad:
                     self.problems.add("Invalid Format", "class", "Class",
@@ -924,7 +1053,7 @@ class _DocumentCheck:
                     classes = None
         classes = per_segment("class", "Class", classes, True)
         if classes:
-            line["travel_class"] = ",".join(classes)
+            line["travel_class"] = SEGMENT_SEP.join(classes)
 
     def _supplier(self, pax, n, line):
         office_id = self._text(pax, "office_id", "Office ID", 30, n)
@@ -1069,7 +1198,7 @@ def _staging_rows(company_id, source_system, doc, context, request_doc):
             }, default=str),
         }
         for key, value in pax.items():
-            if key not in ("gst_amounts", "ssr_items", "ssr_ticket_numbers"):   # kept in raw_payload only
+            if key not in ("gst_amounts", "ssr_items", "ssr_ticket_numbers", "ssr_charges"):   # kept in raw_payload only
                 row[PAX_TO_STAGING.get(key, key)] = value
         row["source_record_id"] = f"{doc['ticket_status']}|{doc['doc_ref']}|{i}"
         rows.append(row)
@@ -1498,7 +1627,7 @@ def _ssr_payload(company_id, rows):
         parent = parents.get(r["original_ticket_no"])
         line = _line(r)
         _inherit(line, header, ("airline_category", "office_id", "supplier_name"))
-        live_sectors = [s.strip().upper() for s in ((parent or {}).get("sector") or "").split(",") if s.strip()]
+        live_sectors = [s.strip().upper() for s in ((parent or {}).get("sector") or "").split(SEGMENT_SEP) if s.strip()]
         if parent and line.get("sector") and line["sector"].upper() not in live_sectors:
             problems.add("Mismatch", "sector", "Sector",
                          f"Sector {line['sector']} is not on ticket {r['original_ticket_no']} - its sectors are "
@@ -1524,6 +1653,7 @@ def _ssr_payload(company_id, rows):
                                         "supplier_name", "fop", "card_number")},
             "ssr_items": passenger.get("ssr_items") or {},
             "ssr_ticket_numbers": passenger.get("ssr_ticket_numbers") or {},
+            "ssr_charges": passenger.get("ssr_charges") or {},
             **{k: line.get(f) or 0 for k, f in SSR_LINE_AMOUNTS.items()},
         })
     if problems.items:
@@ -1611,16 +1741,17 @@ def _save(view, payload, rows, acting_user):
             line["gst_amounts"] = _pushed_gst(r)
     status_code, data = _call_view(view, payload, acting_user)
     if status_code in (200, 201) and view in PG_CHARGE_LINES:
-        _set_pg_charges(PG_CHARGE_LINES[view], payload, data.get("id"))
+        _set_pg_charges(*PG_CHARGE_LINES[view], payload, data.get("id"))
     return status_code, data
 
 
-def _set_pg_charges(lines_of, payload, header_id):
+def _set_pg_charges(doc_type, lines_of, payload, header_id):
     """
     Payment Gateway: each saved passenger's PG Charges = its Total Billed x the gateway's PG
     Master PG Charges % in force on the Invoice Date - the Ticket Entry screen's
     updatePgCharges(). Set after the save, from the Total Billed the view worked out.
     (SSR / Cancellation lines carry no PG Charges, same as their screens.)
+    The month-wise ledger tables are worked out again for the new PG Receipt.
     """
     if payload.get("payment_mode") != "Payment Gateway" or not header_id:
         return
@@ -1630,11 +1761,13 @@ def _set_pg_charges(lines_of, payload, header_id):
     for line_id, total in lines_of(header_id).values_list("id", "total_billed"):
         lines_of(header_id).filter(id=line_id).update(
             pg_charges_percentage=pct, pg_charges=_round2(float(total or 0) * pct / 100))
+    ledger_months.sync_document(doc_type, header_id)
 
 
-PG_CHARGE_LINES = {   # view -> its saved lines, by header id
-    views.ticket_create: lambda header_id: models.TicketLine.objects.filter(ticket_id=header_id),
-    views.reschedule_ticket_create: lambda header_id: models.RescheduleAirlineTicketLine.objects.filter(reschedule_ticket_id=header_id),
+PG_CHARGE_LINES = {   # view -> (document type, its saved lines by header id)
+    views.ticket_create: ("ticket", lambda header_id: models.TicketLine.objects.filter(ticket_id=header_id)),
+    views.reschedule_ticket_create: ("reschedule", lambda header_id: models.RescheduleAirlineTicketLine.objects.filter(
+        reschedule_ticket_id=header_id)),
 }
 
 
@@ -1844,6 +1977,7 @@ def receive_documents(company_id, source_system, batch_id, documents, process_no
     for n, doc in enumerate(documents, 1):
         check = _DocumentCheck(doc, masters, today)
         cleaned = check.run()
+        doc = check.doc   # an SSR passenger on several sectors is one passenger per sector from here on
         problems = check.problems
         doc_ref = cleaned["doc_ref"] if cleaned else check.doc_ref_guess()
         key = _doc_key(company_id, source_system, check.status, doc_ref) if check.status and doc_ref else None

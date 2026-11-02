@@ -168,15 +168,16 @@
     const cu = d.customer;
     const num = (v) => Number(v) || 0;
     const kv = (rows) => rows.filter(([, v]) => v).map(([k, v]) => `<tr><td class="k">${esc(k)}</td><td class="v">${esc(v)}</td></tr>`).join("");
-    const multi = (v) => String(v || "").split(",").map((x) => esc(x.trim())).filter(Boolean).join("<br/>");
+    // Several sectors: "/" between them (sector, flight, class, airline); Travel Date keeps ",".
+    const multi = (v, sep = ",") => String(v || "").split(sep).map((x) => esc(x.trim())).filter(Boolean).join("<br/>");
     // Trip table - one row for the whole invoice: each column lists its
     // distinct values across the passengers (passenger names / types / ticket
     // numbers sit in the fare table below).
-    const uniq = (f) => multi([...new Set(d.lines.flatMap((l) => String(f(l) || "").split(",")).map((x) => x.trim()).filter(Boolean))].join(","));
+    const uniq = (f, sep = "/") => multi([...new Set(d.lines.flatMap((l) => String(f(l) || "").split(sep)).map((x) => x.trim()).filter(Boolean))].join(sep), sep);
     const airlinePnr = d.airlinePnr || ((d.infoRows || []).find(([k]) => /airline pnr/i.test(k)) || [])[1] || "";
-    const tripRow = `<tr><td class="c">${uniq((l) => l.productType)}</td><td class="c">${uniq((l) => l.gdsPnr)}</td><td class="c">${multi(airlinePnr)}</td>
+    const tripRow = `<tr><td class="c">${uniq((l) => l.productType, ",")}</td><td class="c">${uniq((l) => l.gdsPnr, ",")}</td><td class="c">${multi(airlinePnr)}</td>
       <td class="c nw">${uniq((l) => l.airlineName || l.airline)}</td><td class="c">${uniq((l) => l.cls)}</td><td class="c nw">${uniq((l) => l.sector)}</td>
-      <td class="c">${uniq((l) => l.flight)}</td><td class="c">${uniq((l) => l.travelDate)}</td></tr>`;
+      <td class="c">${uniq((l) => l.flight)}</td><td class="c">${uniq((l) => l.travelDate, ",")}</td></tr>`;
 
     // Fare table. Total (per line) = the billed amount before GST and TDS -
     // both are added back in the summary below, like the reference invoice.
@@ -356,7 +357,8 @@
     const cu = d.customer;
     const num = (v) => Number(v) || 0;
     const na = (v) => esc(v && String(v).trim() ? v : "N/A");
-    const uniq = (vals) => [...new Set(vals.flatMap((v) => String(v || "").split(",")).map((v) => v.trim()).filter(Boolean))];
+    // Several sectors: "/" between them; Travel Date / GDS PNR keep ",".
+    const uniq = (vals, sep = "/") => [...new Set(vals.flatMap((v) => String(v || "").split(sep)).map((v) => v.trim()).filter(Boolean))];
     const PAX = { ADULT: "ADT", CHILD: "CHD", INFANT: "INF" };
     const yq = (l) => num(l.yq ?? (l.taxParts || {}).YQ);
     const sum = (f) => d.lines.reduce((s, l) => s + f(l), 0);
@@ -415,8 +417,8 @@
 
     const airlinePnr = d.airlinePnr || ((d.infoRows || []).find(([k]) => /airline pnr/i.test(k)) || [])[1] || "";
     const flightRow = [uniq(d.lines.map((l) => l.airlineName || l.airline)).join(", "), d.refValue, airlinePnr,
-      uniq(d.lines.map((l) => l.gdsPnr)).join(", "), uniq(d.lines.map((l) => l.flight)).join(", "),
-      uniq(d.lines.map((l) => l.sector)).join(", "), uniq(d.lines.map((l) => l.travelDate)).join(", ")];
+      uniq(d.lines.map((l) => l.gdsPnr), ",").join(", "), uniq(d.lines.map((l) => l.flight)).join(", "),
+      uniq(d.lines.map((l) => l.sector)).join(", "), uniq(d.lines.map((l) => l.travelDate), ",").join(", ")];
     const paxRows = d.lines.map((l, i) => `<tr><td>${i + 1}</td><td>${esc(l.ticketNo)}</td><td>${esc(l.pax)}</td>
       <td>${esc(PAX[String(l.paxType || "").toUpperCase()] || l.paxType || "")}</td><td>${n2(l.fare)}</td><td>${n2(yq(l))}</td><td>${n2(otherTax(l))}</td>
       <td>${n2(l.baggage)}</td><td>${n2(l.seat)}</td><td>${n2(l.meal)}</td><td>${n2(l.otherSsr)}</td><td>${n2(rowTotal(l))}</td></tr>`).join("");

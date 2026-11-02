@@ -110,6 +110,9 @@
   // either field shows matching airlines, and picking/typing an exact
   // code or name auto-fills the other (see sector-airline-code/name
   // "input" listeners below).
+  // Several sectors on one passenger: "/" between them in Sector and every
+  // per-sector field (models.SEGMENT_SEP); Travel Date only keeps "," (a date has "/").
+  const SEGMENT_SEP = "/";
   let airlineList = []; // [{code, name}], deduped by code
   async function loadAirlinesFromXml() {
     const codeOptions = document.getElementById("sector-airline-code-options");
@@ -123,7 +126,8 @@
       const seen = new Set();
       airlineList = Array.from(xml.querySelectorAll("AIRLINEDET")).reduce((acc, el) => {
         const code = (el.querySelector("_CODE")?.textContent || "").trim().toUpperCase().replace(/\*$/, "");
-        const name = (el.querySelector("_NAME")?.textContent || "").trim();
+        // "/" separates sectors - a name like "Air Central / ANA" is kept as "Air Central - ANA" (same as the server).
+        const name = (el.querySelector("_NAME")?.textContent || "").trim().replace(/\s*\/\s*/g, " - ");
         if (code && name && !seen.has(code)) { seen.add(code); acc.push({ code, name }); }
         return acc;
       }, []).sort((a, b) => a.code.localeCompare(b.code));
@@ -268,7 +272,7 @@
   fillPlain(document.getElementById("modal-disc-type"), OPT.custDiscountTypes, "Select...");
   fillPlain(document.getElementById("modal-supp-comm-on"), OPT.custDiscountOn, "Select...");
   fillPlain(document.getElementById("modal-supp-comm-type"), OPT.custDiscountTypes, "Select...");
-  fillPlain(document.getElementById("modal-airline-category"), OPT.airlineCategories, "Select...");
+  fillPlain(document.getElementById("sector-airline-category"), OPT.airlineCategories, "Select...");
   // Starts Cash-only - Own Card/Client Card only get added once we know
   // whether FOP Master actually has an active card of that type (see
   // populateFopOptions below, called from populateRefs).
@@ -632,7 +636,9 @@
   async function autofillSupplierCommission() {
     const officeId = document.getElementById("modal-office-id").value.trim();
     const travelType = document.getElementById("travel_type").value;
-    const airlineCategory = document.getElementById("modal-airline-category").value;
+    // Airline Category is per sector now - the rule matches when every sector has that category.
+    const categories = [...new Set(modalSectors.map((s) => s.airlineCategory || ""))];
+    const airlineCategory = categories.length === 1 ? categories[0] : joinSectorField("airlineCategory");
     const cabin = joinSectorField("cabin");
     const fareType = joinSectorField("fareType");
     if (!officeId || !activeCompanyId) return;
@@ -667,7 +673,6 @@
     }
   }
   document.getElementById("travel_type").addEventListener("change", autofillSupplierCommission);
-  document.getElementById("modal-airline-category").addEventListener("change", autofillSupplierCommission);
 
   // ============================================================
   // dd-mm-yyyy 3-box date handling (header + modal both use .date-group)
@@ -1050,12 +1055,12 @@
     const p = {
       airline_code: joinSectorField("airlineCode"),
       airline_name: joinSectorField("airlineName"),
-      airline_category: document.getElementById("modal-airline-category").value,
+      airline_category: joinSectorField("airlineCategory"),
       flight_no: joinSectorField("flightNo"),
       ticket_no: document.getElementById("modal-ticket-no").value.trim(),
       passenger_name: document.getElementById("modal-pax-name").value.trim(),
       pax_type: document.getElementById("modal-pax-type").value,
-      sector: modalSectors.map((s) => `${s.from}-${s.to}`).join(","),
+      sector: modalSectors.map((s) => `${s.from}-${s.to}`).join(SEGMENT_SEP),
       travel_date: sectorTravelDateField(),
       cabin: joinSectorField("cabin"),
       travel_class: joinSectorField("cls"),
@@ -1365,7 +1370,6 @@
     return r;
   }
   function writeModalPassenger(p) {
-    document.getElementById("modal-airline-category").value = p.airline_category || "";
     document.getElementById("modal-ticket-no").value = p.ticket_no;
     document.getElementById("modal-pax-name").value = p.passenger_name;
     document.getElementById("modal-pax-type").value = p.pax_type;
@@ -1567,9 +1571,10 @@
   // ============================================================
   // Sector chips - multi-city segments on one passenger line, each
   // captured via the Add Sector popup (From/To/Travel Date/Flight No/
-  // Cabin/Class/Fare Type). Stored on the passenger as comma-joined
-  // strings (sector: "BOM-DXB,DXB-JFK", flight_no/cabin/travel_class/
-  // fare_type the same, one value per sector in the same order).
+  // Cabin/Class/Fare Type/Airline Category). Stored on the passenger as
+  // "/"-joined strings (sector: "BOM-DXB/DXB-JFK", flight_no/cabin/
+  // travel_class/fare_type/airline_category the same, one value per sector
+  // in the same order).
   // travel_date collapses to a single value when every sector shares the
   // same date, comma-joined only when they actually differ.
   // Keeps the Reschedule fare modal's right column (Base Fare + Customer/
@@ -1659,12 +1664,13 @@
   function openSectorModal(index) {
     editingSectorIndex = index;
     const s = index === null
-      ? { from: "", to: "", airlineCode: "", airlineName: "", travelDate: "", flightNo: "", cabin: "", cls: "", fareType: "" }
+      ? { from: "", to: "", airlineCode: "", airlineName: "", airlineCategory: "", travelDate: "", flightNo: "", cabin: "", cls: "", fareType: "" }
       : modalSectors[index];
     document.getElementById("sector-from").value = s.from;
     document.getElementById("sector-to").value = s.to;
     document.getElementById("sector-airline-code").value = s.airlineCode || "";
     document.getElementById("sector-airline-name").value = s.airlineName || "";
+    document.getElementById("sector-airline-category").value = s.airlineCategory || "";
     setDateGroupValue(document.getElementById("sector-travel-date"), s.travelDate);
     // Travel Date can never be earlier than Booking Ref Date - the ticket
     // is issued against that booking reference, so travel can't predate
@@ -1681,7 +1687,7 @@
     // Read-only when the ticket itself is being viewed, not edited -
     // clicking a sector chip/detail row here should just let the user see
     // its full breakdown, never let them change it outside Edit mode.
-    ["sector-from", "sector-to", "sector-airline-code", "sector-airline-name", "sector-flight-no", "sector-class", "sector-cabin", "sector-fare-type"]
+    ["sector-from", "sector-to", "sector-airline-code", "sector-airline-name", "sector-airline-category", "sector-flight-no", "sector-class", "sector-cabin", "sector-fare-type"]
       .forEach((id) => { document.getElementById(id).disabled = sectorReadOnly(); });
     document.getElementById("sector-travel-date").querySelector(".dg-native").disabled = sectorReadOnly();
     document.getElementById("sector-modal-title").textContent = sectorReadOnly() ? "Sector Details" : (index === null ? "Add Sector" : "Edit Sector");
@@ -1751,6 +1757,7 @@
       from, to,
       airlineCode: document.getElementById("sector-airline-code").value.trim().toUpperCase(),
       airlineName: document.getElementById("sector-airline-name").value.trim(),
+      airlineCategory: document.getElementById("sector-airline-category").value,
       travelDate,
       flightNo: document.getElementById("sector-flight-no").value.trim(),
       cabin: document.getElementById("sector-cabin").value,
@@ -1764,7 +1771,7 @@
     autofillSupplierCommission();
   });
   function joinSectorField(key) {
-    return modalSectors.map((s) => s[key] || "").join(",");
+    return modalSectors.map((s) => s[key] || "").join(SEGMENT_SEP);
   }
   function sectorTravelDateField() {
     const dates = modalSectors.map((s) => s.travelDate || "");
@@ -1772,19 +1779,22 @@
     return unique.length <= 1 ? (unique[0] || "") : dates.join(",");
   }
   function sectorsOfPassenger(p) {
-    const pairs = (p.sector || "").split(",").map((s) => s.trim()).filter(Boolean);
-    const airlineCodes = (p.airline_code || "").split(",");
-    const airlineNames = (p.airline_name || "").split(",");
-    const flightNos = (p.flight_no || "").split(",");
-    const cabins = (p.cabin || "").split(",");
-    const classes = (p.travel_class || "").split(",");
-    const fareTypes = (p.fare_type || "").split(",");
+    const pairs = (p.sector || "").split(SEGMENT_SEP).map((s) => s.trim()).filter(Boolean);
+    const airlineCodes = (p.airline_code || "").split(SEGMENT_SEP);
+    const airlineNames = (p.airline_name || "").split(SEGMENT_SEP);
+    // A line saved before Airline Category moved to the sectors holds one category - every sector's.
+    const categories = (p.airline_category || "").split(SEGMENT_SEP);
+    const flightNos = (p.flight_no || "").split(SEGMENT_SEP);
+    const cabins = (p.cabin || "").split(SEGMENT_SEP);
+    const classes = (p.travel_class || "").split(SEGMENT_SEP);
+    const fareTypes = (p.fare_type || "").split(SEGMENT_SEP);
     const dates = (p.travel_date || "").split(",").map((d) => d.trim());
     return pairs.map((pair, i) => {
       const [from, to] = pair.split("-");
       return {
         from: (from || "").trim(), to: (to || "").trim(),
         airlineCode: (airlineCodes[i] || "").trim(), airlineName: (airlineNames[i] || "").trim(),
+        airlineCategory: (categories.length === 1 ? categories[0] : (categories[i] || "")).trim(),
         flightNo: (flightNos[i] || "").trim(), cabin: (cabins[i] || "").trim(),
         cls: (classes[i] || "").trim(), fareType: (fareTypes[i] || "").trim(),
         travelDate: (dates.length === 1 ? dates[0] : (dates[i] || "")).trim(),
@@ -1799,7 +1809,7 @@
   // Reschedule, 2nd+ passenger only: each sector's still-empty Travel Date/
   // Flight No/Cabin/Class/Fare Type are copied from passenger 1's matching
   // sector (same From-To) as entered in THIS reschedule. A sector nothing has
-  // been entered for yet also takes passenger 1's Airline Code/Name (it may
+  // been entered for yet also takes passenger 1's Airline Code/Name/Category (it may
   // have been rescheduled onto a different airline). Values already typed for
   // this passenger are never overwritten. Passenger 1 itself is untouched -
   // it still comes from the booking as before. FOP + Card Number follow the
@@ -1844,6 +1854,7 @@
       if (!RESCHED_SECTOR_FILL_FIELDS.some((f) => s[f])) {
         if (r.airlineCode) s.airlineCode = r.airlineCode;
         if (r.airlineName) s.airlineName = r.airlineName;
+        if (r.airlineCategory) s.airlineCategory = r.airlineCategory;
       }
       RESCHED_SECTOR_FILL_FIELDS.forEach((f) => {
         if (!s[f] && r[f]) { s[f] = r[f]; changed = true; }
@@ -1933,7 +1944,7 @@
       // Passenger & Segment Details are view-only in Cancellation - they
       // describe the passenger being cancelled, straight from the picked
       // ticket (sectors too - see sectorReadOnly).
-      ["modal-airline-category", "modal-ticket-no", "modal-pax-name", "modal-pax-type",
+      ["modal-ticket-no", "modal-pax-name", "modal-pax-type",
         "modal-office-id", "modal-supplier", "modal-fop", "modal-card-number"].forEach((id) => {
         document.getElementById(id).disabled = true;
       });
@@ -2223,7 +2234,7 @@
     // parent line's Pax Name, Pax Type, Office ID, Supplier and Airline
     // Category - fixed on a reschedule, so they're locked here.
     if (rescheduleParentPassengers[editingIndex]) {
-      ["modal-pax-name", "modal-pax-type", "modal-office-id", "modal-supplier", "modal-airline-category"]
+      ["modal-pax-name", "modal-pax-type", "modal-office-id", "modal-supplier"]
         .forEach((id) => { document.getElementById(id).disabled = true; });
     }
     // Chained (2nd+) reschedule only - writeModalPassenger's own
@@ -2463,8 +2474,8 @@
       : "";
     linesBody.innerHTML = rowsHtml + addRowHtml || blankRescheduleHtml || `<tr id="no-pax-row"><td colspan="13" style="text-align:center; padding:18px; color:#64748B; font-size:11.5px;">No passengers to show.</td></tr>`;
 
-    // Double-click or single-click to view/edit a row's passenger & fare details
-    // works in both view mode (read-only) and edit mode.
+    // Double-click to view/edit a row's passenger & fare details works in
+    // both view mode (read-only) and edit mode.
     document.querySelectorAll(".pax-row[data-idx]").forEach((row) => {
       row.style.cursor = "pointer";
       row.addEventListener("click", (e) => {
@@ -4756,8 +4767,8 @@
       // starts blank/0.00 for every fare figure (like any other new
       // passenger), but a handful of Passenger & Segment Details fields
       // are pre-filled from the Parent line as a starting point the user
-      // can freely overwrite: Airline Category, Pax Name, Pax Type, and
-      // (inside the Sector popup) Origin/Destination, Airline Code/Name -
+      // can freely overwrite: Pax Name, Pax Type, and (inside the Sector
+      // popup) Origin/Destination, Airline Code/Name/Category -
       // Flight No/Travel Date/Cabin/Class/Fare Type stay blank since
       // those genuinely change on a reschedule. Office ID/Supplier are
       // also carried over - auto-filling Office ID re-triggers the same
@@ -5170,7 +5181,7 @@
     const igst = sum(bk ? "bkIgst" : "igst"), cgst = sum(bk ? "bkCgst" : "cgst"), sgst = sum(bk ? "bkSgst" : "sgst");
     const totalTax = igst + cgst + sgst;
     const travelDates = [...new Set(passengers.flatMap((p) => (p.travel_date || "").split(",").map((d) => d.trim()).filter(Boolean)))];
-    const sectors = [...new Set(passengers.flatMap((p) => (p.sector || "").split(",").map((s) => s.trim()).filter(Boolean)))];
+    const sectors = [...new Set(passengers.flatMap((p) => (p.sector || "").split(SEGMENT_SEP).map((s) => s.trim()).filter(Boolean)))];
     return {
       docTitle: cancellationMode ? "CREDIT NOTE" : "TAX INVOICE",
       // The document's own Invoice Type (Voucher Type name) - Template 3's heading.

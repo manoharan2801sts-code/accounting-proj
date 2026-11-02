@@ -235,6 +235,13 @@ def line_gst_amounts(line, header):
     return pending.get((line_type, line.ticket_no)) if pending else None
 
 
+# A passenger line on several sectors keeps one value per sector, "/" between
+# them, in Sector, Airline Code / Name / Category, Flight No, Cabin, Class and
+# Fare Type (MAA-DEL/DEL-BOM, 6E/AI ...). Travel Date only keeps the comma -
+# a date has "/" in it (05/11/2026,06/11/2026).
+SEGMENT_SEP = "/"
+
+
 def gst_part(line, header, fee_field, field_name, pct_of):
     """GST of one fee: the amount the Agent sent, else fee x GST % of the ledger mapped to field_name."""
     pushed = line_gst_amounts(line, header)
@@ -486,7 +493,7 @@ class Ticket(models.Model):
     # Only meaningful when payment_mode == "Payment Gateway" — the gateway's
     # own transaction/reference number for this booking.
     payment_gateway_ref = models.CharField(max_length=60, null=True, blank=True)
-    airline_category = models.CharField(max_length=5, choices=AIRLINE_CATEGORY_CHOICES, null=True, blank=True)
+    airline_category = models.CharField(max_length=200, null=True, blank=True)   # one per sector, e.g. LCC,FSC
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -524,7 +531,7 @@ class TicketLine(models.Model):
     airline_name = models.CharField(max_length=200, null=True, blank=True)
     # Moved here from the Ticket header — airline category (LCC/FSC/OSC) can differ
     # per passenger segment, not just once per booking. Reuses Ticket's choice list.
-    airline_category = models.CharField(max_length=5, choices=Ticket.AIRLINE_CATEGORY_CHOICES, null=True, blank=True)
+    airline_category = models.CharField(max_length=200, null=True, blank=True)   # one per sector, e.g. LCC,FSC
     # Multi-city: one passenger line can carry several sectors, each captured
     # via the Add Sector popup on the frontend and comma-joined here in the
     # same order — e.g. sector "BOM-DXB,DXB-JFK", flight_no "5259,EK202" one
@@ -850,7 +857,7 @@ class RescheduleAirlineTicket(models.Model):
 
     payment_mode = models.CharField(max_length=20, choices=Ticket.PAYMENT_MODE_CHOICES, null=True, blank=True)
     payment_gateway_ref = models.CharField(max_length=60, null=True, blank=True)
-    airline_category = models.CharField(max_length=5, choices=Ticket.AIRLINE_CATEGORY_CHOICES, null=True, blank=True)
+    airline_category = models.CharField(max_length=200, null=True, blank=True)   # one per sector, e.g. LCC,FSC
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -924,7 +931,7 @@ class RescheduleAirlineTicketLine(models.Model):
 
     airline_code = models.CharField(max_length=200, null=True, blank=True)
     airline_name = models.CharField(max_length=200, null=True, blank=True)
-    airline_category = models.CharField(max_length=5, choices=Ticket.AIRLINE_CATEGORY_CHOICES, null=True, blank=True)
+    airline_category = models.CharField(max_length=200, null=True, blank=True)   # one per sector, e.g. LCC,FSC
     flight_no = models.CharField(max_length=200, null=True, blank=True)
     ticket_no = models.CharField(max_length=30)
     passenger_name = models.CharField(max_length=50)
@@ -1183,7 +1190,7 @@ class CancellationAirlineTicket(models.Model):
     # enterBlankCancellationShell) - kept as a real, editable column.
     payment_mode = models.CharField(max_length=20, choices=Ticket.PAYMENT_MODE_CHOICES, null=True, blank=True)
     payment_gateway_ref = models.CharField(max_length=60, null=True, blank=True)
-    airline_category = models.CharField(max_length=5, choices=Ticket.AIRLINE_CATEGORY_CHOICES, null=True, blank=True)
+    airline_category = models.CharField(max_length=200, null=True, blank=True)   # one per sector, e.g. LCC,FSC
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -1231,7 +1238,7 @@ class CancellationAirlineTicketLine(models.Model):
 
     airline_code = models.CharField(max_length=200, null=True, blank=True)
     airline_name = models.CharField(max_length=200, null=True, blank=True)
-    airline_category = models.CharField(max_length=5, choices=Ticket.AIRLINE_CATEGORY_CHOICES, null=True, blank=True)
+    airline_category = models.CharField(max_length=200, null=True, blank=True)   # one per sector, e.g. LCC,FSC
     flight_no = models.CharField(max_length=200, null=True, blank=True)
     ticket_no = models.CharField(max_length=30)
     passenger_name = models.CharField(max_length=50)
@@ -1523,7 +1530,7 @@ class SSRAirlineTicketLine(models.Model):
     ticket_no = models.CharField(max_length=20, null=True, blank=True)
     passenger_name = models.CharField(max_length=100, null=True, blank=True)
     pax_type = models.CharField(max_length=10, null=True, blank=True)
-    airline_category = models.CharField(max_length=5, null=True, blank=True)
+    airline_category = models.CharField(max_length=200, null=True, blank=True)   # one per sector, e.g. LCC,FSC
     sector = models.CharField(max_length=20, null=True, blank=True)
     office_id = models.CharField(max_length=30, null=True, blank=True)
     supplier = models.ForeignKey(
