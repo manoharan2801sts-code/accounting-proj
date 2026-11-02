@@ -23,6 +23,55 @@ except Exception as e:
 
 def ensure_schema(cursor):
     for q in [
+        """CREATE TABLE IF NOT EXISTS `accounting_ledger_status` (
+          `company_id` int NOT NULL,
+          `is_dirty` tinyint(1) NOT NULL DEFAULT 1,
+          `built_at` datetime DEFAULT NULL,
+          PRIMARY KEY (`company_id`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;""",
+
+        """CREATE TABLE IF NOT EXISTS `26-27-accounting_ledger` (
+          `company_id` int NOT NULL,
+          `ledger_id` int NOT NULL,
+          `Ledger_Name` varchar(200) DEFAULT NULL,
+          `Opening_Balance` decimal(19,4) NOT NULL,
+          `Apr_Cr` decimal(19,4) DEFAULT NULL,
+          `Apr_Dr` decimal(19,4) DEFAULT NULL,
+          `Apr_Balance` decimal(19,4) DEFAULT NULL,
+          `May_Cr` decimal(19,4) DEFAULT NULL,
+          `May_Dr` decimal(19,4) DEFAULT NULL,
+          `May_Balance` decimal(19,4) DEFAULT NULL,
+          `Jun_Cr` decimal(19,4) DEFAULT NULL,
+          `Jun_Dr` decimal(19,4) DEFAULT NULL,
+          `Jun_Balance` decimal(19,4) DEFAULT NULL,
+          `Jul_Cr` decimal(19,4) DEFAULT NULL,
+          `Jul_Dr` decimal(19,4) DEFAULT NULL,
+          `Jul_Balance` decimal(19,4) DEFAULT NULL,
+          `Aug_Cr` decimal(19,4) DEFAULT NULL,
+          `Aug_Dr` decimal(19,4) DEFAULT NULL,
+          `Aug_Balance` decimal(19,4) DEFAULT NULL,
+          `Sep_Cr` decimal(19,4) DEFAULT NULL,
+          `Sep_Dr` decimal(19,4) DEFAULT NULL,
+          `Sep_Balance` decimal(19,4) DEFAULT NULL,
+          `Oct_Cr` decimal(19,4) DEFAULT NULL,
+          `Oct_Dr` decimal(19,4) DEFAULT NULL,
+          `Oct_Balance` decimal(19,4) DEFAULT NULL,
+          `Overall_Total` decimal(19,4) NOT NULL,
+          `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          PRIMARY KEY (`company_id`, `ledger_id`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;""",
+
+        "ALTER TABLE `al_tickets` MODIFY `airline_category` VARCHAR(200) NULL;",
+        "ALTER TABLE `al_ticketlines` MODIFY `airline_category` VARCHAR(200) NULL;",
+        "ALTER TABLE `rescheduled_al_ticket` MODIFY `airline_category` VARCHAR(200) NULL;",
+        "ALTER TABLE `rescheduled_al_ticketlines` MODIFY `airline_category` VARCHAR(200) NULL;",
+        "ALTER TABLE `cancellation_al_tickets` MODIFY `airline_category` VARCHAR(200) NULL;",
+        "ALTER TABLE `cancellation_al_ticketlines` MODIFY `airline_category` VARCHAR(200) NULL;",
+        "ALTER TABLE `ssr_al_tickets` MODIFY `airline_category` VARCHAR(200) NULL;",
+        "ALTER TABLE `ssr_al_ticketlines` MODIFY `airline_category` VARCHAR(200) NULL;",
+        "ALTER TABLE `ticket_import_staging` MODIFY `airline_category` VARCHAR(200) NULL;",
+        "ALTER TABLE `al_ticketlines` DROP CHECK `ck_ticketlines_airline_category`;",
+
         """CREATE TABLE IF NOT EXISTS `AirlineDropdownValues` (
           `id` int NOT NULL AUTO_INCREMENT,
           `list_key` varchar(50) NOT NULL,
@@ -462,6 +511,51 @@ def load_data(force=False):
     errors = 0
     with connection.cursor() as cursor:
         cursor.execute("SET FOREIGN_KEY_CHECKS = 0;")
+
+        # Ensure schema (new tables, altered columns) exists BEFORE running inserts
+        print("[INFO] Ensuring schema, missing tables, and column widths...")
+        ensure_schema(cursor)
+
+        # Initialize & Seed Airline_Agent Database & Table (all 95 columns)
+        try:
+            airline_sql_file = BASE_DIR / "airline_agent_mysql.sql"
+            if airline_sql_file.exists():
+                with open(airline_sql_file, "r", encoding="utf-8") as af:
+                    a_content = af.read()
+                a_statements = []
+                a_curr = []
+                for a_line in a_content.splitlines():
+                    a_line_s = a_line.strip()
+                    if not a_line_s or a_line_s.startswith("--"):
+                        continue
+                    a_curr.append(a_line_s)
+                    if a_line_s.endswith(";"):
+                        a_stmt = " ".join(a_curr).rstrip(";").strip()
+                        if a_stmt:
+                            a_statements.append(a_stmt)
+                        a_curr = []
+                if a_curr:
+                    a_stmt = " ".join(a_curr).rstrip(";").strip()
+                    if a_stmt:
+                        a_statements.append(a_stmt)
+
+                a_success = 0
+                for a_s in a_statements:
+                    try:
+                        cursor.execute(a_s)
+                        a_success += 1
+                    except Exception as ex:
+                        if "Duplicate entry" not in str(ex):
+                            print(f"[WARN] Airline_Agent stmt failed: {ex}")
+                print(f"[OK] Airline_Agent database & Agent_ticket_data: executed {a_success} statements!")
+        except Exception as e:
+            print(f"[INFO] Airline_Agent init check: {e}")
+
+        # Always restore default database context
+        main_db = connection.settings_dict.get("NAME") or "accounting_dep_db"
+        cursor.execute(f"USE `{main_db}`;")
+
+        # Execute main database converted inserts
         for stmt in statements:
             try:
                 cursor.execute(stmt)
@@ -479,6 +573,7 @@ def load_data(force=False):
 
     # Self-healing check for new tables and columns in MySQL / TiDB
     with connection.cursor() as cursor:
+        cursor.execute(f"USE `{main_db}`;")
         ensure_schema(cursor)
 
     counts = {}
@@ -501,48 +596,6 @@ def load_data(force=False):
             """, [pwd_hash, pwd_hash])
         except Exception as e:
             print(f"[WARN] Super Admin sync failed: {e}")
-
-    # Ensure Airline_Agent database and table are initialized & seeded
-    try:
-        airline_sql_file = BASE_DIR / "airline_agent_mysql.sql"
-        if airline_sql_file.exists():
-            with open(airline_sql_file, "r", encoding="utf-8") as af:
-                a_content = af.read()
-            a_statements = []
-            a_curr = []
-            for line in a_content.splitlines():
-                line_s = line.strip()
-                if not line_s or line_s.startswith("--"):
-                    continue
-                a_curr.append(line_s)
-                if line_s.endswith(";"):
-                    stmt = " ".join(a_curr).rstrip(";").strip()
-                    if stmt:
-                        a_statements.append(stmt)
-                    a_curr = []
-            if a_curr:
-                stmt = " ".join(a_curr).rstrip(";").strip()
-                if stmt:
-                    a_statements.append(stmt)
-
-            a_success = 0
-            with connection.cursor() as cursor:
-                cursor.execute("SET FOREIGN_KEY_CHECKS = 0;")
-                for s in a_statements:
-                    try:
-                        cursor.execute(s)
-                        a_success += 1
-                    except Exception as ex:
-                        if "Duplicate entry" not in str(ex):
-                            print(f"[WARN] Airline_Agent stmt failed: {ex}")
-                cursor.execute("SET FOREIGN_KEY_CHECKS = 1;")
-            try:
-                connection.commit()
-            except Exception:
-                pass
-            print(f"[OK] Airline_Agent database & Agent_ticket_data: executed {a_success} statements!")
-    except Exception as e:
-        print(f"[INFO] Airline_Agent init check: {e}")
 
     try:
         with connection.cursor() as cursor:
