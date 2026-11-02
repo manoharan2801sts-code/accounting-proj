@@ -8437,6 +8437,36 @@ def db_diagnostic(request):
                     pass
             result["counts"] = counts
 
+            # Inspect latest rows in Agent_ticket_data
+            try:
+                cur.execute("SELECT agent_row_id, ticket_no, pax_name, booking_reference, agent_ref_no, created_at FROM `Airline_Agent`.`Agent_ticket_data` ORDER BY agent_row_id DESC LIMIT 10;")
+                result["latest_agent_tickets"] = [
+                    {"agent_row_id": r[0], "ticket_no": r[1], "pax_name": r[2], "booking_reference": r[3], "agent_ref_no": r[4], "created_at": str(r[5])}
+                    for r in cur.fetchall()
+                ]
+            except Exception as e:
+                result["latest_agent_tickets_error"] = str(e)
+
+            # Inspect latest rows in Agent_DB_Ticket_Log
+            try:
+                cur.execute("SELECT agent_row_id, process_status, error_message, invoice_number, voucher_no, updated_at FROM `Agent_DB_Ticket_Log` ORDER BY id DESC LIMIT 10;")
+                result["latest_ticket_logs"] = [
+                    {"agent_row_id": r[0], "process_status": r[1], "error": r[2], "invoice": r[3], "voucher": r[4], "updated_at": str(r[5])}
+                    for r in cur.fetchall()
+                ]
+            except Exception as e:
+                result["latest_ticket_logs_error"] = str(e)
+
+            # Check unlogged / waiting rows
+            try:
+                cur.execute("""
+                    SELECT COUNT(*) FROM `Airline_Agent`.`Agent_ticket_data` t
+                    WHERE NOT EXISTS (SELECT 1 FROM `Agent_DB_Ticket_Log` l WHERE l.agent_row_id = t.agent_row_id)
+                """)
+                result["waiting_agent_ticket_count"] = cur.fetchone()[0]
+            except Exception as e:
+                result["waiting_agent_ticket_error"] = str(e)
+
             from django.contrib.auth.hashers import make_password
             pwd_hash = make_password("admin123")
             for tbl in ["AppUsers", "appusers"]:
