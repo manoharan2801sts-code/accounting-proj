@@ -8412,7 +8412,7 @@ def db_diagnostic(request):
     """
     from django.db import connection
     import traceback
-    result = {"status": "ok", "version": "v54-tidb-verified"}
+    result = {"status": "ok", "version": "v55-diagnostic-check"}
     try:
         result["vendor"] = connection.vendor
         result["db_name"] = connection.settings_dict.get("NAME")
