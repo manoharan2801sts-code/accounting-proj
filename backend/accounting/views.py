@@ -8435,6 +8435,14 @@ def db_diagnostic(request):
                     counts["airline_agent.agent_ticket_data"] = cur.fetchone()[0]
                 except Exception:
                     pass
+            try:
+                cur.execute("SELECT UTC_TIMESTAMP(6), NOW();")
+                t_utc, t_now = cur.fetchone()
+                result["server_utc_time"] = str(t_utc)
+                result["server_now_time"] = str(t_now)
+            except Exception:
+                pass
+
             result["counts"] = counts
 
             # Inspect latest rows in Agent_ticket_data
@@ -8449,9 +8457,9 @@ def db_diagnostic(request):
 
             # Inspect latest rows in Agent_DB_Ticket_Log
             try:
-                cur.execute("SELECT agent_row_id, process_status, error_message, invoice_number, voucher_no, updated_at FROM `Agent_DB_Ticket_Log` ORDER BY id DESC LIMIT 10;")
+                cur.execute("SELECT agent_row_id, process_status, error_message, invoice_number, voucher_no, processing_at FROM `Agent_DB_Ticket_Log` ORDER BY ticket_log_id DESC LIMIT 10;")
                 result["latest_ticket_logs"] = [
-                    {"agent_row_id": r[0], "process_status": r[1], "error": r[2], "invoice": r[3], "voucher": r[4], "updated_at": str(r[5])}
+                    {"agent_row_id": r[0], "process_status": r[1], "error": r[2], "invoice": r[3], "voucher": r[4], "processing_at": str(r[5])}
                     for r in cur.fetchall()
                 ]
             except Exception as e:
